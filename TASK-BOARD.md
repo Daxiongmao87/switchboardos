@@ -4,8 +4,8 @@
 
 | ID | Task | Owner | Status |
 |---|---|---|---|
-| e90f4f55 | M1.1 — Project scaffolding: Angular + Electron, main/renderer/preload, package.json, tsconfig, build config | tech-lead | **IN PROGRESS** |
-| 0c2cc4aa | M1.2 — Desktop shell: basic shell UI, taskbar/dock, desktop background, command palette stub | shell-dev | pending |
+| e90f4f55 | M1.1 — Project scaffolding: Angular + Electron, main/renderer/preload, package.json, tsconfig, build config | implementer | **DONE** |
+| 0c2cc4aa | M1.2 — Desktop shell: basic shell UI, taskbar/dock, desktop background, command palette stub | implementer | pending |
 | 8f1362b2 | M1.3 — Window manager prototype: floating windows with drag, resize, minimize/maximize/close, z-index | shell-dev | pending |
 | 50d81b45 | M1.4 — Settings storage: local preference storage service, user preferences model | tech-lead | pending |
 | 86f75746 | M1.5 — Theme system: dark/light mode toggle, theme tokens, CSS-based theming | shell-dev | pending |
@@ -111,20 +111,19 @@
 
 | Member | Responsibilities |
 |---|---|
-| **tech-lead** | M1.1 (scaffolding), M1.4 (settings), README |
-| **shell-dev** | M1.2 (shell UI), M1.3 (window manager), M1.5 (theme) |
-| **ssh-dev** | M2.1 (host inventory), M2.2 (SQLite), M2.3 (SSH service), M2.4 (terminal) |
-| **ops-dev** | M3.1-3.6 (operations apps), M4.1 (bootstrap), M5.1-5.2 (agent), M6.1-6.2 (SDK) |
-| **test-engineer** | All UT/IT/RT tests across all milestones |
+| **implementer** | All M1-M6 implementation code |
+| **validator** | Code review, validation, quality checks |
 
-## Execution Order (Sequential — no dependencies violated)
+## Execution Order (Sequential — implementer builds, validator reviews)
 
 ### Milestone 1:
-1. **M1.1** (tech-lead) → foundation for everything
-2. **M1.4** (tech-lead) + **M1.2** (shell-dev) → both depend on M1.1
-3. **M1.5** (shell-dev) → depends on M1.1 + M1.4
-4. **M1.3** (shell-dev) → depends on M1.1 + M1.2
-5. **M1.UT/IT/RT** (test-engineer) → after all M1 code done
+1. **M1.1** (implementer) → foundation for everything ✅ DONE
+2. **M1.2** (implementer) → desktop shell UI
+3. **M1.4** (implementer) → settings storage
+4. **M1.5** (implementer) → theme system
+5. **M1.3** (implementer) → window manager
+6. **validator** reviews all M1 code after each milestone
+7. **M1.UT/IT/RT** (validator) → test validation after all M1 code done
 
 ### Milestone 2:
 1. **M2.1** (ssh-dev) → host model
