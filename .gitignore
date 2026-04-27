@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+build/
+*.angular/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files (keep secrets out)
+.env
+.env.local
+.env.*.local
+
+# SQLite (generated, not committed)
+*.db
+*.db-journal
+
+# Test coverage
+coverage/
+
+# Aion team files
+.aionrs/
