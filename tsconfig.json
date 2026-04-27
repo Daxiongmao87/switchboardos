@@ -1,29 +1,21 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "commonjs",
+    "lib": ["ES2022", "dom"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "declaration": false,
     "outDir": "./dist",
+    "rootDir": ".",
     "baseUrl": ".",
     "paths": {
       "@main/*": ["src/main/*"],
       "@preload/*": ["src/preload/*"],
-      "@renderer/*": ["src/renderer/*"]
-    },
-    "lib": ["ES2022", "DOM"]
+      "@app/*": ["src/renderer/app/*"]
+    }
   },
-  "include": [
-    "src/main/**/*.ts",
-    "src/preload/**/*.ts",
-    "src/renderer/**/*.ts",
-    "scripts/**/*.ts"
-  ],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

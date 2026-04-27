@@ -5,33 +5,18 @@
   "projects": {
     "switchboardos": {
       "projectType": "application",
-      "schematics": {
-        "@schematics/angular:component": {
-          "style": "css"
-        }
-      },
       "root": "",
       "sourceRoot": "src/renderer",
-      "prefix": "sb",
+      "prefix": "app",
       "architect": {
         "build": {
-          "builder": "@angular-builders/custom-webpack:browser",
+          "builder": "@angular-devkit/build-angular:browser",
           "options": {
-            "customWebpackConfig": {
-              "path": "./webpack.renderer.config.js"
-            },
-            "outputPath": "dist/switchboardos",
+            "outputPath": "dist/renderer",
             "index": "src/renderer/index.html",
             "main": "src/renderer/main.ts",
-            "polyfills": ["zone.js"],
-            "tsConfig": "tsconfig.app.json",
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "src/renderer/assets",
-                "output": "/assets"
-              }
-            ],
+            "tsConfig": "src/renderer/tsconfig.app.json",
+            "assets": [],
             "styles": ["src/renderer/styles.css"],
             "scripts": []
           },
@@ -42,11 +27,6 @@
                   "type": "initial",
                   "maximumWarning": "2mb",
                   "maximumError": "5mb"
-                },
-                {
-                  "type": "anyComponentStyle",
-                  "maximumWarning": "4kb",
-                  "maximumError": "8kb"
                 }
               ],
               "outputHashing": "all"
@@ -63,7 +43,7 @@
           "defaultConfiguration": "production"
         },
         "serve": {
-          "builder": "@angular-builders/custom-webpack:dev-server",
+          "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
               "buildTarget": "switchboardos:build:production"
@@ -74,26 +54,11 @@
           },
           "defaultConfiguration": "development"
         },
-        "extract-i18n": {
-          "builder": "@angular-builders/custom-webpack:extract-i18n",
-          "options": {
-            "buildTarget": "switchboardos:build"
-          }
-        },
         "test": {
-          "builder": "@angular-builders/custom-webpack:karma",
+          "builder": "@angular-devkit/build-angular:karma",
           "options": {
-            "polyfills": ["zone.js", "zone.js/testing"],
-            "tsConfig": "tsconfig.spec.json",
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "src/renderer/assets",
-                "output": "/assets"
-              }
-            ],
-            "styles": ["src/renderer/styles.css"],
-            "scripts": []
+            "tsConfig": "src/renderer/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"]
           }
         }
       }

@@ -8,11 +8,14 @@ end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-[*.md]
-trim_trailing_whitespace = false
-
-[*.{json,yml,yaml}]
+[*.ts]
 indent_size = 2
 
-[*.{ts,js,cjs,mjs,css,html}]
+[*.json]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[package.json]
 indent_size = 2
