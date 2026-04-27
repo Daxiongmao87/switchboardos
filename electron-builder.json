@@ -13,6 +13,9 @@
   "extraMetadata": {
     "main": "dist-electron/main.js"
   },
+  "extraNodeModules": {
+    "electron": "electron"
+  },
   "win": {
     "target": [
       "nsis"
