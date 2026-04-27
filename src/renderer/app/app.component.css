@@ -1,0 +1,105 @@
+/* SwitchboardOS — Root Component Styles */
+
+.shell-content {
+  flex: 1;
+  overflow: hidden;
+  background: #1e1e2e;
+  color: #cdd6f4;
+}
+
+/* Title bar */
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  min-height: 36px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar-content {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.titlebar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cdd6f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  width: 46px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: #a6adc8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms, color 150ms;
+}
+
+.titlebar-btn:hover {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+.titlebar-btn-close:hover {
+  background: #f38ba8;
+  color: #1e1e2e;
+}
+
+/* Taskbar */
+.taskbar {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-height: 28px;
+  background: #181825;
+  border-top: 1px solid #313244;
+  padding: 0 12px;
+  font-size: 11px;
+  color: #6c7086;
+}
+
+.taskbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.taskbar-spacer {
+  flex: 1;
+}
+
+.taskbar-label {
+  font-weight: 600;
+  color: #89b4fa;
+}
+
+.taskbar-version {
+  color: #6c7086;
+}
+
+.taskbar-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #a6e3a1;
+}

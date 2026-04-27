@@ -50,20 +50,39 @@ switchboardos/
 
 ## Development
 
-### Milestones
+### Prerequisites
 
-| # | Milestone | Description |
-|---|-----------|-------------|
-| 1 | Electron/Angular shell | Main/renderer/preload, desktop shell, window manager, settings, theme |
-| 2 | Host and SSH foundation | Host inventory, SQLite, SSH connection, terminal with xterm.js |
-| 3 | Core operations apps | Host dashboard, file browser, process/service viewer, audit log |
-| 4 | Bootstrap system | Bootstrap generator with presets, script preview |
-| 5 | Agent integration | Agent endpoint, panel, structured state, approval flow, audit trail |
-| 6 | App SDK and graphics | App manifest, launcher, UI library, graphics primitives, example app |
+- Node.js 18+ (LTS recommended)
+- npm 9+
+- Git
 
-### Running
+### Getting Started
 
-(To be configured once the shell is scaffolded.)
+```bash
+# Install dependencies
+npm install
+
+# Development: Angular dev server + Electron
+npm run start:dev
+
+# Production build
+npm run build
+npm run electron:build
+```
+
+### Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm start` | Build renderer + Electron, then launch |
+| `npm run start:dev` | Angular dev server + Electron (hot reload) |
+| `npm run build` | Build renderer and Electron bundles |
+| `npm run build:renderer` | Build Angular app to `dist/switchboardos/` |
+| `npm run build:electron` | Bundle Electron main/preload to `dist-electron/` |
+| `npm run package` | Full build + package with electron-builder |
+| `npm run electron:build` | Build distributables (NSIS, DMG, AppImage) |
+| `npm run test` | Run Angular unit tests (Karma) |
+| `npm run lint` | Run ESLint |
 
 ## License
 

@@ -1,0 +1,35 @@
+<!--
+  SwitchboardOS — Root Component Template
+  Desktop shell with title bar, content area, and taskbar.
+-->
+<aside class="titlebar">
+  <div class="titlebar-content">
+    <span class="titlebar-title">{{ title }}</span>
+  </div>
+  <div class="titlebar-controls">
+    <button class="titlebar-btn" (click)="minimize()" title="Minimize" aria-label="Minimize">
+      <svg width="12" height="12" viewBox="0 0 12 12"><line x1="0" y1="6" x2="12" y2="6" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+    <button class="titlebar-btn" (click)="maximize()" title="Maximize" aria-label="Maximize">
+      <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+    <button class="titlebar-btn titlebar-btn-close" (click)="close()" title="Close" aria-label="Close">
+      <svg width="12" height="12" viewBox="0 0 12 12"><line x1="1" y1="1" x2="11" y2="11" stroke="currentColor" stroke-width="1.2"/><line x1="11" y1="1" x2="1" y2="11" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+  </div>
+</aside>
+
+<main class="shell-content">
+  <router-outlet></router-outlet>
+</main>
+
+<aside class="taskbar">
+  <div class="taskbar-section">
+    <span class="taskbar-label">SwitchboardOS</span>
+  </div>
+  <div class="taskbar-section taskbar-spacer"></div>
+  <div class="taskbar-section taskbar-info">
+    <span *ngIf="appInfo" class="taskbar-version">v{{ appInfo.version }}</span>
+    <span class="taskbar-status taskbar-dot" title="Ready"></span>
+  </div>
+</aside>
