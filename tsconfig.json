@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -11,11 +11,18 @@
     "isolatedModules": true,
     "declaration": false,
     "outDir": "./dist",
-    "lib": ["ES2022"]
+    "baseUrl": ".",
+    "paths": {
+      "@main/*": ["src/main/*"],
+      "@preload/*": ["src/preload/*"],
+      "@renderer/*": ["src/renderer/*"]
+    },
+    "lib": ["ES2022", "DOM"]
   },
   "include": [
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
+    "src/renderer/**/*.ts",
     "scripts/**/*.ts"
   ],
   "exclude": ["node_modules", "dist"]
