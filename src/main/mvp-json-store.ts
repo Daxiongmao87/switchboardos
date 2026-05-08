@@ -14,6 +14,9 @@ import type {
   MvpStoreState,
   UpdateHostInput,
 } from '../shared/mvp-models';
+import { probeHost, type ProbeInput, type ProbeResult } from './host-connection-tester';
+
+export type HostProbe = (input: ProbeInput) => Promise<ProbeResult>;
 
 const STORE_FILE_NAME = 'switchboardos-mvp.json';
 
@@ -190,6 +193,22 @@ function normalizeAuditEvent(value: unknown): AuditEvent | null {
   return event;
 }
 
+function buildConnectionTestMessage(probe: ProbeResult): string {
+  const target = `${probe.addressTried || '<no address>'}:${probe.portTried}`;
+  if (probe.success) {
+    const latency = `${probe.latencyMs} ms`;
+    if (probe.protocolDetected === 'ssh' && probe.banner) {
+      return `TCP reachable at ${target} in ${latency}. SSH banner: ${probe.banner}. Credential auth was not attempted.`;
+    }
+    if (probe.banner) {
+      return `TCP reachable at ${target} in ${latency}. Service banner: ${probe.banner}. Credential auth was not attempted.`;
+    }
+    return `TCP reachable at ${target} in ${latency}. No banner received within window. Credential auth was not attempted.`;
+  }
+  const reason = probe.errorMessage || probe.errorCode || 'Connection failed.';
+  return `TCP reachability check to ${target} failed: ${reason}`;
+}
+
 function normalizeState(value: unknown): MvpStoreState {
   if (!isRecord(value)) {
     return defaultState();
@@ -212,7 +231,10 @@ function normalizeState(value: unknown): MvpStoreState {
 export class MvpJsonStore {
   private state: MvpStoreState | null = null;
 
-  constructor(private readonly getUserDataPath: () => string) {}
+  constructor(
+    private readonly getUserDataPath: () => string,
+    private readonly probe: HostProbe = probeHost,
+  ) {}
 
   listHosts(): HostRecord[] {
     return clone(this.loadState().hosts);
@@ -286,19 +308,20 @@ export class MvpJsonStore {
     return true;
   }
 
-  testConnection(hostId: string): ConnectionTestResult {
-    const state = this.loadState();
-    const checkedAt = new Date().toISOString();
-    const hostIndex = state.hosts.findIndex((host) => host.id === hostId);
+  async testConnection(hostId: string): Promise<ConnectionTestResult> {
+    const stateBefore = this.loadState();
+    const hostBefore = stateBefore.hosts.find((host) => host.id === hostId) ?? null;
 
-    if (hostIndex === -1) {
+    if (!hostBefore) {
+      const checkedAt = new Date().toISOString();
       const result: ConnectionTestResult = {
         hostId,
         status: 'not_found',
         success: false,
-        message: 'Host record was not found. No SSH connection was attempted.',
+        message: 'Host record was not found. Reachability check was not attempted.',
         checkedAt,
       };
+      const state = this.loadState();
       state.auditEvents.push(this.createAuditEvent({
         type: 'host.connection_test',
         entityType: 'host',
@@ -310,26 +333,64 @@ export class MvpJsonStore {
       return result;
     }
 
+    const probeAddress = hostBefore.address || hostBefore.hostname;
+    const probePort = hostBefore.port;
+    const timeoutMs = stateBefore.settings.sshDefaults.connectTimeoutMs;
+
+    const probeOutcome = await this.probe({
+      address: probeAddress,
+      port: probePort,
+      timeoutMs,
+    });
+
+    const checkedAt = new Date().toISOString();
+    const status: ConnectionTestResult['status'] = probeOutcome.success ? 'success' : 'failed';
+    const message = buildConnectionTestMessage(probeOutcome);
+
     const result: ConnectionTestResult = {
       hostId,
-      status: 'stubbed',
-      success: false,
-      message: 'Connection test is a deterministic MVP stub. No SSH connection was attempted.',
+      status,
+      success: probeOutcome.success,
+      message,
       checkedAt,
+      address: probeOutcome.addressTried,
+      port: probeOutcome.portTried,
+      latencyMs: probeOutcome.latencyMs,
+      protocolDetected: probeOutcome.protocolDetected,
     };
+    if (probeOutcome.banner) {
+      result.banner = probeOutcome.banner;
+    }
+    if (probeOutcome.errorCode) {
+      result.errorCode = probeOutcome.errorCode;
+    }
 
-    state.hosts[hostIndex] = {
-      ...state.hosts[hostIndex],
-      lastConnectionStatus: 'stubbed',
-      lastCheckedAt: checkedAt,
-      updatedAt: checkedAt,
-    };
+    const state = this.loadState();
+    const hostIndex = state.hosts.findIndex((host) => host.id === hostId);
+    if (hostIndex !== -1) {
+      state.hosts[hostIndex] = {
+        ...state.hosts[hostIndex],
+        lastConnectionStatus: probeOutcome.success ? 'success' : 'failed',
+        lastCheckedAt: checkedAt,
+        updatedAt: checkedAt,
+      };
+    }
+
     state.auditEvents.push(this.createAuditEvent({
       type: 'host.connection_test',
       entityType: 'host',
       entityId: hostId,
-      message: result.message,
-      metadata: { status: result.status, success: result.success },
+      message,
+      metadata: {
+        status,
+        success: probeOutcome.success,
+        address: probeOutcome.addressTried,
+        port: probeOutcome.portTried,
+        latencyMs: probeOutcome.latencyMs,
+        protocolDetected: probeOutcome.protocolDetected,
+        banner: probeOutcome.banner ?? null,
+        errorCode: probeOutcome.errorCode ?? null,
+      },
     }, checkedAt));
     this.writeState(state);
     return result;

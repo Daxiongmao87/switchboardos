@@ -18,12 +18,20 @@ export interface HostRecord {
   updatedAt: string;
 }
 
+export type ConnectionTestStatus = 'success' | 'failed' | 'not_found';
+
 export interface ConnectionTestResult {
   hostId: string;
-  status: 'stubbed' | 'not_found';
+  status: ConnectionTestStatus;
   success: boolean;
   message: string;
   checkedAt: string;
+  address?: string;
+  port?: number;
+  latencyMs?: number;
+  banner?: string;
+  protocolDetected?: 'ssh' | 'unknown';
+  errorCode?: string;
 }
 
 export interface AuditEvent {

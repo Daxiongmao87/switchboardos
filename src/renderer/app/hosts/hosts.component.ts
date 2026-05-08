@@ -722,7 +722,7 @@ export class HostsComponent implements OnInit {
       this.statusMessage = result.message;
       await this.loadHosts();
     } catch {
-      this.errorMessage = 'Unable to run the connection test stub.';
+      this.errorMessage = 'Unable to run the connection reachability check.';
     } finally {
       this.isTestingHostId = null;
     }
@@ -735,9 +735,9 @@ export class HostsComponent implements OnInit {
   statusLabel(status: HostRecord['lastConnectionStatus']): string {
     switch (status) {
       case 'stubbed':
-        return 'Stubbed';
+        return 'Stubbed (legacy)';
       case 'success':
-        return 'Success';
+        return 'Reachable';
       case 'failed':
         return 'Failed';
       default:

@@ -34,9 +34,9 @@ import { getSwitchboardApi } from '../switchboard-api';
           <span class="metric-note">Profiles stored in the local MVP JSON store.</span>
         </article>
         <article class="metric-card">
-          <span class="metric-label">Tested / stubbed</span>
-          <strong>{{ testedHostCount }} / {{ stubbedHostCount }}</strong>
-          <span class="metric-note">Connection tests are deterministic MVP stubs.</span>
+          <span class="metric-label">Reachable / Failed</span>
+          <strong>{{ reachableHostCount }} / {{ failedHostCount }}</strong>
+          <span class="metric-note">Counts last TCP reachability check per host.</span>
         </article>
         <article class="metric-card">
           <span class="metric-label">Audit events</span>
@@ -246,12 +246,12 @@ export class DashboardComponent implements OnInit {
     void this.loadDashboard();
   }
 
-  get testedHostCount(): number {
-    return this.hosts.filter((host) => host.lastConnectionStatus !== 'untested').length;
+  get reachableHostCount(): number {
+    return this.hosts.filter((host) => host.lastConnectionStatus === 'success').length;
   }
 
-  get stubbedHostCount(): number {
-    return this.hosts.filter((host) => host.lastConnectionStatus === 'stubbed').length;
+  get failedHostCount(): number {
+    return this.hosts.filter((host) => host.lastConnectionStatus === 'failed').length;
   }
 
   get recentAuditEvents(): AuditEvent[] {

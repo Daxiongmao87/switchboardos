@@ -352,9 +352,9 @@ export class TerminalComponent implements OnInit {
   statusLabel(status: HostRecord['lastConnectionStatus']): string {
     switch (status) {
       case 'stubbed':
-        return 'Stubbed MVP test';
+        return 'Stubbed (legacy)';
       case 'success':
-        return 'Success';
+        return 'Reachable';
       case 'failed':
         return 'Failed';
       default:
