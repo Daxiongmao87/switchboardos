@@ -33,7 +33,7 @@ export class AppComponent implements OnInit {
   readonly navItems = [
     { label: 'Dashboard', path: '/dashboard', detail: 'Overview' },
     { label: 'Hosts', path: '/hosts', detail: 'Inventory' },
-    { label: 'Terminal', path: '/terminal', detail: 'Session stub' },
+    { label: 'Terminal', path: '/terminal', detail: 'SSH session' },
     { label: 'Agents', path: '/agents', detail: 'Operator policy' },
     { label: 'Audit', path: '/audit', detail: 'Local history' },
     { label: 'Settings', path: '/settings', detail: 'Defaults' },

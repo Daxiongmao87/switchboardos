@@ -16,6 +16,7 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { join } from 'path';
 import { MvpJsonStore } from './mvp-json-store';
+import { TerminalSessionManager, type TerminalEventSender } from './terminal-session-manager';
 import type {
   CreateAuditEventInput,
   CreateHostInput,
@@ -29,11 +30,45 @@ app.commandLine.appendSwitch('disable-gpu');
 // Track window state for multi-window support
 let mainWindow: BrowserWindow | null = null;
 const mvpStore = new MvpJsonStore(() => app.getPath('userData'));
+const sendTerminalEvent: TerminalEventSender = (event) => {
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.webContents.send(event.channel, event.payload);
+  });
+};
+const terminalSessions = new TerminalSessionManager(
+  (hostId) => mvpStore.getHost(hostId),
+  sendTerminalEvent,
+  (event) => mvpStore.logAuditEvent(event),
+);
 
 const DEV_SERVER_URL = process.env.SWITCHBOARDOS_DEV_SERVER_URL;
+const SHOULD_OPEN_DEVTOOLS =
+  process.env.SWITCHBOARDOS_OPEN_DEVTOOLS === '1' ||
+  process.argv.includes('--open-devtools');
 
 const RENDERER_INDEX = join(__dirname, '..', '..', 'renderer', 'index.html');
 const PRELOAD_PATH = join(__dirname, '..', 'preload', 'preload.js');
+const RENDERER_LOAD_RETRY_DELAYS_MS = [250, 1000];
+
+function loadRenderer(window: BrowserWindow, attempt = 0): void {
+  const loadPromise = DEV_SERVER_URL
+    ? window.loadURL(DEV_SERVER_URL)
+    : window.loadFile(RENDERER_INDEX);
+
+  loadPromise.catch((err) => {
+    const retryDelay = RENDERER_LOAD_RETRY_DELAYS_MS[attempt];
+    if (retryDelay !== undefined && !window.isDestroyed()) {
+      setTimeout(() => {
+        if (!window.isDestroyed()) {
+          loadRenderer(window, attempt + 1);
+        }
+      }, retryDelay);
+      return;
+    }
+
+    console.error('Failed to load renderer:', err);
+  });
+}
 
 /**
  * Create the main application window.
@@ -57,21 +92,15 @@ function createWindow(): void {
     },
   });
 
-  const loadPromise = DEV_SERVER_URL
-    ? mainWindow.loadURL(DEV_SERVER_URL)
-    : mainWindow.loadFile(RENDERER_INDEX);
-
-  loadPromise.catch((err) => {
-    console.error('Failed to load renderer:', err);
-  });
+  loadRenderer(mainWindow);
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
   });
 
-  // Open DevTools in development
-  if (!app.isPackaged) {
+  // Keep default startup headless-safe; open DevTools only when explicitly requested.
+  if (!app.isPackaged && SHOULD_OPEN_DEVTOOLS) {
     mainWindow.webContents.openDevTools();
   }
 
@@ -277,6 +306,35 @@ ipcMain.handle(
   }
 );
 
+// Terminal sessions
+ipcMain.handle(
+  'terminal:start',
+  async (_event, hostId: string) => {
+    return terminalSessions.start(hostId);
+  }
+);
+
+ipcMain.handle(
+  'terminal:write',
+  async (_event, sessionId: string, input: string) => {
+    return terminalSessions.write(sessionId, input);
+  }
+);
+
+ipcMain.handle(
+  'terminal:resize',
+  async (_event, sessionId: string, cols: number, rows: number) => {
+    return terminalSessions.resize(sessionId, cols, rows);
+  }
+);
+
+ipcMain.handle(
+  'terminal:stop',
+  async (_event, sessionId: string) => {
+    return terminalSessions.stop(sessionId);
+  }
+);
+
 // ============================================================
 // App Lifecycle
 // ============================================================
@@ -316,10 +374,13 @@ app.on('window-all-closed', () => {
 // Graceful shutdown
 app.on('will-quit', () => {
   // Clean up resources, close DB connections, etc.
+  terminalSessions.stopAll('Application is shutting down.');
   console.log('SwitchboardOS shutting down...');
 });
 
 function exitFromProcessSignal(): void {
+  terminalSessions.stopAll('Application received a shutdown signal.');
+
   if (app.isReady()) {
     BrowserWindow.getAllWindows().forEach((window) => {
       window.destroy();

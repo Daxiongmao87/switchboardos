@@ -20,6 +20,13 @@ import type {
   HostRecord,
   MvpSettings,
   MvpSettingsUpdate,
+  TerminalExitEvent,
+  TerminalOutputEvent,
+  TerminalResizeResult,
+  TerminalStartResult,
+  TerminalStatusEvent,
+  TerminalStopResult,
+  TerminalWriteResult,
   UpdateHostInput,
 } from '../shared/mvp-models';
 
@@ -54,6 +61,19 @@ interface WindowBounds {
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(channel, ...args);
+}
+
+function subscribe<T>(
+  channel: string,
+  callback: (event: T) => void,
+): (() => void) {
+  const subscription = (_event: Electron.IpcRendererEvent, payload: T) => {
+    callback(payload);
+  };
+  ipcRenderer.on(channel, subscription);
+  return () => {
+    ipcRenderer.removeListener(channel, subscription);
+  };
 }
 
 // ============================================================
@@ -122,6 +142,24 @@ contextBridge.exposeInMainWorld('sb', {
       invoke('audit:log', event),
   },
 
+  // --- Terminal Sessions ---
+  terminal: {
+    start: (hostId: string): Promise<TerminalStartResult> =>
+      invoke('terminal:start', hostId),
+    write: (sessionId: string, input: string): Promise<TerminalWriteResult> =>
+      invoke('terminal:write', sessionId, input),
+    resize: (sessionId: string, cols: number, rows: number): Promise<TerminalResizeResult> =>
+      invoke('terminal:resize', sessionId, cols, rows),
+    stop: (sessionId: string): Promise<TerminalStopResult> =>
+      invoke('terminal:stop', sessionId),
+    onOutput: (callback: (event: TerminalOutputEvent) => void): (() => void) =>
+      subscribe('terminal:output', callback),
+    onStatus: (callback: (event: TerminalStatusEvent) => void): (() => void) =>
+      subscribe('terminal:status', callback),
+    onExit: (callback: (event: TerminalExitEvent) => void): (() => void) =>
+      subscribe('terminal:exit', callback),
+  },
+
   // --- Event Listening (one-way, main → renderer) ---
   on: (channel: string, callback: (...args: unknown[]) => void): (() => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
@@ -175,6 +213,15 @@ declare global {
       audit: {
         list: () => Promise<AuditEvent[]>;
         log: (event: CreateAuditEventInput) => Promise<AuditEvent>;
+      };
+      terminal: {
+        start: (hostId: string) => Promise<TerminalStartResult>;
+        write: (sessionId: string, input: string) => Promise<TerminalWriteResult>;
+        resize: (sessionId: string, cols: number, rows: number) => Promise<TerminalResizeResult>;
+        stop: (sessionId: string) => Promise<TerminalStopResult>;
+        onOutput: (callback: (event: TerminalOutputEvent) => void) => () => void;
+        onStatus: (callback: (event: TerminalStatusEvent) => void) => () => void;
+        onExit: (callback: (event: TerminalExitEvent) => void) => () => void;
       };
       on: (channel: string, callback: (...args: unknown[]) => void) => () => void;
       removeAllListeners: (channel: string) => void;

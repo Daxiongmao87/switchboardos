@@ -84,3 +84,58 @@ export type MvpSettingsUpdate = Partial<Pick<MvpSettings, 'theme' | 'defaultWind
   sshDefaults?: Partial<MvpSettings['sshDefaults']>;
   operator?: Partial<MvpSettings['operator']>;
 };
+
+export type TerminalSessionStatus = 'starting' | 'active' | 'failed' | 'exited' | 'stopped';
+
+export interface TerminalStartResult {
+  sessionId: string | null;
+  status: 'started' | 'failed';
+  message: string;
+  hostId: string;
+}
+
+export interface TerminalWriteResult {
+  sessionId: string;
+  success: boolean;
+  message: string;
+}
+
+export interface TerminalResizeResult {
+  sessionId: string;
+  success: boolean;
+  message: string;
+  cols: number;
+  rows: number;
+}
+
+export interface TerminalStopResult {
+  sessionId: string;
+  success: boolean;
+  message: string;
+}
+
+export interface TerminalOutputEvent {
+  sessionId: string;
+  hostId: string;
+  stream: 'stdout' | 'stderr' | 'system';
+  data: string;
+  createdAt: string;
+}
+
+export interface TerminalExitEvent {
+  sessionId: string;
+  hostId: string;
+  status: 'exited' | 'failed' | 'stopped';
+  exitCode: number | null;
+  signal: string | null;
+  message: string;
+  createdAt: string;
+}
+
+export interface TerminalStatusEvent {
+  sessionId: string;
+  hostId: string;
+  status: TerminalSessionStatus;
+  message: string;
+  createdAt: string;
+}

@@ -6,6 +6,13 @@ import type {
   HostRecord,
   MvpSettings,
   MvpSettingsUpdate,
+  TerminalExitEvent,
+  TerminalOutputEvent,
+  TerminalResizeResult,
+  TerminalStartResult,
+  TerminalStatusEvent,
+  TerminalStopResult,
+  TerminalWriteResult,
   UpdateHostInput,
 } from '../../shared/mvp-models';
 
@@ -37,6 +44,15 @@ export interface SwitchboardApi {
   audit: {
     list: () => Promise<AuditEvent[]>;
     log: (event: CreateAuditEventInput) => Promise<AuditEvent>;
+  };
+  terminal: {
+    start: (hostId: string) => Promise<TerminalStartResult>;
+    write: (sessionId: string, input: string) => Promise<TerminalWriteResult>;
+    resize: (sessionId: string, cols: number, rows: number) => Promise<TerminalResizeResult>;
+    stop: (sessionId: string) => Promise<TerminalStopResult>;
+    onOutput: (callback: (event: TerminalOutputEvent) => void) => () => void;
+    onStatus: (callback: (event: TerminalStatusEvent) => void) => () => void;
+    onExit: (callback: (event: TerminalExitEvent) => void) => () => void;
   };
 }
 

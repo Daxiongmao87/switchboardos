@@ -1,6 +1,20 @@
-import { Component, OnInit } from '@angular/core';
-import type { HostRecord } from '../../../shared/mvp-models';
+import {
+  AfterViewChecked,
+  Component,
+  ElementRef,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+} from '@angular/core';
+import type {
+  HostRecord,
+  TerminalExitEvent,
+  TerminalOutputEvent,
+  TerminalStatusEvent,
+} from '../../../shared/mvp-models';
 import { getSwitchboardApi } from '../switchboard-api';
+
+type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
 
 @Component({
   selector: 'app-terminal',
@@ -10,24 +24,29 @@ import { getSwitchboardApi } from '../switchboard-api';
       <header class="page-header">
         <div>
           <h1>Terminal</h1>
-          <p>Host-scoped terminal workspace with command execution disabled.</p>
+          <p>Real host-scoped SSH session foundation using local system ssh.</p>
         </div>
         <div class="header-actions">
-          <span class="status-pill">Non-executing MVP stub</span>
-          <button type="button" class="secondary-action" (click)="loadHosts()" [disabled]="isLoading">
-            Refresh
+          <span class="status-pill" [class.is-active]="activeSessionId">
+            {{ sessionLabel }}
+          </span>
+          <button type="button" class="secondary-action" (click)="loadHosts()" [disabled]="isLoading || isSessionActive">
+            Refresh hosts
           </button>
         </div>
       </header>
 
+      <p class="notice">
+        MVP terminal starts <code>ssh</code> with <code>BatchMode=yes</code>. It uses existing local ssh-agent or key files only.
+        Password prompts, stored secrets, keychain integration, and hosted terminal mode are not handled here.
+      </p>
       <p *ngIf="errorMessage" class="notice error">{{ errorMessage }}</p>
-      <p *ngIf="auditMessage" class="notice">{{ auditMessage }}</p>
 
       <section class="terminal-layout">
         <aside class="panel context-panel">
           <div class="panel-heading">
-            <h2>Selected host</h2>
-            <span>{{ hosts.length }} available</span>
+            <h2>Session target</h2>
+            <span>{{ hosts.length }} hosts</span>
           </div>
 
           <label class="host-select">
@@ -36,7 +55,7 @@ import { getSwitchboardApi } from '../switchboard-api';
               name="selectedHostId"
               [(ngModel)]="selectedHostId"
               (ngModelChange)="selectHost($event)"
-              [disabled]="isLoading || hosts.length === 0"
+              [disabled]="isLoading || isSessionActive || hosts.length === 0"
             >
               <option value="">No host selected</option>
               <option *ngFor="let host of hosts; trackBy: trackHost" [value]="host.id">
@@ -55,11 +74,11 @@ import { getSwitchboardApi } from '../switchboard-api';
               <dd>{{ selectedHostAddress }}</dd>
             </div>
             <div>
-              <dt>SSH defaults</dt>
-              <dd>{{ selectedHost ? selectedHost.username || 'No user' : 'No user' }} · port {{ selectedHost?.port || 22 }}</dd>
+              <dt>SSH target</dt>
+              <dd>{{ sshTargetLabel }}</dd>
             </div>
             <div>
-              <dt>Status</dt>
+              <dt>Reachability</dt>
               <dd>{{ selectedHost ? statusLabel(selectedHost.lastConnectionStatus) : 'No connection' }}</dd>
             </div>
             <div>
@@ -67,27 +86,58 @@ import { getSwitchboardApi } from '../switchboard-api';
               <dd>{{ selectedLastCheckedLabel }}</dd>
             </div>
             <div>
-              <dt>Mode</dt>
-              <dd>Disabled local workspace</dd>
+              <dt>Resize</dt>
+              <dd>Recorded only; SSH pipe backend cannot propagate terminal size.</dd>
             </div>
           </dl>
+
+          <div class="control-stack">
+            <button
+              type="button"
+              class="primary-action"
+              (click)="startSession()"
+              [disabled]="!selectedHost || isStarting || isSessionActive"
+            >
+              Start session
+            </button>
+            <button
+              type="button"
+              class="danger-action"
+              (click)="stopSession()"
+              [disabled]="!isSessionActive || isStopping"
+            >
+              Stop session
+            </button>
+          </div>
         </aside>
 
         <article class="panel terminal-panel">
-          <div class="terminal-output" aria-label="Terminal output placeholder">
-            <div class="line muted">$ switchboard terminal --mvp-stub</div>
-            <div class="line" *ngIf="selectedHost">
-              Selected host: {{ selectedHost.name }} ({{ selectedHostAddress }})
-            </div>
-            <div class="line" *ngIf="!selectedHost">No host is selected.</div>
-            <div class="line">Command input is disabled. No commands execute from this view.</div>
-            <div class="line">No SSH connection is attempted by the MVP terminal workspace.</div>
-            <div class="line muted">Opening or selecting a host records a local audit event only.</div>
+          <div #outputPane class="terminal-output" aria-label="Terminal output stream">
+            <span *ngIf="outputChunks.length === 0" class="chunk system">
+              Select a host and start a session. Output from system ssh will stream here.
+            </span>
+            <span
+              *ngFor="let chunk of outputChunks"
+              class="chunk"
+              [class.stdout]="chunk.stream === 'stdout'"
+              [class.stderr]="chunk.stream === 'stderr'"
+              [class.system]="chunk.stream === 'system'"
+            >{{ chunk.data }}</span>
           </div>
-          <div class="terminal-input-row">
+
+          <form class="terminal-input-row" (ngSubmit)="sendInput()">
             <span class="prompt">$</span>
-            <input value="command input disabled - no execution" disabled />
-          </div>
+            <input
+              name="terminalInput"
+              [(ngModel)]="commandInput"
+              (keydown.enter)="handleInputEnter($event)"
+              [disabled]="!isSessionActive || isStopping"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Input is sent to the active ssh process"
+            />
+            <button type="submit" [disabled]="!canSendInput">Send</button>
+          </form>
         </article>
       </section>
     </div>
@@ -124,17 +174,23 @@ import { getSwitchboardApi } from '../switchboard-api';
       font-size: 15px;
     }
 
+    code {
+      color: #bfdbfe;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+      font-size: 12px;
+    }
+
     p,
     dt,
-    .muted,
-    label,
-    .panel-heading span {
+    .panel-heading span,
+    label {
       color: #94a3b8;
       font-size: 12px;
     }
 
     .header-actions,
-    .panel-heading {
+    .panel-heading,
+    .terminal-input-row {
       display: flex;
       gap: 10px;
       align-items: center;
@@ -155,11 +211,17 @@ import { getSwitchboardApi } from '../switchboard-api';
       white-space: nowrap;
     }
 
+    .status-pill.is-active {
+      border-color: #166534;
+      color: #bbf7d0;
+      background: #052e16;
+    }
+
     .terminal-layout {
       display: grid;
-      grid-template-columns: 280px minmax(0, 1fr);
+      grid-template-columns: 300px minmax(0, 1fr);
       gap: 12px;
-      min-height: 460px;
+      min-height: 500px;
       flex: 1;
     }
 
@@ -170,10 +232,11 @@ import { getSwitchboardApi } from '../switchboard-api';
       padding: 16px;
     }
 
-    .host-select {
+    .host-select,
+    .control-stack {
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 8px;
       margin: 14px 0;
     }
 
@@ -206,15 +269,25 @@ import { getSwitchboardApi } from '../switchboard-api';
       padding: 14px;
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
       font-size: 12px;
-      line-height: 1.6;
+      line-height: 1.55;
       color: #d1d5db;
       overflow: auto;
+      white-space: pre-wrap;
+    }
+
+    .chunk {
+      white-space: pre-wrap;
+    }
+
+    .chunk.stderr {
+      color: #fecaca;
+    }
+
+    .chunk.system {
+      color: #93c5fd;
     }
 
     .terminal-input-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
       border-top: 1px solid #2d3440;
       padding: 10px 12px;
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
@@ -224,16 +297,7 @@ import { getSwitchboardApi } from '../switchboard-api';
       color: #22c55e;
     }
 
-    input {
-      flex: 1;
-      min-width: 0;
-      border: none;
-      background: transparent;
-      color: #94a3b8;
-      font: inherit;
-      outline: none;
-    }
-
+    input,
     select {
       border: 1px solid #334155;
       border-radius: 6px;
@@ -245,7 +309,16 @@ import { getSwitchboardApi } from '../switchboard-api';
       min-width: 0;
     }
 
-    .secondary-action {
+    .terminal-input-row input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: #e5e7eb;
+      padding: 0;
+      outline: none;
+    }
+
+    button {
       border: 1px solid #334155;
       border-radius: 6px;
       background: #1f2937;
@@ -256,9 +329,21 @@ import { getSwitchboardApi } from '../switchboard-api';
       cursor: pointer;
     }
 
-    .secondary-action:disabled {
+    button:disabled,
+    input:disabled,
+    select:disabled {
       cursor: not-allowed;
       opacity: 0.55;
+    }
+
+    .primary-action {
+      background: #1d4ed8;
+      border-color: #2563eb;
+    }
+
+    .danger-action {
+      background: #7f1d1d;
+      border-color: #991b1b;
     }
 
     .notice {
@@ -291,17 +376,47 @@ import { getSwitchboardApi } from '../switchboard-api';
     `,
   ],
 })
-export class TerminalComponent implements OnInit {
+export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
+  @ViewChild('outputPane') private outputPane?: ElementRef<HTMLDivElement>;
+
   hosts: HostRecord[] = [];
   selectedHostId = '';
   isLoading = false;
+  isStarting = false;
+  isStopping = false;
   errorMessage = '';
-  auditMessage = '';
-  private lastLoggedHostId: string | null | undefined;
+  commandInput = '';
+  activeSessionId: string | null = null;
+  sessionStatus = 'Disconnected';
+  outputChunks: TerminalChunk[] = [];
+
+  private readonly unsubscribeCallbacks: Array<() => void> = [];
+  private shouldScrollOutput = false;
 
   ngOnInit(): void {
+    this.registerTerminalEvents();
     void this.loadHosts();
-    void this.logTerminalOpened(null);
+  }
+
+  ngAfterViewChecked(): void {
+    if (!this.shouldScrollOutput || !this.outputPane) {
+      return;
+    }
+
+    const element = this.outputPane.nativeElement;
+    element.scrollTop = element.scrollHeight;
+    this.shouldScrollOutput = false;
+  }
+
+  ngOnDestroy(): void {
+    const sessionId = this.activeSessionId;
+    this.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
+    this.unsubscribeCallbacks.length = 0;
+
+    if (sessionId) {
+      const api = getSwitchboardApi();
+      void api?.terminal.stop(sessionId);
+    }
   }
 
   get selectedHost(): HostRecord | null {
@@ -313,15 +428,37 @@ export class TerminalComponent implements OnInit {
     return host ? host.address || host.hostname : 'None';
   }
 
+  get sshTargetLabel(): string {
+    const host = this.selectedHost;
+    if (!host) {
+      return 'No target';
+    }
+
+    const userPrefix = host.username ? `${host.username}@` : '';
+    return `${userPrefix}${host.address || host.hostname}:${host.port}`;
+  }
+
   get selectedLastCheckedLabel(): string {
     const lastCheckedAt = this.selectedHost?.lastCheckedAt;
     return lastCheckedAt ? this.formatDate(lastCheckedAt) : 'Never';
   }
 
+  get isSessionActive(): boolean {
+    return this.activeSessionId !== null;
+  }
+
+  get canSendInput(): boolean {
+    return this.isSessionActive && !this.isStopping && this.commandInput.length > 0;
+  }
+
+  get sessionLabel(): string {
+    return this.activeSessionId ? this.sessionStatus : 'No active session';
+  }
+
   async loadHosts(): Promise<void> {
     const api = getSwitchboardApi();
     if (!api) {
-      this.errorMessage = 'Host API is unavailable. Run the app through Electron to select local profiles.';
+      this.errorMessage = 'Host API is unavailable. Run the app through Electron to start terminal sessions.';
       return;
     }
 
@@ -341,8 +478,95 @@ export class TerminalComponent implements OnInit {
 
   selectHost(hostId: string): void {
     this.selectedHostId = hostId;
+    this.errorMessage = '';
+  }
+
+  async startSession(): Promise<void> {
+    const api = getSwitchboardApi();
     const host = this.selectedHost;
-    void this.logTerminalOpened(host);
+    if (!api || !host) {
+      this.errorMessage = 'Select a host before starting a terminal session.';
+      return;
+    }
+
+    this.isStarting = true;
+    this.errorMessage = '';
+    this.outputChunks = [];
+    this.appendSystemOutput(`Starting session for ${host.name}...\n`);
+
+    try {
+      const result = await api.terminal.start(host.id);
+      if (result.status === 'failed' || !result.sessionId) {
+        this.activeSessionId = null;
+        this.sessionStatus = 'Failed';
+        this.appendSystemOutput(`${result.message}\n`);
+        this.errorMessage = result.message;
+        return;
+      }
+
+      this.activeSessionId = result.sessionId;
+      this.sessionStatus = 'Starting';
+      this.appendSystemOutput(`${result.message}\n`);
+      await api.terminal.resize(result.sessionId, 100, 30);
+    } catch {
+      this.activeSessionId = null;
+      this.sessionStatus = 'Failed';
+      this.errorMessage = 'Unable to start terminal session.';
+      this.appendSystemOutput('Unable to start terminal session.\n');
+    } finally {
+      this.isStarting = false;
+    }
+  }
+
+  async stopSession(): Promise<void> {
+    const api = getSwitchboardApi();
+    const sessionId = this.activeSessionId;
+    if (!api || !sessionId) {
+      return;
+    }
+
+    this.isStopping = true;
+    this.appendSystemOutput('Stopping session...\n');
+    try {
+      const result = await api.terminal.stop(sessionId);
+      if (!result.success) {
+        this.errorMessage = result.message;
+      }
+      this.appendSystemOutput(`${result.message}\n`);
+    } catch {
+      this.errorMessage = 'Unable to stop terminal session.';
+      this.appendSystemOutput('Unable to stop terminal session.\n');
+      this.isStopping = false;
+    }
+  }
+
+  async sendInput(): Promise<void> {
+    const api = getSwitchboardApi();
+    const sessionId = this.activeSessionId;
+    if (!api || !sessionId || !this.commandInput) {
+      return;
+    }
+
+    const input = this.commandInput.endsWith('\n')
+      ? this.commandInput
+      : `${this.commandInput}\n`;
+    this.commandInput = '';
+
+    try {
+      const result = await api.terminal.write(sessionId, input);
+      if (!result.success) {
+        this.errorMessage = result.message;
+        this.appendSystemOutput(`${result.message}\n`);
+      }
+    } catch {
+      this.errorMessage = 'Unable to write input to terminal session.';
+      this.appendSystemOutput('Unable to write input to terminal session.\n');
+    }
+  }
+
+  handleInputEnter(event: Event): void {
+    event.preventDefault();
+    void this.sendInput();
   }
 
   trackHost(_index: number, host: HostRecord): string {
@@ -351,12 +575,12 @@ export class TerminalComponent implements OnInit {
 
   statusLabel(status: HostRecord['lastConnectionStatus']): string {
     switch (status) {
-      case 'stubbed':
-        return 'Stubbed (legacy)';
       case 'success':
         return 'Reachable';
       case 'failed':
         return 'Failed';
+      case 'stubbed':
+        return 'Stubbed legacy check';
       default:
         return 'Untested';
     }
@@ -366,38 +590,71 @@ export class TerminalComponent implements OnInit {
     return new Date(value).toLocaleString();
   }
 
-  private async logTerminalOpened(host: HostRecord | null): Promise<void> {
-    const hostId = host?.id ?? null;
-    if (this.lastLoggedHostId === hostId) {
-      return;
-    }
-
+  private registerTerminalEvents(): void {
     const api = getSwitchboardApi();
     if (!api) {
-      this.auditMessage = 'Audit logging is unavailable outside Electron.';
       return;
     }
 
-    this.lastLoggedHostId = hostId;
-    try {
-      await api.audit.log({
-        type: 'terminal.workspace_opened',
-        entityType: host ? 'host' : 'terminal',
-        entityId: hostId,
-        message: host
-          ? `Terminal workspace opened for ${host.name}. No command execution was enabled.`
-          : 'Terminal workspace opened with no host selected. No command execution was enabled.',
-        metadata: {
-          executionEnabled: false,
-          sshAttempted: false,
-          mvpStub: true,
-        },
-      });
-      this.auditMessage = host
-        ? `Recorded local audit event for ${host.name}.`
-        : 'Recorded local audit event for terminal workspace open.';
-    } catch {
-      this.auditMessage = 'Unable to record the terminal workspace audit event.';
+    this.unsubscribeCallbacks.push(
+      api.terminal.onOutput((event) => this.handleOutputEvent(event)),
+      api.terminal.onStatus((event) => this.handleStatusEvent(event)),
+      api.terminal.onExit((event) => this.handleExitEvent(event)),
+    );
+  }
+
+  private handleOutputEvent(event: TerminalOutputEvent): void {
+    if (!this.isCurrentSession(event.sessionId)) {
+      return;
     }
+
+    this.activeSessionId = event.sessionId;
+    this.outputChunks.push({
+      stream: event.stream,
+      data: event.data,
+      createdAt: event.createdAt,
+    });
+    if (this.outputChunks.length > 500) {
+      this.outputChunks = this.outputChunks.slice(-500);
+    }
+    this.shouldScrollOutput = true;
+  }
+
+  private handleStatusEvent(event: TerminalStatusEvent): void {
+    if (!this.isCurrentSession(event.sessionId)) {
+      return;
+    }
+
+    this.activeSessionId = event.sessionId;
+    this.sessionStatus = event.status;
+    this.appendSystemOutput(`${event.message}\n`);
+  }
+
+  private handleExitEvent(event: TerminalExitEvent): void {
+    if (!this.isCurrentSession(event.sessionId)) {
+      return;
+    }
+
+    this.sessionStatus = event.status;
+    this.appendSystemOutput(`${event.message}\n`);
+    this.activeSessionId = null;
+    this.isStopping = false;
+    this.commandInput = '';
+  }
+
+  private appendSystemOutput(data: string): void {
+    this.outputChunks.push({
+      stream: 'system',
+      data,
+      createdAt: new Date().toISOString(),
+    });
+    if (this.outputChunks.length > 500) {
+      this.outputChunks = this.outputChunks.slice(-500);
+    }
+    this.shouldScrollOutput = true;
+  }
+
+  private isCurrentSession(sessionId: string): boolean {
+    return this.activeSessionId === null || this.activeSessionId === sessionId;
   }
 }
