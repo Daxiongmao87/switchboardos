@@ -12,6 +12,16 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  AuditEvent,
+  ConnectionTestResult,
+  CreateAuditEventInput,
+  CreateHostInput,
+  HostRecord,
+  MvpSettings,
+  MvpSettingsUpdate,
+  UpdateHostInput,
+} from '../shared/mvp-models';
 
 // ============================================================
 // Type declarations for the exposed API
@@ -24,16 +34,6 @@ interface AppInfo {
   electronVersion: string;
   chromeVersion: string;
   nodeVersion: string;
-}
-
-interface HostRecord {
-  id: string;
-  name: string;
-  hostname: string;
-  port: number;
-  username: string;
-  connected?: boolean;
-  lastSeen?: string;
 }
 
 interface DialogResult {
@@ -88,14 +88,21 @@ contextBridge.exposeInMainWorld('sb', {
   host: {
     list: (): Promise<HostRecord[]> => invoke('host:list'),
     get: (id: string): Promise<HostRecord | null> => invoke('host:get', id),
-    create: (data: Omit<HostRecord, 'id'>): Promise<string> =>
+    create: (data: CreateHostInput): Promise<HostRecord> =>
       invoke('host:create', data),
-    update: (id: string, data: Partial<HostRecord>): Promise<boolean> =>
+    update: (id: string, data: UpdateHostInput): Promise<HostRecord | null> =>
       invoke('host:update', id, data),
     remove: (id: string): Promise<boolean> =>
       invoke('host:delete', id),
-    testConnection: (id: string): Promise<{ success: boolean; error?: string }> =>
+    testConnection: (id: string): Promise<ConnectionTestResult> =>
       invoke('host:test-connection', id),
+  },
+
+  // --- MVP Settings ---
+  settings: {
+    get: (): Promise<MvpSettings> => invoke('settings:get'),
+    update: (update: MvpSettingsUpdate): Promise<MvpSettings> =>
+      invoke('settings:update', update),
   },
 
   // --- Secret Storage (OS Keychain) ---
@@ -110,7 +117,8 @@ contextBridge.exposeInMainWorld('sb', {
 
   // --- Audit ---
   audit: {
-    log: (event: Record<string, unknown>): Promise<string> =>
+    list: (): Promise<AuditEvent[]> => invoke('audit:list'),
+    log: (event: CreateAuditEventInput): Promise<AuditEvent> =>
       invoke('audit:log', event),
   },
 
@@ -150,10 +158,14 @@ declare global {
       host: {
         list: () => Promise<HostRecord[]>;
         get: (id: string) => Promise<HostRecord | null>;
-        create: (data: Omit<HostRecord, 'id'>) => Promise<string>;
-        update: (id: string, data: Partial<HostRecord>) => Promise<boolean>;
+        create: (data: CreateHostInput) => Promise<HostRecord>;
+        update: (id: string, data: UpdateHostInput) => Promise<HostRecord | null>;
         remove: (id: string) => Promise<boolean>;
-        testConnection: (id: string) => Promise<{ success: boolean; error?: string }>;
+        testConnection: (id: string) => Promise<ConnectionTestResult>;
+      };
+      settings: {
+        get: () => Promise<MvpSettings>;
+        update: (update: MvpSettingsUpdate) => Promise<MvpSettings>;
       };
       secret: {
         store: (key: string, value: string) => Promise<boolean>;
@@ -161,7 +173,8 @@ declare global {
         remove: (key: string) => Promise<boolean>;
       };
       audit: {
-        log: (event: Record<string, unknown>) => Promise<string>;
+        list: () => Promise<AuditEvent[]>;
+        log: (event: CreateAuditEventInput) => Promise<AuditEvent>;
       };
       on: (channel: string, callback: (...args: unknown[]) => void) => () => void;
       removeAllListeners: (channel: string) => void;

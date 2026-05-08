@@ -4,11 +4,13 @@
   "description": "SwitchboardOS - Local-first desktop operations environment",
   "main": "dist/src/main/main.js",
   "scripts": {
-    "start": "tsc && electron .",
-    "build": "tsc",
+    "start": "npm run build && electron .",
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "tsc",
+    "build:renderer": "ng build --configuration development",
     "build:ts": "tsc",
     "lint": "npx eslint \"src/**/*.ts\"",
-    "electron:package": "tsc && electron-builder",
+    "electron:package": "npm run build && electron-builder",
     "test": "ng test"
   },
   "dependencies": {

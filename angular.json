@@ -16,6 +16,8 @@
             "index": "src/renderer/index.html",
             "main": "src/renderer/main.ts",
             "tsConfig": "src/renderer/tsconfig.app.json",
+            "baseHref": "./",
+            "polyfills": ["src/renderer/polyfills.ts"],
             "assets": [],
             "styles": ["src/renderer/styles.css"],
             "scripts": []

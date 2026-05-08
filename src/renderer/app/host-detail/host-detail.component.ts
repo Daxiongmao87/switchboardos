@@ -9,6 +9,7 @@ import { ActivatedRoute } from '@angular/router';
 
 @Component({
   selector: 'app-host-detail',
+  standalone: false,
   template: `
     <div class="host-detail-placeholder">
       <h2>Host Detail</h2>

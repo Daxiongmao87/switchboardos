@@ -15,24 +15,25 @@
 
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { join } from 'path';
-import crypto from 'crypto';
+import { MvpJsonStore } from './mvp-json-store';
+import type {
+  CreateAuditEventInput,
+  CreateHostInput,
+  MvpSettingsUpdate,
+  UpdateHostInput,
+} from '../shared/mvp-models';
 
-
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
 
 // Track window state for multi-window support
 let mainWindow: BrowserWindow | null = null;
+const mvpStore = new MvpJsonStore(() => app.getPath('userData'));
 
-/**
- * Get the URL for the renderer.
- * In development, load from Angular dev server.
- * In production, load from built files.
- */
-function getRendererUrl(): string {
-  if (process.env.ELECTRON_WEBPACK_MODE === 'serve' || !app.isPackaged) {
-    return 'http://localhost:4200';
-  }
-  return join(__dirname, 'dist', 'switchboardos', 'index.html');
-}
+const DEV_SERVER_URL = process.env.SWITCHBOARDOS_DEV_SERVER_URL;
+
+const RENDERER_INDEX = join(__dirname, '..', '..', 'renderer', 'index.html');
+const PRELOAD_PATH = join(__dirname, '..', 'preload', 'preload.js');
 
 /**
  * Create the main application window.
@@ -48,7 +49,7 @@ function createWindow(): void {
     titleBarStyle: 'hidden',
     backgroundColor: '#1e1e2e',
     webPreferences: {
-      preload: join(__dirname, '..', 'src', 'preload', 'preload.js'),
+      preload: PRELOAD_PATH,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -56,8 +57,11 @@ function createWindow(): void {
     },
   });
 
-  // Load the renderer
-  mainWindow.loadURL(getRendererUrl()).catch((err) => {
+  const loadPromise = DEV_SERVER_URL
+    ? mainWindow.loadURL(DEV_SERVER_URL)
+    : mainWindow.loadFile(RENDERER_INDEX);
+
+  loadPromise.catch((err) => {
     console.error('Failed to load renderer:', err);
   });
 
@@ -175,56 +179,65 @@ ipcMain.handle(
 // Host management
 ipcMain.handle(
   'host:list',
-  async (): Promise<unknown[]> => {
-    // TODO: Query SQLite for host inventory
-    return [];
+  async () => {
+    return mvpStore.listHosts();
   }
 );
 
 ipcMain.handle(
   'host:get',
-  async (_event, hostId: string): Promise<unknown | null> => {
-    // TODO: Query SQLite for single host
-    return null;
+  async (_event, hostId: string) => {
+    return mvpStore.getHost(hostId);
   }
 );
 
 ipcMain.handle(
   'host:create',
-  async (_event, hostData: Record<string, unknown>): Promise<string> => {
-    // TODO: Insert into SQLite
-    return (hostData.id as string) ?? crypto.randomUUID();
+  async (_event, hostData: CreateHostInput) => {
+    return mvpStore.createHost(hostData);
   }
 );
 
 ipcMain.handle(
   'host:update',
-  async (_event, hostId: string, hostData: Record<string, unknown>): Promise<boolean> => {
-    // TODO: Update in SQLite
-    return true;
+  async (_event, hostId: string, hostData: UpdateHostInput) => {
+    return mvpStore.updateHost(hostId, hostData);
   }
 );
 
 ipcMain.handle(
   'host:delete',
-  async (_event, hostId: string): Promise<boolean> => {
-    // TODO: Delete from SQLite
-    return true;
+  async (_event, hostId: string) => {
+    return mvpStore.deleteHost(hostId);
   }
 );
 
 ipcMain.handle(
   'host:test-connection',
-  async (_event, hostId: string): Promise<{ success: boolean; error?: string }> => {
-    // TODO: SSH connection test
-    return { success: false, error: 'Not yet implemented' };
+  async (_event, hostId: string) => {
+    return mvpStore.testConnection(hostId);
+  }
+);
+
+// MVP settings
+ipcMain.handle(
+  'settings:get',
+  async () => {
+    return mvpStore.getSettings();
+  }
+);
+
+ipcMain.handle(
+  'settings:update',
+  async (_event, update: MvpSettingsUpdate) => {
+    return mvpStore.updateSettings(update);
   }
 );
 
 // Secret storage (OS keychain)
 ipcMain.handle(
   'secret:store',
-  async (_event, key: string, value: string): Promise<boolean> => {
+  async (_event, _key: string, _value: string): Promise<boolean> => {
     // TODO: Store in OS keychain
     console.warn('secret:store not yet implemented');
     return false;
@@ -233,7 +246,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'secret:retrieve',
-  async (_event, key: string): Promise<string | null> => {
+  async (_event, _key: string): Promise<string | null> => {
     // TODO: Retrieve from OS keychain
     console.warn('secret:retrieve not yet implemented');
     return null;
@@ -242,7 +255,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'secret:delete',
-  async (_event, key: string): Promise<boolean> => {
+  async (_event, _key: string): Promise<boolean> => {
     // TODO: Delete from OS keychain
     console.warn('secret:delete not yet implemented');
     return false;
@@ -251,11 +264,16 @@ ipcMain.handle(
 
 // Audit logging
 ipcMain.handle(
+  'audit:list',
+  async () => {
+    return mvpStore.listAuditEvents();
+  }
+);
+
+ipcMain.handle(
   'audit:log',
-  async (_event, event: Record<string, unknown>): Promise<string> => {
-    // TODO: Write audit event to SQLite
-    console.log('Audit event:', JSON.stringify(event));
-    return crypto.randomUUID();
+  async (_event, event: CreateAuditEventInput) => {
+    return mvpStore.logAuditEvent(event);
   }
 );
 
@@ -300,6 +318,19 @@ app.on('will-quit', () => {
   // Clean up resources, close DB connections, etc.
   console.log('SwitchboardOS shutting down...');
 });
+
+function exitFromProcessSignal(): void {
+  if (app.isReady()) {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      window.destroy();
+    });
+  }
+
+  app.exit(0);
+}
+
+process.once('SIGTERM', exitFromProcessSignal);
+process.once('SIGINT', exitFromProcessSignal);
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
