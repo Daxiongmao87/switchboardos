@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
 import { AppComponent } from './app.component';
 import { AgentsComponent } from './agents/agents.component';
+import { AppsComponent } from './apps/apps.component';
 import { AuditComponent } from './audit/audit.component';
 import { BootstrapComponent } from './bootstrap/bootstrap.component';
 import { DashboardComponent } from './dashboard/dashboard.component';
@@ -19,6 +20,7 @@ const routes: Routes = [
   { path: 'terminal', component: TerminalComponent },
   { path: 'bootstrap', component: BootstrapComponent },
   { path: 'agents', component: AgentsComponent },
+  { path: 'apps', component: AppsComponent },
   { path: 'audit', component: AuditComponent },
   { path: 'settings', component: SettingsComponent },
   { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
@@ -29,6 +31,7 @@ const routes: Routes = [
   declarations: [
     AppComponent,
     AgentsComponent,
+    AppsComponent,
     AuditComponent,
     BootstrapComponent,
     DashboardComponent,
