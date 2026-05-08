@@ -19,7 +19,10 @@
             "baseHref": "./",
             "polyfills": ["src/renderer/polyfills.ts"],
             "assets": [],
-            "styles": ["src/renderer/styles.css"],
+            "styles": [
+              "node_modules/@xterm/xterm/css/xterm.css",
+              "src/renderer/styles.css"
+            ],
             "scripts": []
           },
           "configurations": {

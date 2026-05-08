@@ -1,11 +1,13 @@
 import {
-  AfterViewChecked,
+  AfterViewInit,
   Component,
   ElementRef,
+  HostListener,
   OnDestroy,
   OnInit,
   ViewChild,
 } from '@angular/core';
+import { Terminal } from '@xterm/xterm';
 import type {
   HostRecord,
   TerminalExitEvent,
@@ -14,7 +16,9 @@ import type {
 } from '../../../shared/mvp-models';
 import { getSwitchboardApi } from '../switchboard-api';
 
-type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
+interface Disposable {
+  dispose: () => void;
+}
 
 @Component({
   selector: 'app-terminal',
@@ -112,32 +116,22 @@ type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
         </aside>
 
         <article class="panel terminal-panel">
-          <div #outputPane class="terminal-output" aria-label="Terminal output stream">
-            <span *ngIf="outputChunks.length === 0" class="chunk system">
-              Select a host and start a session. Output from system ssh will stream here.
-            </span>
-            <span
-              *ngFor="let chunk of outputChunks"
-              class="chunk"
-              [class.stdout]="chunk.stream === 'stdout'"
-              [class.stderr]="chunk.stream === 'stderr'"
-              [class.system]="chunk.stream === 'system'"
-            >{{ chunk.data }}</span>
+          <div class="terminal-toolbar">
+            <span>{{ isSessionActive ? 'xterm attached to active ssh process' : 'xterm idle' }}</span>
+            <span>{{ terminalSizeLabel }}</span>
           </div>
-
-          <form class="terminal-input-row" (ngSubmit)="sendInput()">
+          <div
+            #terminalHost
+            class="terminal-host"
+            [class.is-disabled]="!isSessionActive"
+            aria-label="xterm terminal output and input"
+          ></div>
+          <div class="terminal-footer">
             <span class="prompt">$</span>
-            <input
-              name="terminalInput"
-              [(ngModel)]="commandInput"
-              (keydown.enter)="handleInputEnter($event)"
-              [disabled]="!isSessionActive || isStopping"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Input is sent to the active ssh process"
-            />
-            <button type="submit" [disabled]="!canSendInput">Send</button>
-          </form>
+            <span>
+              {{ isSessionActive ? 'Keyboard input streams through xterm to system ssh.' : 'Start a session to enable xterm keyboard input.' }}
+            </span>
+          </div>
         </article>
       </section>
     </div>
@@ -190,7 +184,8 @@ type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
 
     .header-actions,
     .panel-heading,
-    .terminal-input-row {
+    .terminal-toolbar,
+    .terminal-footer {
       display: flex;
       gap: 10px;
       align-items: center;
@@ -263,41 +258,43 @@ type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
       background: #090b10;
     }
 
-    .terminal-output {
-      flex: 1;
-      min-height: 0;
-      padding: 14px;
+    .terminal-toolbar,
+    .terminal-footer {
+      min-height: 38px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #2d3440;
+      color: #94a3b8;
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
       font-size: 12px;
-      line-height: 1.55;
-      color: #d1d5db;
-      overflow: auto;
-      white-space: pre-wrap;
     }
 
-    .chunk {
-      white-space: pre-wrap;
-    }
-
-    .chunk.stderr {
-      color: #fecaca;
-    }
-
-    .chunk.system {
-      color: #93c5fd;
-    }
-
-    .terminal-input-row {
+    .terminal-footer {
+      justify-content: flex-start;
       border-top: 1px solid #2d3440;
-      padding: 10px 12px;
-      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+      border-bottom: 0;
+    }
+
+    .terminal-host {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      overflow: auto;
+      background: #090b10;
+    }
+
+    .terminal-host.is-disabled {
+      cursor: default;
+    }
+
+    :host ::ng-deep .terminal-host .xterm {
+      height: 100%;
+      padding: 12px;
     }
 
     .prompt {
       color: #22c55e;
     }
 
-    input,
     select {
       border: 1px solid #334155;
       border-radius: 6px;
@@ -307,15 +304,6 @@ type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
       font: inherit;
       font-size: 12px;
       min-width: 0;
-    }
-
-    .terminal-input-row input {
-      flex: 1;
-      border: none;
-      background: transparent;
-      color: #e5e7eb;
-      padding: 0;
-      outline: none;
     }
 
     button {
@@ -330,7 +318,6 @@ type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
     }
 
     button:disabled,
-    input:disabled,
     select:disabled {
       cursor: not-allowed;
       opacity: 0.55;
@@ -376,8 +363,8 @@ type TerminalChunk = Pick<TerminalOutputEvent, 'stream' | 'data' | 'createdAt'>;
     `,
   ],
 })
-export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
-  @ViewChild('outputPane') private outputPane?: ElementRef<HTMLDivElement>;
+export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
+  @ViewChild('terminalHost') private terminalHost?: ElementRef<HTMLDivElement>;
 
   hosts: HostRecord[] = [];
   selectedHostId = '';
@@ -385,38 +372,47 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
   isStarting = false;
   isStopping = false;
   errorMessage = '';
-  commandInput = '';
   activeSessionId: string | null = null;
   sessionStatus = 'Disconnected';
-  outputChunks: TerminalChunk[] = [];
+  terminalSizeLabel = '100 x 30';
 
   private readonly unsubscribeCallbacks: Array<() => void> = [];
-  private shouldScrollOutput = false;
+  private xterm: Terminal | null = null;
+  private xtermDataDisposable: Disposable | null = null;
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
     this.registerTerminalEvents();
     void this.loadHosts();
   }
 
-  ngAfterViewChecked(): void {
-    if (!this.shouldScrollOutput || !this.outputPane) {
-      return;
-    }
-
-    const element = this.outputPane.nativeElement;
-    element.scrollTop = element.scrollHeight;
-    this.shouldScrollOutput = false;
+  ngAfterViewInit(): void {
+    this.createTerminal();
   }
 
   ngOnDestroy(): void {
     const sessionId = this.activeSessionId;
     this.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
     this.unsubscribeCallbacks.length = 0;
+    this.xtermDataDisposable?.dispose();
+    this.xtermDataDisposable = null;
+    this.xterm?.dispose();
+    this.xterm = null;
+
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = null;
+    }
 
     if (sessionId) {
       const api = getSwitchboardApi();
       void api?.terminal.stop(sessionId);
     }
+  }
+
+  @HostListener('window:resize')
+  onWindowResize(): void {
+    this.scheduleTerminalResize();
   }
 
   get selectedHost(): HostRecord | null {
@@ -445,10 +441,6 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
 
   get isSessionActive(): boolean {
     return this.activeSessionId !== null;
-  }
-
-  get canSendInput(): boolean {
-    return this.isSessionActive && !this.isStopping && this.commandInput.length > 0;
   }
 
   get sessionLabel(): string {
@@ -491,7 +483,7 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
 
     this.isStarting = true;
     this.errorMessage = '';
-    this.outputChunks = [];
+    this.xterm?.clear();
     this.appendSystemOutput(`Starting session for ${host.name}...\n`);
 
     try {
@@ -507,7 +499,8 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
       this.activeSessionId = result.sessionId;
       this.sessionStatus = 'Starting';
       this.appendSystemOutput(`${result.message}\n`);
-      await api.terminal.resize(result.sessionId, 100, 30);
+      this.xterm?.focus();
+      await this.syncBackendResize();
     } catch {
       this.activeSessionId = null;
       this.sessionStatus = 'Failed';
@@ -540,35 +533,6 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
     }
   }
 
-  async sendInput(): Promise<void> {
-    const api = getSwitchboardApi();
-    const sessionId = this.activeSessionId;
-    if (!api || !sessionId || !this.commandInput) {
-      return;
-    }
-
-    const input = this.commandInput.endsWith('\n')
-      ? this.commandInput
-      : `${this.commandInput}\n`;
-    this.commandInput = '';
-
-    try {
-      const result = await api.terminal.write(sessionId, input);
-      if (!result.success) {
-        this.errorMessage = result.message;
-        this.appendSystemOutput(`${result.message}\n`);
-      }
-    } catch {
-      this.errorMessage = 'Unable to write input to terminal session.';
-      this.appendSystemOutput('Unable to write input to terminal session.\n');
-    }
-  }
-
-  handleInputEnter(event: Event): void {
-    event.preventDefault();
-    void this.sendInput();
-  }
-
   trackHost(_index: number, host: HostRecord): string {
     return host.id;
   }
@@ -590,6 +554,65 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
     return new Date(value).toLocaleString();
   }
 
+  private createTerminal(): void {
+    if (!this.terminalHost || this.xterm) {
+      return;
+    }
+
+    this.xterm = new Terminal({
+      allowProposedApi: false,
+      convertEol: true,
+      cursorBlink: true,
+      cursorStyle: 'block',
+      fontFamily: 'SFMono-Regular, Consolas, Liberation Mono, monospace',
+      fontSize: 12,
+      letterSpacing: 0,
+      lineHeight: 1.15,
+      scrollback: 5000,
+      theme: {
+        background: '#090b10',
+        foreground: '#d1d5db',
+        cursor: '#bfdbfe',
+        selectionBackground: '#1d4ed8',
+        black: '#111827',
+        blue: '#60a5fa',
+        cyan: '#67e8f9',
+        green: '#22c55e',
+        magenta: '#c084fc',
+        red: '#f87171',
+        white: '#e5e7eb',
+        yellow: '#facc15',
+      },
+    });
+
+    this.xterm.open(this.terminalHost.nativeElement);
+    this.xtermDataDisposable = this.xterm.onData((data) => {
+      void this.writeTerminalData(data);
+    });
+    this.resizeXtermToContainer();
+    this.appendSystemOutput('Select a host and start a session. Output from system ssh will render here.\n');
+  }
+
+  private async writeTerminalData(data: string): Promise<void> {
+    const api = getSwitchboardApi();
+    const sessionId = this.activeSessionId;
+    if (!api || !sessionId || this.isStopping) {
+      return;
+    }
+
+    try {
+      const input = data.replace(/\r/g, '\n');
+      const result = await api.terminal.write(sessionId, input);
+      if (!result.success) {
+        this.errorMessage = result.message;
+        this.appendSystemOutput(`${result.message}\n`);
+      }
+    } catch {
+      this.errorMessage = 'Unable to write input to terminal session.';
+      this.appendSystemOutput('Unable to write input to terminal session.\n');
+    }
+  }
+
   private registerTerminalEvents(): void {
     const api = getSwitchboardApi();
     if (!api) {
@@ -609,15 +632,7 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
     }
 
     this.activeSessionId = event.sessionId;
-    this.outputChunks.push({
-      stream: event.stream,
-      data: event.data,
-      createdAt: event.createdAt,
-    });
-    if (this.outputChunks.length > 500) {
-      this.outputChunks = this.outputChunks.slice(-500);
-    }
-    this.shouldScrollOutput = true;
+    this.writeOutput(event);
   }
 
   private handleStatusEvent(event: TerminalStatusEvent): void {
@@ -639,22 +654,76 @@ export class TerminalComponent implements AfterViewChecked, OnDestroy, OnInit {
     this.appendSystemOutput(`${event.message}\n`);
     this.activeSessionId = null;
     this.isStopping = false;
-    this.commandInput = '';
   }
 
   private appendSystemOutput(data: string): void {
-    this.outputChunks.push({
-      stream: 'system',
-      data,
-      createdAt: new Date().toISOString(),
-    });
-    if (this.outputChunks.length > 500) {
-      this.outputChunks = this.outputChunks.slice(-500);
+    if (!this.xterm) {
+      return;
     }
-    this.shouldScrollOutput = true;
+
+    this.xterm.write(`\x1b[36m${this.toTerminalText(data)}\x1b[0m`);
+    this.xterm.scrollToBottom();
   }
 
   private isCurrentSession(sessionId: string): boolean {
     return this.activeSessionId === null || this.activeSessionId === sessionId;
+  }
+
+  private writeOutput(event: TerminalOutputEvent): void {
+    if (!this.xterm) {
+      return;
+    }
+
+    const data = this.toTerminalText(event.data);
+    if (event.stream === 'stderr') {
+      this.xterm.write(`\x1b[31m${data}\x1b[0m`);
+    } else if (event.stream === 'system') {
+      this.xterm.write(`\x1b[36m${data}\x1b[0m`);
+    } else {
+      this.xterm.write(data);
+    }
+    this.xterm.scrollToBottom();
+  }
+
+  private toTerminalText(data: string): string {
+    return data.replace(/\r?\n/g, '\r\n');
+  }
+
+  private scheduleTerminalResize(): void {
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+    }
+
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = null;
+      this.resizeXtermToContainer();
+      void this.syncBackendResize();
+    }, 100);
+  }
+
+  private resizeXtermToContainer(): void {
+    if (!this.xterm || !this.terminalHost) {
+      return;
+    }
+
+    const element = this.terminalHost.nativeElement;
+    const width = element.clientWidth || 850;
+    const height = element.clientHeight || 430;
+    const cols = Math.max(40, Math.floor((width - 24) / 8.4));
+    const rows = Math.max(12, Math.floor((height - 24) / 15.8));
+
+    this.xterm.resize(cols, rows);
+    this.terminalSizeLabel = `${cols} x ${rows}`;
+  }
+
+  private async syncBackendResize(): Promise<void> {
+    const api = getSwitchboardApi();
+    const sessionId = this.activeSessionId;
+    const terminal = this.xterm;
+    if (!api || !sessionId || !terminal) {
+      return;
+    }
+
+    await api.terminal.resize(sessionId, terminal.cols, terminal.rows).catch(() => undefined);
   }
 }
