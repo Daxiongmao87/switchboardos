@@ -115,7 +115,7 @@ contextBridge.exposeInMainWorld('sb', {
   },
 
   // --- Event Listening (one-way, main → renderer) ---
-  on: (channel: string, callback: (...args: unknown[]) => void): void => {
+  on: (channel: string, callback: (...args: unknown[]) => void): (() => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
       callback(...args);
     ipcRenderer.on(channel, subscription);

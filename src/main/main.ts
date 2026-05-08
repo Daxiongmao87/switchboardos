@@ -14,11 +14,10 @@
  */
 
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
+import crypto from 'crypto';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+
 
 // Track window state for multi-window support
 let mainWindow: BrowserWindow | null = null;
@@ -49,7 +48,7 @@ function createWindow(): void {
     titleBarStyle: 'hidden',
     backgroundColor: '#1e1e2e',
     webPreferences: {
-      preload: join(__dirname, 'dist-electron', 'preload.js'),
+      preload: join(__dirname, '..', 'src', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -128,10 +127,17 @@ ipcMain.handle('window:get-bounds', () => {
 ipcMain.handle(
   'dialog:open-file',
   async (_event, options?: Electron.OpenDialogOptions) => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      properties: ['openFile', ...((options?.properties as string[]) || [])],
-      ...options,
-    });
+    const props = options?.properties || [];
+    const dialogOptions: Record<string, unknown> = {
+      properties: ['openFile', ...(props as unknown as string[])],
+      title: options?.title,
+      defaultPath: options?.defaultPath,
+      buttonLabel: options?.buttonLabel,
+      filters: options?.filters,
+      securityScopedBookmarks: options?.securityScopedBookmarks,
+      message: options?.message,
+    };
+    const result = await dialog.showOpenDialog(mainWindow!, dialogOptions as Electron.OpenDialogOptions);
     return result;
   }
 );
@@ -139,10 +145,17 @@ ipcMain.handle(
 ipcMain.handle(
   'dialog:open-directory',
   async (_event, options?: Electron.OpenDialogOptions) => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      properties: ['openDirectory', ...((options?.properties as string[]) || [])],
-      ...options,
-    });
+    const props = options?.properties || [];
+    const dialogOptions: Record<string, unknown> = {
+      properties: ['openDirectory', ...(props as unknown as string[])],
+      title: options?.title,
+      defaultPath: options?.defaultPath,
+      buttonLabel: options?.buttonLabel,
+      filters: options?.filters,
+      securityScopedBookmarks: options?.securityScopedBookmarks,
+      message: options?.message,
+    };
+    const result = await dialog.showOpenDialog(mainWindow!, dialogOptions as Electron.OpenDialogOptions);
     return result;
   }
 );
@@ -180,7 +193,7 @@ ipcMain.handle(
   'host:create',
   async (_event, hostData: Record<string, unknown>): Promise<string> => {
     // TODO: Insert into SQLite
-    return hostData.id ?? crypto.randomUUID();
+    return (hostData.id as string) ?? crypto.randomUUID();
   }
 );
 
@@ -273,7 +286,7 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
-});
+}).catch(() => { /* ignore */ });
 
 // Quit when all windows are closed (except on macOS)
 app.on('window-all-closed', () => {

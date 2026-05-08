@@ -178,7 +178,7 @@ export class SettingsService {
    * Set a preference by key.
    */
   setPreference(key: keyof UserPreferences, value: unknown): void {
-    (this.preferences as Record<string, unknown>)[key] = value;
+    (this.preferences as unknown as Record<string, unknown>)[key as string] = value;
     this.persist();
     this.emitChange(key);
   }

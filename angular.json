@@ -58,6 +58,7 @@
           "builder": "@angular-devkit/build-angular:karma",
           "options": {
             "tsConfig": "src/renderer/tsconfig.spec.json",
+            "karmaConfig": "karma.conf.js",
             "polyfills": ["zone.js", "zone.js/testing"]
           }
         }
