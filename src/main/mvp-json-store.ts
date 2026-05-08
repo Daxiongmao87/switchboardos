@@ -157,6 +157,7 @@ function normalizeHost(value: unknown): HostRecord | null {
     port: numberValue(value.port, DEFAULT_SETTINGS.sshDefaults.port),
     username: stringValue(value.username, DEFAULT_SETTINGS.sshDefaults.username),
     authMode: authModeValue(value.authMode, DEFAULT_SETTINGS.sshDefaults.authMode),
+    keyPath: stringValue(value.keyPath, '') || undefined,
     tags: stringArrayValue(value.tags),
     notes: stringValue(value.notes, ''),
     lastConnectionStatus: connectionStatusValue(value.lastConnectionStatus, 'untested'),
@@ -256,6 +257,7 @@ export class MvpJsonStore {
       port: numberValue(input.port, state.settings.sshDefaults.port),
       username: stringValue(input.username, state.settings.sshDefaults.username),
       authMode: authModeValue(input.authMode, state.settings.sshDefaults.authMode),
+      keyPath: stringValue(input.keyPath, '').trim() || undefined,
       tags: stringArrayValue(input.tags),
       notes: stringValue(input.notes, ''),
       lastConnectionStatus: 'untested',
@@ -286,6 +288,9 @@ export class MvpJsonStore {
       port: numberValue(input.port, current.port),
       username: stringValue(input.username, current.username),
       authMode: authModeValue(input.authMode, current.authMode),
+      keyPath: input.keyPath === undefined
+        ? current.keyPath
+        : stringValue(input.keyPath, '').trim() || undefined,
       tags: input.tags === undefined ? current.tags : stringArrayValue(input.tags),
       notes: stringValue(input.notes, current.notes),
       updatedAt: new Date().toISOString(),

@@ -42,6 +42,8 @@ function assertSchemaTables(dir) {
     for (const table of ['audit_events', 'hosts', 'meta', 'settings']) {
       assert(`schema has ${table}`, rows.includes(table), JSON.stringify(rows));
     }
+    const hostColumns = db.pragma('table_info(hosts)').map((row) => row.name);
+    assert('hosts schema has key_path', hostColumns.includes('key_path'), JSON.stringify(hostColumns));
   } finally {
     db.close();
   }
@@ -67,14 +69,16 @@ async function caseCrudPersistenceAndFailureProbe() {
       hostname: '127.0.0.1',
       port: 2222,
       username: 'agent',
-      authMode: 'agent',
+      authMode: 'key',
+      keyPath: '/tmp/switchboardos-smoke-key',
       tags: ['local', 'smoke'],
       notes: 'created by smoke',
     });
 
     assert('host id assigned', typeof host.id === 'string' && host.id.length > 0);
     assertEqual('created host listed', store.listHosts().length, 1);
-    assertEqual('created host auth mode', store.getHost(host.id).authMode, 'agent');
+    assertEqual('created host auth mode', store.getHost(host.id).authMode, 'key');
+    assertEqual('created host key path reference', store.getHost(host.id).keyPath, '/tmp/switchboardos-smoke-key');
 
     const updated = store.updateHost(host.id, {
       name: 'Local updated',
@@ -83,6 +87,7 @@ async function caseCrudPersistenceAndFailureProbe() {
     });
     assertEqual('updated host returned', updated && updated.name, 'Local updated');
     assertEqual('updated host tags persisted in memory', store.getHost(host.id).tags.join(','), 'updated');
+    assertEqual('updated host preserves key path reference', store.getHost(host.id).keyPath, '/tmp/switchboardos-smoke-key');
 
     const settings = store.updateSettings({
       theme: 'light',
@@ -138,6 +143,7 @@ async function caseJsonMigration() {
       port: 2200,
       username: 'json-user',
       authMode: 'key',
+      keyPath: '~/.ssh/json_id_ed25519',
       tags: ['json'],
       notes: 'from json',
       lastConnectionStatus: 'success',
@@ -191,6 +197,7 @@ async function caseJsonMigration() {
     try {
       assertEqual('migrated host count', store.listHosts().length, 1);
       assertEqual('migrated host preserved', store.getHost(migratedHost.id).name, 'JSON host');
+      assertEqual('migrated host key path preserved', store.getHost(migratedHost.id).keyPath, '~/.ssh/json_id_ed25519');
       assertEqual('migrated settings preserved', store.getSettings().sshDefaults.username, 'json-default');
       assertEqual('migrated audit count', store.listAuditEvents().length, 1);
       assert('json file not deleted', existsSync(jsonPath));

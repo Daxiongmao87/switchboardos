@@ -153,6 +153,7 @@ function normalizeHost(value: unknown): HostRecord | null {
     port: numberValue(value.port, DEFAULT_SETTINGS.sshDefaults.port),
     username: stringValue(value.username, DEFAULT_SETTINGS.sshDefaults.username),
     authMode: authModeValue(value.authMode, DEFAULT_SETTINGS.sshDefaults.authMode),
+    keyPath: stringValue(value.keyPath, '') || undefined,
     tags: stringArrayValue(value.tags),
     notes: stringValue(value.notes, ''),
     lastConnectionStatus: connectionStatusValue(value.lastConnectionStatus, 'untested'),
@@ -231,6 +232,7 @@ function rowToHost(row: Record<string, unknown>): HostRecord {
     port: numberValue(row.port, 22),
     username: stringValue(row.username, ''),
     authMode: authModeValue(row.auth_mode, 'placeholder'),
+    keyPath: stringValue(row.key_path, '') || undefined,
     tags: stringArrayValue(JSON.parse(stringValue(row.tags, '[]'))),
     notes: stringValue(row.notes, ''),
     lastConnectionStatus: connectionStatusValue(row.last_connection_status, 'untested'),
@@ -318,6 +320,7 @@ export class MvpSqliteStore {
       port: numberValue(input.port, this.getSettings().sshDefaults.port),
       username: stringValue(input.username, this.getSettings().sshDefaults.username),
       authMode: authModeValue(input.authMode, this.getSettings().sshDefaults.authMode),
+      keyPath: stringValue(input.keyPath, '').trim() || undefined,
       tags: stringArrayValue(input.tags),
       notes: stringValue(input.notes, ''),
       lastConnectionStatus: 'untested',
@@ -328,8 +331,8 @@ export class MvpSqliteStore {
 
     this.db!
       .prepare(
-        `INSERT INTO hosts (id, name, address, hostname, port, username, auth_mode, tags, notes, last_connection_status, last_checked_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO hosts (id, name, address, hostname, port, username, auth_mode, key_path, tags, notes, last_connection_status, last_checked_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         host.id,
@@ -339,6 +342,7 @@ export class MvpSqliteStore {
         host.port,
         host.username,
         host.authMode,
+        host.keyPath ?? '',
         JSON.stringify(host.tags),
         host.notes,
         host.lastConnectionStatus,
@@ -366,6 +370,9 @@ export class MvpSqliteStore {
       port: numberValue(input.port, existing.port),
       username: stringValue(input.username, existing.username),
       authMode: authModeValue(input.authMode, existing.authMode),
+      keyPath: input.keyPath === undefined
+        ? existing.keyPath
+        : stringValue(input.keyPath, '').trim() || undefined,
       tags: input.tags === undefined ? existing.tags : stringArrayValue(input.tags),
       notes: stringValue(input.notes, existing.notes),
       updatedAt: new Date().toISOString(),
@@ -380,6 +387,7 @@ export class MvpSqliteStore {
           port = ?,
           username = ?,
           auth_mode = ?,
+          key_path = ?,
           tags = ?,
           notes = ?,
           updated_at = ?
@@ -392,6 +400,7 @@ export class MvpSqliteStore {
         updated.port,
         updated.username,
         updated.authMode,
+        updated.keyPath ?? '',
         JSON.stringify(updated.tags),
         updated.notes,
         updated.updatedAt,
@@ -611,6 +620,7 @@ export class MvpSqliteStore {
         port INTEGER NOT NULL DEFAULT 22,
         username TEXT NOT NULL DEFAULT '',
         auth_mode TEXT NOT NULL DEFAULT 'placeholder',
+        key_path TEXT NOT NULL DEFAULT '',
         tags TEXT NOT NULL DEFAULT '[]',
         notes TEXT NOT NULL DEFAULT '',
         last_connection_status TEXT NOT NULL DEFAULT 'untested',
@@ -640,9 +650,14 @@ export class MvpSqliteStore {
       CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_type, entity_id);
     `);
+
+    if (!this.columnExists('hosts', 'key_path')) {
+      this.db!.exec("ALTER TABLE hosts ADD COLUMN key_path TEXT NOT NULL DEFAULT ''");
+    }
+
     this.db!
       .prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)')
-      .run('schema_version', '1');
+      .run('schema_version', '2');
   }
 
   private seedDefaults(): void {
@@ -672,8 +687,8 @@ export class MvpSqliteStore {
     const state = normalizeState(parsed);
 
     const insertHost = this.db!.prepare(
-      `INSERT INTO hosts (id, name, address, hostname, port, username, auth_mode, tags, notes, last_connection_status, last_checked_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO hosts (id, name, address, hostname, port, username, auth_mode, key_path, tags, notes, last_connection_status, last_checked_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO NOTHING`,
     );
 
@@ -703,6 +718,7 @@ export class MvpSqliteStore {
           host.port,
           host.username,
           host.authMode,
+          host.keyPath ?? '',
           JSON.stringify(host.tags),
           host.notes,
           host.lastConnectionStatus,
@@ -733,5 +749,10 @@ export class MvpSqliteStore {
     });
 
     migrate();
+  }
+
+  private columnExists(tableName: string, columnName: string): boolean {
+    const rows = this.db!.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    return rows.some((row) => row.name === columnName);
   }
 }

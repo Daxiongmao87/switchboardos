@@ -47,6 +47,10 @@ export function buildSshCommand(host: HostRecord): TerminalCommand {
   const address = host.address || host.hostname;
   const target = host.username ? `${host.username}@${address}` : address;
   const port = String(host.port);
+  const keyPath = host.authMode === 'key' ? host.keyPath?.trim() : '';
+  const keyArgs = keyPath
+    ? ['-i', keyPath, '-o', 'IdentitiesOnly=yes']
+    : [];
 
   return {
     command: 'ssh',
@@ -61,6 +65,7 @@ export function buildSshCommand(host: HostRecord): TerminalCommand {
       'ConnectTimeout=10',
       '-p',
       port,
+      ...keyArgs,
       target,
     ],
     env: {

@@ -10,6 +10,7 @@ export interface HostRecord {
   port: number;
   username: string;
   authMode: HostAuthMode;
+  keyPath?: string;
   tags: string[];
   notes: string;
   lastConnectionStatus: HostConnectionStatus;
@@ -67,7 +68,7 @@ export interface MvpStoreState {
 }
 
 export type CreateHostInput = Partial<
-  Pick<HostRecord, 'name' | 'address' | 'hostname' | 'port' | 'username' | 'authMode' | 'tags' | 'notes'>
+  Pick<HostRecord, 'name' | 'address' | 'hostname' | 'port' | 'username' | 'authMode' | 'keyPath' | 'tags' | 'notes'>
 >;
 
 export type UpdateHostInput = Partial<CreateHostInput>;

@@ -16,6 +16,7 @@ interface HostFormModel {
   port: number;
   username: string;
   authMode: HostAuthMode;
+  keyPath: string;
   tags: string;
   notes: string;
 }
@@ -42,6 +43,7 @@ function createEmptyForm(): HostFormModel {
     port: 22,
     username: '',
     authMode: 'placeholder',
+    keyPath: '',
     tags: '',
     notes: '',
   };
@@ -118,6 +120,7 @@ function createEmptyForm(): HostFormModel {
                   <span>{{ host.username || 'No user' }}</span>
                   <span>Port {{ host.port }}</span>
                   <span>{{ authLabel(host.authMode) }}</span>
+                  <span *ngIf="host.keyPath">Key ref {{ host.keyPath }}</span>
                 </div>
                 <div *ngIf="host.tags.length > 0" class="tag-list" aria-label="Host tags">
                   <span *ngFor="let tag of host.tags">{{ tag }}</span>
@@ -204,6 +207,7 @@ function createEmptyForm(): HostFormModel {
                     {{ mode.label }}
                   </option>
                 </select>
+                <span class="field-help">{{ authModeHelp }}</span>
               </label>
             </div>
             <label>
@@ -214,6 +218,17 @@ function createEmptyForm(): HostFormModel {
                 autocomplete="username"
                 [(ngModel)]="form.username"
               />
+            </label>
+            <label>
+              SSH key path/reference
+              <input
+                name="keyPath"
+                type="text"
+                autocomplete="off"
+                placeholder="~/.ssh/id_ed25519"
+                [(ngModel)]="form.keyPath"
+              />
+              <span class="field-help">Stores only a local path/reference, never key contents or passphrases.</span>
             </label>
             <label>
               Tags
@@ -495,6 +510,12 @@ function createEmptyForm(): HostFormModel {
       gap: 5px;
     }
 
+    .field-help {
+      color: #94a3b8;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
     input,
     select,
     textarea {
@@ -557,7 +578,7 @@ export class HostsComponent implements OnInit {
 
   readonly authModes: Array<{ value: HostAuthMode; label: string }> = [
     { value: 'placeholder', label: 'Placeholder' },
-    { value: 'password', label: 'Password' },
+    { value: 'password', label: 'Password (not stored)' },
     { value: 'key', label: 'SSH key' },
     { value: 'agent', label: 'Agent' },
   ];
@@ -579,6 +600,7 @@ export class HostsComponent implements OnInit {
         host.hostname,
         host.username,
         host.authMode,
+        host.keyPath ?? '',
         host.notes,
         ...host.tags,
       ];
@@ -632,6 +654,7 @@ export class HostsComponent implements OnInit {
       port: host.port,
       username: host.username,
       authMode: host.authMode,
+      keyPath: host.keyPath ?? '',
       tags: host.tags.join(', '),
       notes: host.notes,
     };
@@ -753,6 +776,19 @@ export class HostsComponent implements OnInit {
     return this.authModes.find((item) => item.value === mode)?.label ?? mode;
   }
 
+  get authModeHelp(): string {
+    switch (this.form.authMode) {
+      case 'key':
+        return 'Terminal uses the key path/reference with system ssh; key contents are not stored.';
+      case 'agent':
+        return 'Terminal relies on your existing ssh-agent or default ssh configuration.';
+      case 'password':
+        return 'Passwords are not stored or used by the MVP terminal because BatchMode disables prompts.';
+      default:
+        return 'No credential material is stored in the host profile.';
+    }
+  }
+
   formatDate(value: string): string {
     return new Date(value).toLocaleString();
   }
@@ -767,6 +803,7 @@ export class HostsComponent implements OnInit {
       port: Number(this.form.port),
       username: this.form.username.trim(),
       authMode: this.form.authMode,
+      keyPath: this.form.keyPath.trim(),
       tags: this.parseTags(this.form.tags),
       notes: this.form.notes.trim(),
     };
