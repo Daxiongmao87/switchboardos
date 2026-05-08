@@ -140,3 +140,29 @@ export interface TerminalStatusEvent {
   message: string;
   createdAt: string;
 }
+
+export type BootstrapPresetId = 'debian-ubuntu' | 'generic-posix';
+
+export interface BootstrapPreset {
+  id: BootstrapPresetId;
+  name: string;
+  description: string;
+}
+
+export interface BootstrapGenerateOptions {
+  installPackages?: boolean;
+  includeDockerCheck?: boolean;
+}
+
+export interface BootstrapGenerateInput {
+  presetId: BootstrapPresetId;
+  hostId?: string | null;
+  options?: BootstrapGenerateOptions;
+}
+
+export interface BootstrapGenerateResult {
+  preset: BootstrapPreset;
+  hostId: string | null;
+  script: string;
+  generatedAt: string;
+}

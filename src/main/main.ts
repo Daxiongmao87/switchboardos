@@ -17,7 +17,9 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { join } from 'path';
 import { MvpSqliteStore } from './mvp-sqlite-store';
 import { TerminalSessionManager, type TerminalEventSender } from './terminal-session-manager';
+import { generateBootstrapScript, listBootstrapPresets } from './bootstrap-generator';
 import type {
+  BootstrapGenerateInput,
   CreateAuditEventInput,
   CreateHostInput,
   MvpSettingsUpdate,
@@ -40,6 +42,7 @@ const terminalSessions = new TerminalSessionManager(
   sendTerminalEvent,
   (event) => mvpStore.logAuditEvent(event),
 );
+let hasRunExitCleanup = false;
 
 const DEV_SERVER_URL = process.env.SWITCHBOARDOS_DEV_SERVER_URL;
 const SHOULD_OPEN_DEVTOOLS =
@@ -335,6 +338,37 @@ ipcMain.handle(
   }
 );
 
+// Bootstrap generator
+ipcMain.handle(
+  'bootstrap:presets',
+  async () => {
+    return listBootstrapPresets();
+  }
+);
+
+ipcMain.handle(
+  'bootstrap:generate',
+  async (_event, input: BootstrapGenerateInput) => {
+    const hostId = input.hostId ?? null;
+    const host = hostId ? mvpStore.getHost(hostId) : null;
+    const result = generateBootstrapScript(input, host);
+    mvpStore.logAuditEvent({
+      type: 'bootstrap.generated',
+      entityType: host ? 'host' : 'bootstrap',
+      entityId: host?.id ?? null,
+      message: `Generated ${result.preset.name} bootstrap script${host ? ` for ${host.name}` : ''}.`,
+      metadata: {
+        presetId: result.preset.id,
+        hostId: host?.id ?? null,
+        installPackages: input.options?.installPackages ?? true,
+        includeDockerCheck: input.options?.includeDockerCheck ?? false,
+        executesRemotely: false,
+      },
+    });
+    return result;
+  }
+);
+
 // ============================================================
 // App Lifecycle
 // ============================================================
@@ -371,16 +405,24 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Graceful shutdown
-app.on('will-quit', () => {
-  // Clean up resources, close DB connections, etc.
-  terminalSessions.stopAll('Application is shutting down.');
+function cleanupForExit(message: string): void {
+  if (hasRunExitCleanup) {
+    return;
+  }
+
+  hasRunExitCleanup = true;
+  terminalSessions.stopAll(message);
   mvpStore.close();
   console.log('SwitchboardOS shutting down...');
+}
+
+// Graceful shutdown
+app.on('will-quit', () => {
+  cleanupForExit('Application is shutting down.');
 });
 
 function exitFromProcessSignal(): void {
-  terminalSessions.stopAll('Application received a shutdown signal.');
+  cleanupForExit('Application received a shutdown signal.');
 
   if (app.isReady()) {
     BrowserWindow.getAllWindows().forEach((window) => {
@@ -388,7 +430,9 @@ function exitFromProcessSignal(): void {
     });
   }
 
-  app.exit(0);
+  setImmediate(() => {
+    process.exit(0);
+  });
 }
 
 process.once('SIGTERM', exitFromProcessSignal);

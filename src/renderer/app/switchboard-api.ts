@@ -1,5 +1,8 @@
 import type {
   AuditEvent,
+  BootstrapGenerateInput,
+  BootstrapGenerateResult,
+  BootstrapPreset,
   ConnectionTestResult,
   CreateAuditEventInput,
   CreateHostInput,
@@ -53,6 +56,10 @@ export interface SwitchboardApi {
     onOutput: (callback: (event: TerminalOutputEvent) => void) => () => void;
     onStatus: (callback: (event: TerminalStatusEvent) => void) => () => void;
     onExit: (callback: (event: TerminalExitEvent) => void) => () => void;
+  };
+  bootstrap: {
+    presets: () => Promise<BootstrapPreset[]>;
+    generate: (input: BootstrapGenerateInput) => Promise<BootstrapGenerateResult>;
   };
 }
 

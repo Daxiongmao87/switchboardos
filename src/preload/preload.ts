@@ -14,6 +14,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AuditEvent,
+  BootstrapGenerateInput,
+  BootstrapGenerateResult,
+  BootstrapPreset,
   ConnectionTestResult,
   CreateAuditEventInput,
   CreateHostInput,
@@ -160,6 +163,14 @@ contextBridge.exposeInMainWorld('sb', {
       subscribe('terminal:exit', callback),
   },
 
+  // --- Bootstrap Generator ---
+  bootstrap: {
+    presets: (): Promise<BootstrapPreset[]> =>
+      invoke('bootstrap:presets'),
+    generate: (input: BootstrapGenerateInput): Promise<BootstrapGenerateResult> =>
+      invoke('bootstrap:generate', input),
+  },
+
   // --- Event Listening (one-way, main → renderer) ---
   on: (channel: string, callback: (...args: unknown[]) => void): (() => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
@@ -222,6 +233,10 @@ declare global {
         onOutput: (callback: (event: TerminalOutputEvent) => void) => () => void;
         onStatus: (callback: (event: TerminalStatusEvent) => void) => () => void;
         onExit: (callback: (event: TerminalExitEvent) => void) => () => void;
+      };
+      bootstrap: {
+        presets: () => Promise<BootstrapPreset[]>;
+        generate: (input: BootstrapGenerateInput) => Promise<BootstrapGenerateResult>;
       };
       on: (channel: string, callback: (...args: unknown[]) => void) => () => void;
       removeAllListeners: (channel: string) => void;

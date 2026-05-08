@@ -5,6 +5,7 @@ import { RouterModule, Routes } from '@angular/router';
 import { AppComponent } from './app.component';
 import { AgentsComponent } from './agents/agents.component';
 import { AuditComponent } from './audit/audit.component';
+import { BootstrapComponent } from './bootstrap/bootstrap.component';
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { HostDetailComponent } from './host-detail/host-detail.component';
 import { HostsComponent } from './hosts/hosts.component';
@@ -16,6 +17,7 @@ const routes: Routes = [
   { path: 'hosts', component: HostsComponent },
   { path: 'hosts/:hostId', component: HostDetailComponent },
   { path: 'terminal', component: TerminalComponent },
+  { path: 'bootstrap', component: BootstrapComponent },
   { path: 'agents', component: AgentsComponent },
   { path: 'audit', component: AuditComponent },
   { path: 'settings', component: SettingsComponent },
@@ -28,6 +30,7 @@ const routes: Routes = [
     AppComponent,
     AgentsComponent,
     AuditComponent,
+    BootstrapComponent,
     DashboardComponent,
     HostDetailComponent,
     HostsComponent,

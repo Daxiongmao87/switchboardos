@@ -34,6 +34,7 @@ export class AppComponent implements OnInit {
     { label: 'Dashboard', path: '/dashboard', detail: 'Overview' },
     { label: 'Hosts', path: '/hosts', detail: 'Inventory' },
     { label: 'Terminal', path: '/terminal', detail: 'SSH session' },
+    { label: 'Bootstrap', path: '/bootstrap', detail: 'Script generator' },
     { label: 'Agents', path: '/agents', detail: 'Operator policy' },
     { label: 'Audit', path: '/audit', detail: 'Local history' },
     { label: 'Settings', path: '/settings', detail: 'Defaults' },
