@@ -15,7 +15,7 @@
 
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { join } from 'path';
-import { MvpJsonStore } from './mvp-json-store';
+import { MvpSqliteStore } from './mvp-sqlite-store';
 import { TerminalSessionManager, type TerminalEventSender } from './terminal-session-manager';
 import type {
   CreateAuditEventInput,
@@ -29,7 +29,7 @@ app.commandLine.appendSwitch('disable-gpu');
 
 // Track window state for multi-window support
 let mainWindow: BrowserWindow | null = null;
-const mvpStore = new MvpJsonStore(() => app.getPath('userData'));
+const mvpStore = new MvpSqliteStore(() => app.getPath('userData'));
 const sendTerminalEvent: TerminalEventSender = (event) => {
   BrowserWindow.getAllWindows().forEach((window) => {
     window.webContents.send(event.channel, event.payload);
@@ -375,6 +375,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   // Clean up resources, close DB connections, etc.
   terminalSessions.stopAll('Application is shutting down.');
+  mvpStore.close();
   console.log('SwitchboardOS shutting down...');
 });
 
