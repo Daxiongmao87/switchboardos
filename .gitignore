@@ -38,3 +38,12 @@ coverage/
 
 # Aion team files
 .aionrs/
+
+# Local agent/tool state
+.claude/
+.codex/
+.gemini/
+.kimi/
+
+# Scratch test package
+test-project/

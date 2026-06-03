@@ -1,56 +1,684 @@
-<div class="app-frame">
-  <header class="titlebar">
-    <div class="titlebar-content">
-      <span class="titlebar-title">{{ title }}</span>
-      <span class="titlebar-context">Local-first operations shell</span>
-    </div>
-    <div class="titlebar-controls">
-      <button class="titlebar-btn" (click)="minimize()" title="Minimize" aria-label="Minimize">
-        -
-      </button>
-      <button class="titlebar-btn" (click)="maximize()" title="Maximize" aria-label="Maximize">
-        []
-      </button>
-      <button class="titlebar-btn titlebar-btn-close" (click)="close()" title="Close" aria-label="Close">
-        x
-      </button>
-    </div>
-  </header>
+<div
+  class="app-frame"
+  data-testid="desktop-shell"
+  [attr.data-active-profile-id]="activeProfileId"
+  [attr.data-active-profile-name]="activeProfileName"
+  [attr.data-desktop-wallpaper]="desktopWallpaper"
+  [attr.data-desktop-wallpaper-layout]="desktopWallpaperLayout"
+>
+  <main
+    class="desktop-surface"
+    aria-label="SwitchboardOS desktop workspace"
+    (mousedown)="blurWorkspace($event)"
+    (contextmenu)="openDesktopContextMenu($event)"
+  >
+    <section class="desktop-icons" aria-label="Editable desktop icons" data-testid="desktop-icons">
+      <div
+        *ngFor="let app of desktopShortcutApps; let shortcutIndex = index; trackBy: trackApp"
+        class="desktop-icon-frame"
+        [class.is-selected]="selectedShortcutId === app.appId"
+        [ngStyle]="desktopIconStyle(app.appId, shortcutIndex)"
+        (mousedown)="startDesktopIconDrag($event, app.appId, shortcutIndex)"
+        (contextmenu)="openDesktopIconContextMenu($event, app.appId)"
+      >
+        <button
+          class="desktop-icon"
+          type="button"
+          (click)="selectShortcut(app.appId)"
+          (dblclick)="openApp(app.appId)"
+          (keydown.enter)="openApp(app.appId)"
+          [title]="app.title + ': ' + app.detail"
+        >
+          <span class="desktop-icon-glyph">{{ app.icon }}</span>
+          <span class="desktop-icon-label">{{ app.title }}</span>
+        </button>
+      </div>
+    </section>
 
-  <div class="shell-body">
-    <aside class="sidebar" aria-label="Primary navigation">
-      <div class="sidebar-header">
-        <span class="workspace-label">Workspace</span>
-        <span class="workspace-name">Local MVP</span>
+    <section *ngIf="desktopShortcutIds.length === 0" class="desktop-empty" aria-label="Empty desktop">
+      <span>No desktop shortcuts</span>
+      <button type="button" (click)="toggleLauncher()">Open launcher</button>
+    </section>
+
+    <section *ngIf="firstRunOpen" class="first-run-panel" aria-label="First run setup" data-testid="first-run-panel">
+      <header>
+        <div>
+          <h2>Welcome to SwitchboardOS</h2>
+          <span>Start menu, right-click actions, and app launcher basics for first use.</span>
+        </div>
+        <button type="button" class="mini-button" (click)="dismissFirstRun()">Dismiss</button>
+      </header>
+      <p>
+        Use the Start menu to open core apps, then use right-click context menus for desktop actions. File Explorer is your workspace root; Recycle Bin stores removed workspace items.
+      </p>
+      <p>
+        Open Hosts to add SSH targets and set up your first host; Settings controls themes, wallpaper, and policy basics. Advanced tools such as host operations, Operator, bootstrap, and developer tools are available once those surfaces are needed.
+      </p>
+      <div class="first-run-actions">
+        <button type="button" class="mini-button" (click)="startFirstRunStep('hosts')">Add host</button>
+        <button type="button" class="mini-button" (click)="startFirstRunStep('workspace-files')">File Explorer</button>
+        <button type="button" class="mini-button" (click)="startFirstRunStep('settings')">Settings</button>
+        <button type="button" class="mini-button" (click)="startFirstRunStep('apps')">App Manager</button>
+        <button type="button" class="mini-button" (click)="launcherOpen = true; firstRunOpen = false">Start menu</button>
+      </div>
+    </section>
+
+    <section *ngIf="hostLauncherOpen" class="host-launcher" aria-label="Host launcher" data-testid="host-launcher">
+      <header>
+        <div>
+          <h2>Host launcher</h2>
+          <span>{{ hosts.length }} hosts</span>
+        </div>
+        <button type="button" class="mini-button" (click)="loadWorkspaceContext()" [disabled]="isLoadingHosts">
+          Refresh
+        </button>
+      </header>
+      <div *ngIf="isLoadingHosts" class="launcher-empty">Loading hosts from local store.</div>
+      <div *ngIf="!isLoadingHosts && hosts.length === 0" class="launcher-empty">
+        No host profiles yet. Open Hosts to add one.
+      </div>
+      <article *ngFor="let host of hosts; trackBy: trackHost" class="host-row">
+        <div class="host-row-main">
+          <strong>{{ host.name }}</strong>
+          <span>{{ host.username || 'user' }}&#64;{{ host.address || host.hostname }}:{{ host.port }}</span>
+          <span>{{ host.lastConnectionStatus }} / {{ hostCredentialSummary(host) }}</span>
+          <span>OS {{ statusText(host.osHint) }} / bootstrap {{ host.bootstrapStatus || 'unknown' }}</span>
+        </div>
+        <div class="host-row-actions">
+          <button type="button" class="mini-button" (click)="openHostDashboard(host)">Dashboard</button>
+          <button type="button" class="mini-button" (click)="openHostTerminal(host)">Terminal</button>
+          <button type="button" class="mini-button" (click)="openHostOperation(host, 'file-browser')">Files</button>
+          <button type="button" class="mini-button" (click)="openHostOperation(host, 'log-viewer')">Logs</button>
+          <button type="button" class="mini-button" (click)="openHostOperation(host, 'service-manager')">Services</button>
+          <button type="button" class="mini-button" (click)="openHostOperation(host, 'process-viewer')">Processes</button>
+        </div>
+      </article>
+    </section>
+
+    <section
+      *ngFor="let shellWindow of visibleWindows; trackBy: trackWindow"
+      class="desktop-window"
+      [class.is-focused]="shellWindow.focused"
+      [class.is-tiled]="shellWindow.state === 'tiled'"
+      [class.is-maximized]="shellWindow.state === 'maximized' || shellWindow.state === 'fullscreen'"
+      [ngStyle]="windowStyle(shellWindow)"
+      [attr.data-window-id]="shellWindow.windowId"
+      [attr.data-app-id]="shellWindow.appId"
+      [attr.data-host-id]="shellWindow.hostId"
+      [attr.aria-label]="shellWindow.title + ' shell window'"
+      (mousedown)="focusWindow(shellWindow)"
+    >
+      <header
+        class="window-chrome"
+        (mousedown)="startDrag($event, shellWindow)"
+        (contextmenu)="openWindowContextMenu($event, shellWindow)"
+      >
+        <div class="window-title-group">
+          <span class="window-icon">{{ shellWindow.appDefinition.icon }}</span>
+          <span class="window-title">{{ shellWindow.title }}</span>
+        </div>
+        <div class="window-controls">
+          <button class="window-btn window-btn-minimize" type="button" (click)="minimizeWindow(shellWindow)" title="Minimize" aria-label="Minimize window">
+            <span class="window-control-icon window-control-minimize" aria-hidden="true"></span>
+          </button>
+          <button class="window-btn window-btn-maximize" type="button" (click)="toggleMaximize(shellWindow)" title="Maximize or restore" aria-label="Maximize or restore window">
+            <span class="window-control-icon window-control-maximize" aria-hidden="true"></span>
+          </button>
+          <button class="window-btn window-btn-close" type="button" (click)="closeWindow(shellWindow)" title="Close" aria-label="Close window">
+            <span class="window-control-icon window-control-close" aria-hidden="true"></span>
+          </button>
+        </div>
+      </header>
+
+      <div class="window-body">
+        <ng-container [ngSwitch]="shellWindow.appId">
+          <section *ngSwitchCase="'terminal'" class="generic-terminal-window">
+            <ng-container *ngComponentOutlet="terminalComponent; inputs: terminalInputs(shellWindow)"></ng-container>
+          </section>
+
+          <section *ngSwitchCase="'workspace-files'" class="workspace-files-window">
+            <header class="workspace-files-header">
+              <div>
+                <h2>File Explorer</h2>
+                <p data-testid="workspace-current-path">{{ workspaceDisplayPath }}</p>
+              </div>
+              <div class="workspace-files-actions">
+                <button type="button" class="mini-button" (click)="createWorkspaceArtifact('folder', workspaceCurrentPath)">New Folder</button>
+                <button type="button" class="mini-button" (click)="createWorkspaceArtifact('applet', workspaceCurrentPath)">New Applet</button>
+                <button type="button" class="mini-button" (click)="createWorkspaceArtifact('scriptlet', workspaceCurrentPath)">New Scriptlet</button>
+              </div>
+            </header>
+            <div class="workspace-file-navigation">
+              <button type="button" class="mini-button" (click)="navigateWorkspaceUp()" [disabled]="!canNavigateWorkspaceUp">Up</button>
+              <button type="button" class="mini-button" (click)="navigateWorkspaceRoot()" [disabled]="!canNavigateWorkspaceUp">Root</button>
+              <div class="workspace-breadcrumbs" aria-label="Workspace path" data-testid="workspace-breadcrumbs">
+                <ng-container *ngFor="let crumb of workspaceBreadcrumbs; let last = last">
+                  <button
+                    type="button"
+                    class="workspace-breadcrumb-button"
+                    [class.is-current]="last"
+                    [disabled]="last"
+                    (click)="navigateWorkspacePath(crumb.path)"
+                  >
+                    {{ crumb.label }}
+                  </button>
+                  <span *ngIf="!last" class="workspace-breadcrumb-separator">/</span>
+                </ng-container>
+              </div>
+            </div>
+            <div class="workspace-file-toolbar" aria-label="Workspace explorer controls">
+              <label class="workspace-file-search">
+                <span>Search</span>
+                <input
+                  type="search"
+                  placeholder="Search name, detail, path"
+                  [(ngModel)]="workspaceArtifactSearchText"
+                />
+              </label>
+              <label class="workspace-file-select">
+                <span>Kind</span>
+                <select [(ngModel)]="workspaceArtifactKindFilter">
+                  <option value="all">All</option>
+                  <option value="folder">Folders</option>
+                  <option value="applet">Applets</option>
+                  <option value="scriptlet">Scriptlets</option>
+                  <option value="note">Notes</option>
+                </select>
+              </label>
+              <label class="workspace-file-select">
+                <span>Sort</span>
+                <select [(ngModel)]="workspaceArtifactSortBy">
+                  <option value="name">Name</option>
+                  <option value="kind">Kind</option>
+                  <option value="modified">Modified</option>
+                  <option value="size">Size</option>
+                </select>
+              </label>
+              <div class="workspace-file-view-controls" role="group" aria-label="File view mode">
+                <button
+                  type="button"
+                  class="mini-button"
+                  [class.workspace-file-view-active]="workspaceArtifactViewMode === 'list'"
+                  (click)="workspaceArtifactViewMode = 'list'"
+                  title="List view"
+                >
+                  List
+                </button>
+                <button
+                  type="button"
+                  class="mini-button"
+                  [class.workspace-file-view-active]="workspaceArtifactViewMode === 'grid'"
+                  (click)="workspaceArtifactViewMode = 'grid'"
+                  title="Grid view"
+                >
+                  Grid
+                </button>
+              </div>
+            </div>
+            <div class="workspace-file-content" [class.has-selection]="selectedWorkspaceArtifact">
+              <div
+                class="workspace-file-list"
+                [class.workspace-file-list-grid]="workspaceArtifactViewMode === 'grid'"
+                data-testid="workspace-file-list"
+              >
+                <p *ngIf="workspaceArtifacts.length === 0" class="workspace-file-empty">No workspace artifacts yet.</p>
+                <p *ngIf="workspaceArtifacts.length > 0 && workspaceArtifactsView.length === 0" class="workspace-file-empty">No artifacts match the current filter.</p>
+                <ng-container *ngIf="workspaceArtifactsView.length > 0">
+                  <article
+                    *ngFor="let artifact of workspaceArtifactsView; trackBy: trackWorkspaceArtifact"
+                    class="workspace-file-item"
+                    [class.workspace-file-row]="workspaceArtifactViewMode === 'list'"
+                    [class.workspace-file-grid-item]="workspaceArtifactViewMode === 'grid'"
+                    tabindex="0"
+                    [class.is-selected]="selectedWorkspaceArtifact?.id === artifact.id"
+                    [attr.aria-selected]="selectedWorkspaceArtifact?.id === artifact.id"
+                    (click)="showWorkspaceArtifactProperties(artifact)"
+                    (dblclick)="openWorkspaceArtifact(artifact)"
+                    (keydown.enter)="openWorkspaceArtifact(artifact)"
+                    (contextmenu)="openWorkspaceArtifactContextMenu($event, artifact)"
+                  >
+                    <span class="workspace-file-icon">{{ workspaceArtifactIcon(artifact) }}</span>
+                    <span class="workspace-file-main">
+                      <strong>{{ artifact.name }}</strong>
+                      <small>{{ artifact.detail }}</small>
+                      <small class="workspace-file-path">{{ workspaceArtifactLocation(artifact) }}</small>
+                    </span>
+                    <time *ngIf="workspaceArtifactViewMode === 'list'">{{ artifact.updatedAt }}</time>
+                    <time *ngIf="workspaceArtifactViewMode === 'grid'" class="workspace-file-meta-line">Updated {{ artifact.updatedAt }}</time>
+                    <div class="workspace-file-meta-line" *ngIf="artifact.size !== undefined">{{ formatWorkspaceArtifactSize(artifact.size) }}</div>
+                    <div class="workspace-file-type" *ngIf="workspaceArtifactViewMode === 'grid'">{{ workspaceArtifactKindLabel(artifact) }}</div>
+                    <div class="workspace-file-actions">
+                      <button type="button" class="mini-button" (click)="$event.stopPropagation(); renameWorkspaceArtifact(artifact)">Rename</button>
+                      <button type="button" class="mini-button workspace-file-danger" (click)="$event.stopPropagation(); deleteWorkspaceArtifact(artifact)">Delete Permanently</button>
+                    </div>
+                  </article>
+                </ng-container>
+              </div>
+              <aside *ngIf="selectedWorkspaceArtifact as selectedArtifact" class="workspace-file-properties" aria-label="Workspace file properties">
+                <header class="workspace-file-properties-header">
+                  <div>
+                    <span class="workspace-file-icon">{{ selectedArtifact.kind === 'folder' ? 'DIR' : selectedArtifact.kind === 'applet' ? 'APP' : selectedArtifact.kind === 'scriptlet' ? 'SH' : 'TXT' }}</span>
+                  </div>
+                  <button type="button" class="window-btn" (click)="selectedWorkspaceArtifact = null" title="Close properties" aria-label="Close properties">
+                    x
+                  </button>
+                </header>
+                <h3>{{ selectedArtifact.name }}</h3>
+                <dl class="workspace-file-properties-list">
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{{ selectedArtifact.name }}</dd>
+                  </div>
+                  <div>
+                    <dt>Kind</dt>
+                    <dd>{{ workspaceArtifactKindLabel(selectedArtifact) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Path</dt>
+                    <dd>{{ workspaceArtifactLocation(selectedArtifact) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Workspace URL</dt>
+                    <dd>{{ workspaceArtifactUrl(selectedArtifact) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Detail</dt>
+                    <dd>{{ selectedArtifact.detail }}</dd>
+                  </div>
+                  <div *ngIf="selectedArtifact.size !== undefined">
+                    <dt>Size</dt>
+                    <dd>{{ formatWorkspaceArtifactSize(selectedArtifact.size) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Updated</dt>
+                    <dd>{{ selectedArtifact.updatedAt }}</dd>
+                  </div>
+                </dl>
+              </aside>
+            </div>
+          </section>
+
+          <section *ngSwitchCase="'trash'" class="trash-window">
+            <header class="workspace-files-header">
+              <div>
+                <h2>Recycle Bin</h2>
+                <p>Deleted workspace items are available for recovery here.</p>
+              </div>
+              <button type="button" class="mini-button" (click)="clearTrash()">Empty Recycle Bin</button>
+            </header>
+            <div class="trash-empty" data-testid="trash-empty">Recycle Bin is empty.</div>
+          </section>
+
+          <section *ngSwitchCase="'host-dashboard'" class="host-dashboard-window">
+            <ng-container *ngIf="hostFor(shellWindow) as host; else missingHost">
+              <header class="host-dashboard-header">
+                <div>
+                  <h2>{{ host.name }}</h2>
+                  <p>{{ host.username || 'user' }}&#64;{{ host.address || host.hostname }}:{{ host.port }}</p>
+                </div>
+                <span class="status-chip">{{ host.lastConnectionStatus }}</span>
+              </header>
+
+              <dl class="host-dashboard-grid">
+                <div>
+                  <dt>Reachability</dt>
+                  <dd>{{ host.lastConnectionStatus }}</dd>
+                </div>
+                <div>
+                  <dt>Last checked</dt>
+                  <dd>{{ host.lastCheckedAt || 'Not checked' }}</dd>
+                </div>
+                <div>
+                  <dt>Credential reference</dt>
+                  <dd>{{ hostCredentialSummary(host) }}</dd>
+                </div>
+                <div>
+                  <dt>Auth mode</dt>
+                  <dd>{{ host.authMode }}</dd>
+                </div>
+                <div>
+                  <dt>OS info</dt>
+                  <dd>{{ hostMetricText(host, 'os') }}</dd>
+                </div>
+                <div>
+                  <dt>Uptime</dt>
+                  <dd>{{ hostMetricText(host, 'uptime') }}</dd>
+                </div>
+                <div>
+                  <dt>Memory</dt>
+                  <dd>{{ hostMetricText(host, 'memory') }}</dd>
+                </div>
+                <div>
+                  <dt>Disk</dt>
+                  <dd>{{ hostMetricText(host, 'disk') }}</dd>
+                </div>
+                <div>
+                  <dt>Bootstrap</dt>
+                  <dd>{{ host.bootstrapStatus || 'unknown' }}</dd>
+                </div>
+                <div>
+                  <dt>Default shell</dt>
+                  <dd>{{ host.defaultShell || 'unknown' }}</dd>
+                </div>
+                <div>
+                  <dt>Working directory</dt>
+                  <dd>{{ host.defaultWorkingDirectory || 'unknown' }}</dd>
+                </div>
+                <div>
+                  <dt>Known capabilities</dt>
+                  <dd>{{ hostCapabilitiesSummary(host) }}</dd>
+                </div>
+              </dl>
+
+              <div class="host-dashboard-actions">
+                <button type="button" class="primary-action" (click)="testHostConnection(host, shellWindow)">
+                  Test reachability
+                </button>
+                <button type="button" class="secondary-action" (click)="openHostTerminal(host)">
+                  Open host terminal
+                </button>
+                <button type="button" class="secondary-action" (click)="openHostOperation(host, 'file-browser')">
+                  Open files
+                </button>
+                <button type="button" class="secondary-action" (click)="openHostOperation(host, 'log-viewer')">
+                  Open logs
+                </button>
+                <button type="button" class="secondary-action" (click)="openHostOperation(host, 'service-manager')">
+                  Open services
+                </button>
+                <button type="button" class="secondary-action" (click)="openHostOperation(host, 'process-viewer')">
+                  Open processes
+                </button>
+                <button type="button" class="secondary-action" (click)="refreshHostMetrics(host, shellWindow)" [disabled]="metricsLoadingHostId === host.id">
+                  {{ metricsLoadingHostId === host.id ? 'Refreshing metrics' : 'Refresh metrics' }}
+                </button>
+                <button type="button" class="secondary-action" (click)="loadWorkspaceContext()">
+                  Refresh context
+                </button>
+              </div>
+
+              <p *ngIf="hostMetricsById[host.id]?.error" class="host-dashboard-error">
+                {{ hostMetricsById[host.id]?.error }}
+              </p>
+
+              <section class="host-audit">
+                <h3>Recent audit</h3>
+                <p *ngIf="recentAuditForHost(host.id).length === 0">No recent audit events for this host.</p>
+                <article *ngFor="let event of recentAuditForHost(host.id)" class="audit-mini-row">
+                  <strong>{{ event.type }}</strong>
+                  <span>{{ event.message }}</span>
+                  <time>{{ event.createdAt }}</time>
+                </article>
+              </section>
+            </ng-container>
+            <ng-template #missingHost>
+              <div class="launcher-empty">Host profile is no longer available.</div>
+            </ng-template>
+          </section>
+
+          <section *ngSwitchCase="'host-terminal'" class="host-terminal-window">
+            <div class="host-terminal-banner" *ngIf="hostFor(shellWindow) as host">
+              <strong>{{ host.name }}</strong>
+              <span>Shell metadata hostId={{ host.id }} is passed into the terminal runtime. The terminal uses local ssh with no stored secrets.</span>
+            </div>
+            <ng-container *ngComponentOutlet="terminalComponent; inputs: hostTerminalInputs(shellWindow)"></ng-container>
+          </section>
+
+          <section *ngSwitchCase="'file-browser'" class="host-operation-window">
+            <ng-container *ngComponentOutlet="hostOperationsComponent; inputs: hostOperationInputs(shellWindow, 'files')"></ng-container>
+          </section>
+
+          <section *ngSwitchCase="'process-viewer'" class="host-operation-window">
+            <ng-container *ngComponentOutlet="hostOperationsComponent; inputs: hostOperationInputs(shellWindow, 'processes')"></ng-container>
+          </section>
+
+          <section *ngSwitchCase="'service-manager'" class="host-operation-window">
+            <ng-container *ngComponentOutlet="hostOperationsComponent; inputs: hostOperationInputs(shellWindow, 'services')"></ng-container>
+          </section>
+
+          <section *ngSwitchCase="'log-viewer'" class="host-operation-window">
+            <ng-container *ngComponentOutlet="hostOperationsComponent; inputs: hostOperationInputs(shellWindow, 'logs')"></ng-container>
+          </section>
+
+          <ng-container *ngSwitchDefault>
+            <ng-container *ngIf="isGeneratedAppWindow(shellWindow); else trustedAngularComponent">
+              <ng-container *ngComponentOutlet="generatedAppRuntimeComponent; inputs: generatedAppInputs(shellWindow)"></ng-container>
+            </ng-container>
+            <ng-template #trustedAngularComponent>
+              <ng-container *ngIf="shellWindow.appDefinition.component as component">
+                <ng-container *ngComponentOutlet="component"></ng-container>
+              </ng-container>
+            </ng-template>
+          </ng-container>
+        </ng-container>
       </div>
 
-      <nav class="primary-nav">
-        <a
-          *ngFor="let item of navItems"
-          class="nav-link"
-          [routerLink]="item.path"
-          routerLinkActive="is-active"
+      <button
+        class="window-resize-handle"
+        type="button"
+        (mousedown)="startResize($event, shellWindow)"
+        title="Resize window"
+        aria-label="Resize window"
+      ></button>
+    </section>
+
+    <section *ngIf="commandPaletteOpen" class="command-palette" aria-label="Command palette and global search" data-testid="command-palette">
+      <header>
+        <span>Command palette</span>
+        <button type="button" class="mini-button" (click)="commandPaletteOpen = false">Close</button>
+      </header>
+      <input
+        name="paletteQuery"
+        type="search"
+        placeholder="Search apps, hosts, windows, and actions"
+        [(ngModel)]="paletteQuery"
+        autofocus
+      />
+      <div class="palette-results">
+        <button
+          *ngFor="let result of paletteResults; trackBy: trackPaletteResult"
+          type="button"
+          class="palette-result"
+          (click)="runPaletteResult(result)"
         >
-          <span class="nav-label">{{ item.label }}</span>
-          <span class="nav-detail">{{ item.detail }}</span>
-        </a>
-      </nav>
-    </aside>
+          <span>{{ result.label }}</span>
+          <small>{{ result.detail }}</small>
+        </button>
+        <p *ngIf="paletteResults.length === 0">No matching commands.</p>
+      </div>
+    </section>
 
-    <main class="shell-content">
-      <router-outlet></router-outlet>
-    </main>
-  </div>
+    <section *ngIf="inspectorOpen" class="inspector-panel" aria-label="Semantic state inspector" data-testid="semantic-inspector">
+      <header>
+        <div>
+          <h2>State inspector</h2>
+          <span>{{ focusedWindow ? focusedWindow.title : 'No focused window' }}</span>
+        </div>
+        <button type="button" class="mini-button" (click)="inspectorOpen = false">Hide</button>
+      </header>
+      <pre>{{ inspectWindowJson(focusedWindow) }}</pre>
+      <div *ngIf="focusedWindow as activeWindow" class="registered-actions">
+        <button
+          *ngFor="let action of activeWindow.registeredActions; trackBy: trackAction"
+          type="button"
+          class="mini-button"
+          (click)="runWindowAction(activeWindow, action.id)"
+        >
+          {{ action.label }}
+        </button>
+      </div>
+    </section>
 
-  <footer class="taskbar">
-    <div class="taskbar-section">
-      <span class="taskbar-label">SwitchboardOS</span>
-      <span class="taskbar-muted">Renderer ready</span>
+    <section class="toast-stack" aria-label="Notifications">
+      <p *ngIf="errorMessage" class="toast error">{{ errorMessage }}</p>
+      <p *ngIf="statusMessage" class="toast">{{ statusMessage }}</p>
+      <p *ngFor="let toast of toasts" class="toast">{{ toast }}</p>
+    </section>
+
+    <nav
+      *ngIf="contextMenu as menu"
+      class="context-menu"
+      data-testid="context-menu"
+      [style.left.px]="menu.x"
+      [style.top.px]="menu.y"
+      [attr.data-context-target]="menu.target"
+      [attr.aria-label]="menu.label + ' context menu'"
+      (click)="$event.stopPropagation()"
+      (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
+    >
+      <div class="context-menu-title">{{ menu.label }}</div>
+      <ng-container *ngFor="let item of menu.items">
+        <div *ngIf="item.submenu?.length; else singleMenuItem" class="context-menu-item has-submenu">
+          <span>{{ item.label }}</span>
+          <span class="submenu-arrow">›</span>
+          <div class="context-submenu">
+            <button
+              *ngFor="let subItem of item.submenu"
+              type="button"
+              class="context-menu-button"
+              [class.is-danger]="subItem.danger"
+              [disabled]="subItem.disabled"
+              (click)="runContextMenuAction(subItem)"
+            >
+              {{ subItem.label }}
+            </button>
+          </div>
+        </div>
+        <ng-template #singleMenuItem>
+          <button
+            type="button"
+            class="context-menu-button"
+            [class.is-danger]="item.danger"
+            [disabled]="item.disabled"
+            (click)="runContextMenuAction(item)"
+          >
+            {{ item.label }}
+            <small *ngIf="item.detail">{{ item.detail }}</small>
+          </button>
+        </ng-template>
+      </ng-container>
+    </nav>
+  </main>
+
+  <footer
+    class="taskbar"
+    aria-label="Taskbar and status panel"
+    data-testid="taskbar"
+    (contextmenu)="openTaskbarContextMenu($event)"
+  >
+    <button
+      class="start-button"
+      type="button"
+      (click)="toggleLauncher()"
+      (contextmenu)="openTaskbarContextMenu($event)"
+      data-testid="app-launcher-button"
+    >
+      Start
+    </button>
+
+    <div *ngIf="launcherOpen" class="launcher-panel" aria-label="App launcher" data-testid="app-launcher">
+      <header>
+        <h2>SwitchboardOS</h2>
+        <button type="button" class="mini-button" (click)="launcherOpen = false">Close</button>
+      </header>
+      <div class="launcher-actions">
+        <button type="button" class="mini-button" (click)="commandPaletteOpen = true; launcherOpen = false">Search</button>
+        <button type="button" class="mini-button" (click)="hostLauncherOpen = !hostLauncherOpen; launcherOpen = false">Host launcher</button>
+        <button type="button" class="mini-button" (click)="profilePanelOpen = !profilePanelOpen; launcherOpen = false">Profiles</button>
+      </div>
+      <div
+        *ngFor="let app of launcherApps; trackBy: trackApp"
+        class="launcher-row"
+        (contextmenu)="openLauncherRowContextMenu($event, app.appId)"
+      >
+        <button type="button" class="launcher-open-button" (click)="openFromLauncher(app.appId)">
+          <span class="launcher-icon">{{ app.icon }}</span>
+          <span class="launcher-text">
+            <span>{{ app.title }}</span>
+            <small>{{ app.detail }}</small>
+          </span>
+        </button>
+        <button
+          class="pin-button"
+          type="button"
+          (click)="addShortcut(app.appId)"
+          [disabled]="isShortcutPinned(app.appId)"
+          [title]="isShortcutPinned(app.appId) ? 'Shortcut already pinned' : 'Pin desktop shortcut'"
+          [attr.aria-label]="isShortcutPinned(app.appId) ? 'Shortcut already pinned' : 'Pin desktop shortcut'"
+        >
+          {{ isShortcutPinned(app.appId) ? 'Pinned' : 'Pin' }}
+        </button>
+      </div>
     </div>
-    <div class="taskbar-section taskbar-spacer"></div>
-    <div class="taskbar-section taskbar-info">
-      <span *ngIf="appInfo" class="taskbar-version">v{{ appInfo.version }}</span>
-      <span *ngIf="appInfo" class="taskbar-muted">{{ appInfo.platform }}</span>
+
+    <div *ngIf="profilePanelOpen" class="profile-panel" aria-label="Workspace profiles" data-testid="workspace-profile-panel">
+      <header>
+        <div>
+          <h2>Workspace profiles</h2>
+          <span>{{ activeProfileName }}</span>
+        </div>
+        <button type="button" class="mini-button" (click)="profilePanelOpen = false">Close</button>
+      </header>
+
+      <div class="profile-list">
+        <article
+          *ngFor="let profile of workspaceProfiles"
+          class="profile-row"
+          [class.is-active]="profile.profileId === activeProfileId"
+          [attr.data-profile-id]="profile.profileId"
+        >
+          <button type="button" class="profile-switch" (click)="switchWorkspaceProfile(profile.profileId)">
+            <strong>{{ profile.name }}</strong>
+            <span>{{ profile.layout.windows.length }} windows / {{ profile.updatedAt }}</span>
+          </button>
+          <button
+            type="button"
+            class="mini-button"
+            (click)="deleteWorkspaceProfile(profile.profileId)"
+            [disabled]="workspaceProfiles.length <= 1"
+          >
+            Delete
+          </button>
+        </article>
+      </div>
+
+      <div class="profile-editor">
+        <label>
+          New profile
+          <input name="newProfileName" [(ngModel)]="newProfileName" placeholder="Profile name" />
+        </label>
+        <button type="button" class="mini-button" data-testid="profile-create-button" (click)="createWorkspaceProfile()">
+          Create
+        </button>
+      </div>
+
+      <div class="profile-editor">
+        <label>
+          Rename active
+          <input name="renameProfileName" [(ngModel)]="renameProfileName" />
+        </label>
+        <button type="button" class="mini-button" data-testid="profile-rename-button" (click)="renameActiveWorkspaceProfile()">
+          Rename
+        </button>
+      </div>
+    </div>
+
+    <div class="active-window-switcher" aria-label="Active window switcher" data-testid="active-window-switcher">
+      <button
+        *ngFor="let shellWindow of windows; trackBy: trackWindow"
+        type="button"
+        class="taskbar-window"
+        [class.is-focused]="shellWindow.focused"
+        [class.is-minimized]="shellWindow.state === 'minimized'"
+        (click)="shellWindow.state === 'minimized' ? restoreWindow(shellWindow) : focusWindow(shellWindow)"
+      >
+        <span>{{ shellWindow.appDefinition.icon }}</span>
+        <span>{{ shellWindow.title }}</span>
+      </button>
+    </div>
+
+    <div class="taskbar-tray" aria-label="Status and tray area">
+      <span *ngIf="appInfo" class="taskbar-muted">v{{ appInfo.version }}</span>
       <span class="taskbar-status" title="Ready"></span>
     </div>
   </footer>

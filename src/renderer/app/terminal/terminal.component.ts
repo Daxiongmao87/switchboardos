@@ -3,13 +3,17 @@ import {
   Component,
   ElementRef,
   HostListener,
+  Input,
+  OnChanges,
   OnDestroy,
   OnInit,
+  SimpleChanges,
   ViewChild,
 } from '@angular/core';
 import { Terminal } from '@xterm/xterm';
 import type {
   HostRecord,
+  ShellWindowSemanticState,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
@@ -20,15 +24,30 @@ interface Disposable {
   dispose: () => void;
 }
 
+type PendingTerminalEvent =
+  | { kind: 'output'; event: TerminalOutputEvent }
+  | { kind: 'status'; event: TerminalStatusEvent }
+  | { kind: 'exit'; event: TerminalExitEvent };
+
 @Component({
   selector: 'app-terminal',
   standalone: false,
   template: `
-    <div class="page">
+    <div
+      class="page"
+      data-testid="terminal-runtime"
+      [attr.data-host-context-id]="hostContextId || null"
+      [attr.data-selected-host-id]="selectedHostId || null"
+      [attr.data-host-context-locked]="hostContextLocked ? 'true' : 'false'"
+      [attr.data-active-session-id]="activeSessionId || null"
+      [attr.data-terminal-event-count]="consumedTerminalEventCount"
+      [attr.data-terminal-last-event-session-id]="lastTerminalEventSessionId || null"
+      [attr.data-terminal-last-event-kind]="lastTerminalEventKind || null"
+    >
       <header class="page-header">
         <div>
           <h1>Terminal</h1>
-          <p>Real host-scoped SSH session foundation using local system ssh.</p>
+          <p>{{ hostContextLocked ? 'Host-scoped SSH session foundation using local system ssh.' : 'Real SSH session foundation using local system ssh.' }}</p>
         </div>
         <div class="header-actions">
           <span class="status-pill" [class.is-active]="activeSessionId">
@@ -44,6 +63,10 @@ interface Disposable {
         MVP terminal starts <code>ssh</code> with <code>BatchMode=yes</code>. It uses existing local ssh-agent or key files only.
         Password prompts, stored secrets, keychain integration, and hosted terminal mode are not handled here.
       </p>
+      <p *ngIf="hostContextLocked" class="notice host-context">
+        Host context is locked by the shell window: <strong>{{ hostContextTitle || selectedHost?.name || hostContextId }}</strong>.
+        The selector is disabled so session start and input operate against that host only.
+      </p>
       <p *ngIf="errorMessage" class="notice error">{{ errorMessage }}</p>
 
       <section class="terminal-layout">
@@ -57,9 +80,10 @@ interface Disposable {
             Host
             <select
               name="selectedHostId"
+              data-testid="terminal-host-select"
               [(ngModel)]="selectedHostId"
               (ngModelChange)="selectHost($event)"
-              [disabled]="isLoading || isSessionActive || hosts.length === 0"
+              [disabled]="hostContextLocked || isLoading || isSessionActive || hosts.length === 0"
             >
               <option value="">No host selected</option>
               <option *ngFor="let host of hosts; trackBy: trackHost" [value]="host.id">
@@ -99,6 +123,7 @@ interface Disposable {
             <button
               type="button"
               class="primary-action"
+              data-testid="terminal-start-session"
               (click)="startSession()"
               [disabled]="!selectedHost || isStarting || isSessionActive"
             >
@@ -347,6 +372,12 @@ interface Disposable {
       color: #fecaca;
     }
 
+    .notice.host-context {
+      border-color: #166534;
+      background: #052e16;
+      color: #bbf7d0;
+    }
+
     @media (max-width: 1000px) {
       .terminal-layout {
         grid-template-columns: 1fr;
@@ -363,7 +394,12 @@ interface Disposable {
     `,
   ],
 })
-export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
+export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, OnInit {
+  @Input() shellWindowId: string | null = null;
+  @Input() hostContextId: string | null = null;
+  @Input() hostContextTitle = '';
+  @Input() hostContextLocked = false;
+
   @ViewChild('terminalHost') private terminalHost?: ElementRef<HTMLDivElement>;
 
   hosts: HostRecord[] = [];
@@ -375,8 +411,13 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
   activeSessionId: string | null = null;
   sessionStatus = 'Disconnected';
   terminalSizeLabel = '100 x 30';
+  consumedTerminalEventCount = 0;
+  lastTerminalEventSessionId = '';
+  lastTerminalEventKind = '';
 
   private readonly unsubscribeCallbacks: Array<() => void> = [];
+  private pendingStartEvents: PendingTerminalEvent[] = [];
+  private pendingStartHostId: string | null = null;
   private xterm: Terminal | null = null;
   private xtermDataDisposable: Disposable | null = null;
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -384,6 +425,12 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
   ngOnInit(): void {
     this.registerTerminalEvents();
     void this.loadHosts();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['hostContextId'] || changes['hostContextLocked']) {
+      this.applyHostContextSelection();
+    }
   }
 
   ngAfterViewInit(): void {
@@ -458,9 +505,11 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
     this.errorMessage = '';
     try {
       this.hosts = await api.host.list();
-      if (this.selectedHostId && !this.hosts.some((host) => host.id === this.selectedHostId)) {
+      this.applyHostContextSelection();
+      if (!this.hostContextLocked && this.selectedHostId && !this.hosts.some((host) => host.id === this.selectedHostId)) {
         this.selectedHostId = '';
       }
+      this.emitSemanticState();
     } catch {
       this.errorMessage = 'Unable to load hosts from the local MVP store.';
     } finally {
@@ -469,8 +518,14 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
   }
 
   selectHost(hostId: string): void {
+    if (this.hostContextLocked && this.hostContextId && hostId !== this.hostContextId) {
+      this.selectedHostId = this.hostContextId;
+      return;
+    }
+
     this.selectedHostId = hostId;
     this.errorMessage = '';
+    this.emitSemanticState();
   }
 
   async startSession(): Promise<void> {
@@ -482,6 +537,8 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     this.isStarting = true;
+    this.pendingStartHostId = host.id;
+    this.pendingStartEvents = [];
     this.errorMessage = '';
     this.xterm?.clear();
     this.appendSystemOutput(`Starting session for ${host.name}...\n`);
@@ -490,23 +547,31 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
       const result = await api.terminal.start(host.id);
       if (result.status === 'failed' || !result.sessionId) {
         this.activeSessionId = null;
+        this.pendingStartEvents = [];
         this.sessionStatus = 'Failed';
         this.appendSystemOutput(`${result.message}\n`);
         this.errorMessage = result.message;
+        this.emitSemanticState();
         return;
       }
 
       this.activeSessionId = result.sessionId;
       this.sessionStatus = 'Starting';
+      this.emitSemanticState();
+      this.replayPendingStartEvents(result.sessionId);
       this.appendSystemOutput(`${result.message}\n`);
       this.xterm?.focus();
       await this.syncBackendResize();
     } catch {
       this.activeSessionId = null;
+      this.pendingStartEvents = [];
       this.sessionStatus = 'Failed';
       this.errorMessage = 'Unable to start terminal session.';
       this.appendSystemOutput('Unable to start terminal session.\n');
+      this.emitSemanticState();
     } finally {
+      this.pendingStartHostId = null;
+      this.pendingStartEvents = [];
       this.isStarting = false;
     }
   }
@@ -593,6 +658,15 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
     this.appendSystemOutput('Select a host and start a session. Output from system ssh will render here.\n');
   }
 
+  private applyHostContextSelection(): void {
+    if (!this.hostContextLocked || !this.hostContextId) {
+      return;
+    }
+
+    this.selectedHostId = this.hostContextId;
+    this.errorMessage = '';
+  }
+
   private async writeTerminalData(data: string): Promise<void> {
     const api = getSwitchboardApi();
     const sessionId = this.activeSessionId;
@@ -628,32 +702,38 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
 
   private handleOutputEvent(event: TerminalOutputEvent): void {
     if (!this.isCurrentSession(event.sessionId)) {
+      this.bufferPendingStartEvent({ kind: 'output', event });
       return;
     }
 
-    this.activeSessionId = event.sessionId;
+    this.recordConsumedTerminalEvent('output', event.sessionId);
     this.writeOutput(event);
   }
 
   private handleStatusEvent(event: TerminalStatusEvent): void {
     if (!this.isCurrentSession(event.sessionId)) {
+      this.bufferPendingStartEvent({ kind: 'status', event });
       return;
     }
 
-    this.activeSessionId = event.sessionId;
+    this.recordConsumedTerminalEvent('status', event.sessionId);
     this.sessionStatus = event.status;
     this.appendSystemOutput(`${event.message}\n`);
+    this.emitSemanticState();
   }
 
   private handleExitEvent(event: TerminalExitEvent): void {
     if (!this.isCurrentSession(event.sessionId)) {
+      this.bufferPendingStartEvent({ kind: 'exit', event });
       return;
     }
 
+    this.recordConsumedTerminalEvent('exit', event.sessionId);
     this.sessionStatus = event.status;
     this.appendSystemOutput(`${event.message}\n`);
     this.activeSessionId = null;
     this.isStopping = false;
+    this.emitSemanticState();
   }
 
   private appendSystemOutput(data: string): void {
@@ -666,7 +746,44 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
   }
 
   private isCurrentSession(sessionId: string): boolean {
-    return this.activeSessionId === null || this.activeSessionId === sessionId;
+    return this.activeSessionId === sessionId;
+  }
+
+  private bufferPendingStartEvent(item: PendingTerminalEvent): void {
+    if (!this.isStarting || !this.pendingStartHostId || item.event.hostId !== this.pendingStartHostId) {
+      return;
+    }
+
+    this.pendingStartEvents.push(item);
+    if (this.pendingStartEvents.length > 100) {
+      this.pendingStartEvents.shift();
+    }
+  }
+
+  private replayPendingStartEvents(sessionId: string): void {
+    const pendingEvents = this.pendingStartEvents.filter((item) => item.event.sessionId === sessionId);
+    this.pendingStartEvents = [];
+
+    for (const item of pendingEvents) {
+      switch (item.kind) {
+        case 'output':
+          this.handleOutputEvent(item.event);
+          break;
+        case 'status':
+          this.handleStatusEvent(item.event);
+          break;
+        case 'exit':
+          this.handleExitEvent(item.event);
+          break;
+      }
+    }
+  }
+
+  private recordConsumedTerminalEvent(kind: PendingTerminalEvent['kind'], sessionId: string): void {
+    this.consumedTerminalEventCount += 1;
+    this.lastTerminalEventKind = kind;
+    this.lastTerminalEventSessionId = sessionId;
+    this.emitSemanticState();
   }
 
   private writeOutput(event: TerminalOutputEvent): void {
@@ -714,6 +831,7 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
 
     this.xterm.resize(cols, rows);
     this.terminalSizeLabel = `${cols} x ${rows}`;
+    this.emitSemanticState();
   }
 
   private async syncBackendResize(): Promise<void> {
@@ -725,5 +843,41 @@ export class TerminalComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     await api.terminal.resize(sessionId, terminal.cols, terminal.rows).catch(() => undefined);
+  }
+
+  private emitSemanticState(): void {
+    if (!this.shellWindowId) {
+      return;
+    }
+
+    const host = this.selectedHost;
+    const semanticState: ShellWindowSemanticState = {
+      kind: 'terminal',
+      status: this.activeSessionId ? this.sessionStatus : 'idle',
+      summary: host
+        ? `Terminal ${this.activeSessionId ? 'attached' : 'ready'} for ${host.name}.`
+        : 'Terminal idle with no selected host.',
+      metadata: {
+        windowId: this.shellWindowId,
+        hostId: host?.id ?? null,
+        hostName: host?.name ?? null,
+        selectedHostId: this.selectedHostId || null,
+        hostContextLocked: this.hostContextLocked,
+        activeSessionId: this.activeSessionId,
+        terminalSize: this.terminalSizeLabel,
+        consumedTerminalEventCount: this.consumedTerminalEventCount,
+        lastEventSessionId: this.lastTerminalEventSessionId || null,
+        lastEventKind: this.lastTerminalEventKind || null,
+        xterm: true,
+        secretsStored: false,
+      },
+    };
+
+    window.dispatchEvent(new CustomEvent('switchboard-terminal-semantic', {
+      detail: {
+        windowId: this.shellWindowId,
+        semanticState,
+      },
+    }));
   }
 }

@@ -7,6 +7,7 @@ import type {
   CreateAuditEventInput,
   CreateHostInput,
   HostAuthMode,
+  HostBootstrapStatus,
   HostConnectionStatus,
   HostRecord,
   MvpSettings,
@@ -22,10 +23,13 @@ const STORE_FILE_NAME = 'switchboardos-mvp.json';
 
 const AUTH_MODES: readonly HostAuthMode[] = ['placeholder', 'password', 'key', 'agent'];
 const CONNECTION_STATUSES: readonly HostConnectionStatus[] = ['untested', 'stubbed', 'success', 'failed'];
+const BOOTSTRAP_STATUSES: readonly HostBootstrapStatus[] = ['unknown', 'not_started', 'pending', 'ready', 'failed'];
 
 const DEFAULT_SETTINGS: MvpSettings = {
   theme: 'dark',
   defaultWindowBehavior: 'floating',
+  desktopWallpaper: 'default',
+  desktopWallpaperLayout: 'fill',
   sshDefaults: {
     port: 22,
     username: '',
@@ -67,6 +71,10 @@ function numberValue(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function booleanValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function stringArrayValue(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
@@ -89,6 +97,12 @@ function connectionStatusValue(value: unknown, fallback: HostConnectionStatus): 
     : fallback;
 }
 
+function bootstrapStatusValue(value: unknown, fallback: HostBootstrapStatus): HostBootstrapStatus {
+  return typeof value === 'string' && BOOTSTRAP_STATUSES.includes(value as HostBootstrapStatus)
+    ? value as HostBootstrapStatus
+    : fallback;
+}
+
 function windowBehaviorValue(value: unknown, fallback: MvpSettings['defaultWindowBehavior']): MvpSettings['defaultWindowBehavior'] {
   return value === 'floating' || value === 'tile-right' || value === 'tile-bottom'
     ? value
@@ -107,6 +121,23 @@ function operatorPolicyValue(value: unknown, fallback: MvpSettings['operator']['
     : fallback;
 }
 
+function desktopWallpaperValue(value: unknown, fallback: MvpSettings['desktopWallpaper']): MvpSettings['desktopWallpaper'] {
+  const valid: MvpSettings['desktopWallpaper'][] = ['default', 'grid', 'topology', 'plain'];
+  return valid.includes(value as MvpSettings['desktopWallpaper'])
+    ? (value as MvpSettings['desktopWallpaper'])
+    : fallback;
+}
+
+function desktopWallpaperLayoutValue(
+  value: unknown,
+  fallback: MvpSettings['desktopWallpaperLayout'],
+): MvpSettings['desktopWallpaperLayout'] {
+  const valid: MvpSettings['desktopWallpaperLayout'][] = ['fill', 'fit', 'stretch', 'fit-tile', 'tile-original', 'center'];
+  return valid.includes(value as MvpSettings['desktopWallpaperLayout'])
+    ? (value as MvpSettings['desktopWallpaperLayout'])
+    : fallback;
+}
+
 function normalizeSettings(value: unknown): MvpSettings {
   if (!isRecord(value)) {
     return clone(DEFAULT_SETTINGS);
@@ -120,6 +151,14 @@ function normalizeSettings(value: unknown): MvpSettings {
     defaultWindowBehavior: windowBehaviorValue(
       value.defaultWindowBehavior,
       DEFAULT_SETTINGS.defaultWindowBehavior
+    ),
+    desktopWallpaper: desktopWallpaperValue(
+      value.desktopWallpaper,
+      DEFAULT_SETTINGS.desktopWallpaper
+    ),
+    desktopWallpaperLayout: desktopWallpaperLayoutValue(
+      value.desktopWallpaperLayout,
+      DEFAULT_SETTINGS.desktopWallpaperLayout
     ),
     sshDefaults: {
       port: numberValue(sshDefaults.port, DEFAULT_SETTINGS.sshDefaults.port),
@@ -158,7 +197,15 @@ function normalizeHost(value: unknown): HostRecord | null {
     username: stringValue(value.username, DEFAULT_SETTINGS.sshDefaults.username),
     authMode: authModeValue(value.authMode, DEFAULT_SETTINGS.sshDefaults.authMode),
     keyPath: stringValue(value.keyPath, '') || undefined,
+    credentialRefId: nullableStringValue(value.credentialRefId, null),
     tags: stringArrayValue(value.tags),
+    group: stringValue(value.group, '') || undefined,
+    favorite: booleanValue(value.favorite, false),
+    osHint: stringValue(value.osHint, 'unknown') || 'unknown',
+    bootstrapStatus: bootstrapStatusValue(value.bootstrapStatus, 'unknown'),
+    defaultShell: stringValue(value.defaultShell, ''),
+    defaultWorkingDirectory: stringValue(value.defaultWorkingDirectory, ''),
+    capabilities: stringArrayValue(value.capabilities),
     notes: stringValue(value.notes, ''),
     lastConnectionStatus: connectionStatusValue(value.lastConnectionStatus, 'untested'),
     lastCheckedAt: nullableStringValue(value.lastCheckedAt, null),
@@ -258,7 +305,15 @@ export class MvpJsonStore {
       username: stringValue(input.username, state.settings.sshDefaults.username),
       authMode: authModeValue(input.authMode, state.settings.sshDefaults.authMode),
       keyPath: stringValue(input.keyPath, '').trim() || undefined,
+      credentialRefId: input.credentialRefId !== undefined ? (input.credentialRefId ?? null) : null,
       tags: stringArrayValue(input.tags),
+      group: stringValue(input.group, ''),
+      favorite: booleanValue(input.favorite, false),
+      osHint: stringValue(input.osHint, 'unknown').trim() || 'unknown',
+      bootstrapStatus: bootstrapStatusValue(input.bootstrapStatus, 'unknown'),
+      defaultShell: stringValue(input.defaultShell, '').trim(),
+      defaultWorkingDirectory: stringValue(input.defaultWorkingDirectory, '').trim(),
+      capabilities: stringArrayValue(input.capabilities),
       notes: stringValue(input.notes, ''),
       lastConnectionStatus: 'untested',
       lastCheckedAt: null,
@@ -291,7 +346,15 @@ export class MvpJsonStore {
       keyPath: input.keyPath === undefined
         ? current.keyPath
         : stringValue(input.keyPath, '').trim() || undefined,
+      credentialRefId: input.credentialRefId === undefined ? current.credentialRefId : input.credentialRefId ?? null,
       tags: input.tags === undefined ? current.tags : stringArrayValue(input.tags),
+      group: input.group === undefined ? current.group : stringValue(input.group, ''),
+      favorite: input.favorite === undefined ? current.favorite : booleanValue(input.favorite, current.favorite ?? false),
+      osHint: input.osHint === undefined ? current.osHint : stringValue(input.osHint, 'unknown').trim() || 'unknown',
+      bootstrapStatus: input.bootstrapStatus === undefined ? current.bootstrapStatus : bootstrapStatusValue(input.bootstrapStatus, current.bootstrapStatus),
+      defaultShell: input.defaultShell === undefined ? current.defaultShell : stringValue(input.defaultShell, '').trim(),
+      defaultWorkingDirectory: input.defaultWorkingDirectory === undefined ? current.defaultWorkingDirectory : stringValue(input.defaultWorkingDirectory, '').trim(),
+      capabilities: input.capabilities === undefined ? current.capabilities : stringArrayValue(input.capabilities),
       notes: stringValue(input.notes, current.notes),
       updatedAt: new Date().toISOString(),
     };

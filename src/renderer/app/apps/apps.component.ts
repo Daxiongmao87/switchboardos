@@ -1,9 +1,11 @@
 import { Component, OnInit } from '@angular/core';
-import type { AuditEvent, HostRecord } from '../../../shared/mvp-models';
+import type { AppManifest, AuditEvent, HostRecord } from '../../../shared/mvp-models';
 import {
   BUILTIN_APP_MANIFESTS,
   EXAMPLE_HOST_MAP_APP,
   type SwitchboardAppContext,
+  type SwitchboardAppCapability,
+  type SwitchboardAppCategory,
   type SwitchboardAppManifest,
   type SwitchboardAppPanelMode,
 } from '../app-sdk';
@@ -23,7 +25,7 @@ interface AppPanel {
       <header class="page-header">
         <div>
           <h1>Apps</h1>
-          <p>Local App SDK registry with one graphical example app and basic panel tiling.</p>
+          <p>Local App SDK registry with built-in and installed generated apps.</p>
         </div>
         <div class="header-actions">
           <span class="status-pill">Local SDK</span>
@@ -34,7 +36,7 @@ interface AppPanel {
       </header>
 
       <p class="notice">
-        MVP apps run inside the local renderer and read only the typed SwitchboardOS context exposed here.
+        Apps run through typed SDK surfaces, declared capabilities, sandboxed generated runtimes, and shell semantic state.
       </p>
       <p *ngIf="statusMessage" class="notice success">{{ statusMessage }}</p>
       <p *ngIf="errorMessage" class="notice error">{{ errorMessage }}</p>
@@ -463,7 +465,7 @@ interface AppPanel {
   ],
 })
 export class AppsComponent implements OnInit {
-  readonly manifests = BUILTIN_APP_MANIFESTS;
+  manifests: SwitchboardAppManifest[] = [...BUILTIN_APP_MANIFESTS];
   readonly exampleAppId = EXAMPLE_HOST_MAP_APP.id;
   context: SwitchboardAppContext = {
     hosts: [],
@@ -499,10 +501,11 @@ export class AppsComponent implements OnInit {
     this.errorMessage = '';
     this.statusMessage = '';
     try {
-      const [hosts, auditEvents, settings] = await Promise.all([
+      const [hosts, auditEvents, settings, installedManifests] = await Promise.all([
         api.host.list(),
         api.audit.list(),
         api.settings.get(),
+        api.appManifest.list(),
       ]);
       this.context = {
         hosts,
@@ -510,6 +513,12 @@ export class AppsComponent implements OnInit {
         settings,
         generatedAt: new Date().toISOString(),
       };
+      this.manifests = [
+        ...BUILTIN_APP_MANIFESTS,
+        ...installedManifests
+          .filter((manifest) => manifest.enabled && manifest.sourceCode.trim())
+          .map((manifest) => generatedManifestToSdkManifest(manifest)),
+      ];
       this.statusMessage = 'SDK context refreshed from local state.';
     } catch {
       this.errorMessage = 'Unable to load local SDK context.';
@@ -519,6 +528,12 @@ export class AppsComponent implements OnInit {
   }
 
   launchApp(manifest: SwitchboardAppManifest): void {
+    if (manifest.id !== this.exampleAppId) {
+      window.postMessage({ type: 'sb:app-open', appId: manifest.appId }, '*');
+      this.statusMessage = `${manifest.name} requested in the desktop shell.`;
+      return;
+    }
+
     const panel: AppPanel = {
       id: `${manifest.id}:${Date.now()}`,
       manifest,
@@ -569,4 +584,70 @@ export class AppsComponent implements OnInit {
   trackAudit(_index: number, event: AuditEvent): string {
     return event.id;
   }
+}
+
+const APP_CAPABILITIES: readonly SwitchboardAppCapability[] = [
+  'host:read',
+  'host:actions',
+  'host:terminal',
+  'command:read',
+  'files:read',
+  'services:read',
+  'processes:read',
+  'logs:read',
+  'metrics:read',
+  'storage:scoped',
+  'local:config:read',
+  'agent:read-state',
+  'actions:register',
+  'notifications:create',
+  'secrets:reference-only',
+];
+
+const APP_CATEGORIES: readonly SwitchboardAppCategory[] = [
+  'dashboard',
+  'diagnostic',
+  'visualization',
+  'authoring',
+  'operations',
+];
+
+function generatedManifestToSdkManifest(manifest: AppManifest): SwitchboardAppManifest {
+  const actionRegistry = manifest.packageMetadata['actionRegistry'];
+  return {
+    appId: manifest.appId,
+    id: manifest.appId,
+    name: manifest.name,
+    description: manifest.description || 'Installed generated SwitchboardOS app.',
+    version: manifest.version,
+    author: manifest.author || 'Local operator',
+    entrypoint: manifest.entrypoint,
+    icon: manifest.icon || 'GA',
+    category: APP_CATEGORIES.includes(manifest.category as SwitchboardAppCategory)
+      ? (manifest.category as SwitchboardAppCategory)
+      : 'visualization',
+    defaultPanelMode: 'floating',
+    requestedCapabilities: manifest.capabilities.filter((capability): capability is SwitchboardAppCapability =>
+      APP_CAPABILITIES.includes(capability as SwitchboardAppCapability),
+    ),
+    supportedWindowModes: ['floating', 'tile-right', 'tile-bottom'],
+    minimumSwitchboardOSVersion: '0.1.0',
+    agentStateProvider: manifest.capabilities.includes('agent:read-state'),
+    actionRegistry: Array.isArray(actionRegistry)
+      ? actionRegistry
+        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+        .map((item) => ({
+          id: typeof item['id'] === 'string' ? item['id'] : 'generated-action',
+          label: typeof item['label'] === 'string' ? item['label'] : 'Generated action',
+          description: typeof item['description'] === 'string' ? item['description'] : 'Generated app action.',
+        }))
+      : [],
+    graphicsPrimitives: [
+      {
+        kind: 'svg',
+        semanticRole: 'generated app graphical surface',
+        entityIds: [],
+      },
+    ],
+  };
 }

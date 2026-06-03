@@ -2,17 +2,21 @@
 
 ## 1. Product Summary
 
-SwitchboardOS is a local-first desktop operations environment for managing remote computers over SSH. It provides a full application shell with overlapping and tiling windows, desktop icons, host dashboards, terminals, file tools, logs, service/process views, generated utility apps, themes, and responsive layouts.
+SwitchboardOS is a local-first desktop and web-accessible operations environment for managing remote computers over SSH. It provides a full application shell with overlapping and tiling windows, desktop icons, host dashboards, terminals, file tools, logs, service/process views, generated utility apps, themes, and responsive layouts.
+
+SwitchboardOS should also support an optional hosted access mode that serves the UI and backend API on a configurable local or LAN port. This makes the same operations environment accessible from a browser while keeping privileged SSH, SwitchboardOS system/workspace filesystem, remote filesystem, secret, policy, and audit operations behind the SwitchboardOS backend.
 
 The product should be useful without AI. Its core value is a portable operations desktop for remote hosts. An optional agent endpoint supercharges the environment by inspecting structured window and app state, diagnosing host issues, generating helper applications, assisting with bootstrap scripts, summarizing state, and automating approved actions.
 
-The chosen implementation stack is Angular + Electron. Angular provides a structured TypeScript application framework for the SwitchboardOS shell and app platform. Electron provides the native desktop runtime required for SSH transport, local filesystem access, OS keychain integration, privileged tools, IPC boundaries, and cross-platform packaging.
+The chosen implementation stack is Angular + Electron. Angular provides a structured TypeScript application framework for the SwitchboardOS shell and app platform. Electron provides the native desktop runtime required for SSH transport, the SwitchboardOS system/workspace filesystem, user-mediated import/export, remote filesystem mediation, OS keychain integration, privileged tools, IPC boundaries, and cross-platform packaging. Hosted web mode should reuse the same Angular UI and route browser clients through a SwitchboardOS-controlled backend service rather than exposing privileged capabilities directly to the browser.
 
 ## 2. Core Principles
 
 ### 2.1 Local-first by default
 
-SwitchboardOS should run as a local desktop application. Persistent configuration should live locally unless the user explicitly opts into sync or remote storage in a future version.
+SwitchboardOS should run as a local desktop application and may optionally expose a hosted web UI/API from the local machine or an approved host. Persistent configuration should live locally unless the user explicitly opts into sync or remote storage in a future version.
+
+Hosted access should preserve the local-first model. The default bind address should be localhost. LAN or remote binding should be an explicit user choice with authentication, session controls, audit logging, and clear warnings about the privileged nature of the application.
 
 The local database should be limited to SwitchboardOS configuration and metadata, including:
 
@@ -64,7 +68,7 @@ The architecture should still retain audit logging and capability definitions ev
 
 ### 2.5 App platform first-class
 
-SwitchboardOS is not only a terminal manager. It is an application environment. It should support built-in apps, user-created apps, and agent-generated apps. Apps should be able to create real graphical frontends using the SwitchboardOS App SDK.
+SwitchboardOS is not only a terminal manager. It is an application environment. It should support system applets, user-created applets, and agent-generated applets. Applets should be able to create real graphical frontends using the SwitchboardOS App SDK.
 
 Custom apps should be able to build dashboards, host topology maps, monitoring panels, process trees, log visualizers, deployment views, file explorers, service dependency graphs, and other operational interfaces.
 
@@ -89,15 +93,21 @@ Secondary users:
 ### 4.1 In scope for initial product direction
 
 - Local desktop application
+- Optional web-accessible hosted mode served by the SwitchboardOS backend on a configurable port
 - SSH host inventory
 - SSH terminal windows
 - Host connection testing
 - Bootstrap script generation
 - Window manager with floating and tiling behavior
 - Desktop icons
+- OS-like context menus for desktop, taskbar/dock/panel, icons, files, folders, hosts, terminals, windows, and app content
+- Full-fledged SwitchboardOS system/workspace filesystem with basic file/folder utilities
+- SSH/SFTP-backed host filesystem providers for configured remote systems
 - Responsive layout behavior
 - Themes, wallpaper, dark/light mode
 - Built-in apps for common host operations
+- Built-in file explorer for the SwitchboardOS workspace root
+- Applet and scriptlet creation as first-class workspace artifacts
 - App SDK for custom app frontends
 - Graphics/UI library for custom dashboards and visualizations
 - Optional AI endpoint configuration
@@ -106,6 +116,7 @@ Secondary users:
 - Local database for configuration
 - OS keychain or equivalent secure secret handling
 - Audit/event logging for agent and privileged actions
+- Authentication and access controls for hosted web mode
 
 ### 4.2 Out of scope for MVP unless deliberately added
 
@@ -116,7 +127,7 @@ Secondary users:
 - Full remote desktop/VNC/RDP replacement
 - Centralized enterprise policy management
 - Mobile-first experience
-- Browser-only direct SSH
+- Browser-only direct SSH that bypasses the SwitchboardOS backend
 - Plugin marketplace
 - Long-term metrics retention
 
@@ -130,7 +141,7 @@ Electron main process responsibilities:
 
 - Own privileged host operations
 - Manage SSH sessions
-- Handle local filesystem access
+- Own the SwitchboardOS system/workspace filesystem, user-mediated local import/export, and remote filesystem brokering
 - Access OS keychain/secrets
 - Own SQLite database access
 - Execute bootstrap generation workflows
@@ -237,6 +248,24 @@ Preferred secret handling:
 
 Credential access should be mediated by main process services, not renderer code.
 
+### 5.7 Optional web-hosted access mode
+
+Hosted web mode should serve the SwitchboardOS UI and backend APIs over HTTP/WebSocket interfaces on a configurable port.
+
+Core requirements:
+
+- Reuse the Angular UI where practical.
+- Keep SSH, SwitchboardOS system/workspace filesystem, SSH/SFTP-backed host filesystem, secret storage, policy checks, and audit writes in the trusted SwitchboardOS backend.
+- Do not expose raw SSH credentials, OS keychain access, or arbitrary host command execution directly to browser code.
+- Use typed request/response contracts equivalent to desktop IPC contracts.
+- Support a configurable bind address and port, defaulting to localhost.
+- Require authentication for browser sessions, especially for LAN or remote binding.
+- Apply CSRF, session timeout, and rate-limit protections where relevant.
+- Support TLS directly or document reverse-proxy deployment for non-local access.
+- Record hosted-mode login, privileged action, approval, and failure events in the audit log.
+
+This mode is not the same as browser-only direct SSH. Browser clients should operate through the SwitchboardOS backend, which remains the privileged execution boundary.
+
 ## 6. High-Level Architecture
 
 ### 6.1 Major subsystems
@@ -244,25 +273,26 @@ Credential access should be mediated by main process services, not renderer code
 SwitchboardOS consists of these major subsystems:
 
 1. Electron Runtime
-2. Angular Desktop Shell
-3. Window Manager
-4. Host Manager
-5. SSH Service
-6. Secret Service
-7. App Runtime
-8. App SDK
-9. Graphics/UI Library
-10. Agent Service
-11. Bootstrap Service
-12. Local Database
-13. Audit/Event Log
-14. Settings and Policy Engine
+2. Hosted Web Server / HTTP API
+3. Angular Desktop Shell
+4. Window Manager
+5. Host Manager
+6. SSH Service
+7. Secret Service
+8. App Runtime
+9. App SDK
+10. Graphics/UI Library
+11. Agent Service
+12. Bootstrap Service
+13. Local Database
+14. Audit/Event Log
+15. Settings and Policy Engine
 
 ### 6.2 Runtime boundary
 
-The privileged runtime boundary is the Electron main process.
+The privileged runtime boundary is the SwitchboardOS backend. In desktop mode, this is the Electron main process. In hosted web mode, this is the local/server process that owns SSH sessions, SwitchboardOS system/workspace filesystem access, SSH/SFTP-backed host filesystem access, SQLite, secrets, policy checks, and audit writes.
 
-The renderer is treated as a UI surface. Even first-party Angular code should use typed IPC calls rather than direct access to privileged resources. This keeps the architecture clean and allows user-created/generated apps to be sandboxed more easily later.
+The renderer or browser client is treated as a UI surface. Even first-party Angular code should use typed IPC calls or typed hosted APIs rather than direct access to privileged resources. This keeps the architecture clean and allows user-created/generated apps to be sandboxed more easily later.
 
 ### 6.3 Data flow example: opening a terminal
 
@@ -294,23 +324,120 @@ The renderer is treated as a UI surface. Even first-party Angular code should us
 
 ### 7.1 Desktop shell
 
-The shell is the primary user environment.
+The shell is the primary user environment. The default experience must clearly resemble a desktop operating environment, not an admin dashboard or multi-panel web app. On first launch, the user should see a calm wallpaper-backed desktop with only the minimal OS-style default icons, a taskbar/dock/panel with a main menu affordance, and no app windows unless the user explicitly opens one.
 
 Core shell features:
 
-- Desktop background/wallpaper
+- Desktop background/wallpaper using the bundled default wallpaper at `docs/assets/default-wallpaper.png`
+- Wallpaper display options in Settings include:
+  - Source selection with existing sources: Default, Grid, Topology, Plain
+  - Layout selection: Stretch, Fit, Fill (default), Fit with tile, Tile with original size, Center
 - Desktop icons
 - App launcher
 - Host launcher
 - Taskbar/dock/panel
 - System tray/status area
+- Context menu system
 - Command palette
 - Notification/toast system
 - Global search
+- File explorer
+- Workspace file/folder utilities
 - Settings
 - Agent/Operator panel
 
-### 7.2 Window behavior
+Default desktop acceptance criteria:
+
+- The default visual state should be wallpaper-forward and uncluttered.
+- The default theme should use a neutral palette with restrained contrast and accents. Avoid a saturated, busy, or novelty color scheme as the default.
+- Persistent always-visible controls should be limited to desktop-environment primitives such as the desktop, taskbar/dock/panel, main menu affordance, tray/status area, and the minimal default desktop icons.
+- The default desktop icon set should contain exactly two shell-owned icons: File Explorer and Recycle Bin. File Explorer opens the SwitchboardOS workspace/system filesystem root; Recycle Bin opens the deleted-item recovery surface. Additional app, host, profile, operator, settings, state, workspace, applet, or scriptlet icons should not appear by default unless the user explicitly creates or pins them.
+- Apps, hosts, profiles, settings, operator tools, state inspection, workspace utilities, applets, scriptlets, and administrative surfaces should primarily live behind a main menu system similar to a Start menu, application menu, launcher, or command palette.
+- Apps, Search, Hosts, Profiles, Save Profile, Restore Profile, State, Settings, Operator, State Inspector, Workspace, and similar surfaces should not appear as separate default panels or toolbars on an empty desktop. They should be available through the launcher, context menus, keyboard shortcuts, or explicit user action.
+- Titlebar controls such as minimize, maximize, restore, and close should only appear on actual open windows. They should not appear on the desktop when no app window is present.
+- Notification toasts should be transient and auto-dismiss by default. Only critical, pinned, or active-progress notifications may persist, and the empty default state should not contain persistent toasts.
+
+Launcher taxonomy and default launcher policy:
+
+- Core launcher system applets: File Explorer, Recycle Bin, Hosts, Terminal, Settings, and App Manager.
+- Contextual host/file/window tools: host-scoped windows and operations (for example, Host Dashboard, Host Terminal, File Browser, Process Viewer, Service Manager, Log Viewer).
+- Advanced/developer tools: Bootstrap, Command History, App Studio, Host Map, and equivalent diagnostic surfaces.
+- Optional/configured tools: Operator / agent management surfaces remain hidden until configured or explicitly opened. Installed user-created or agent-generated applets may appear after the core launcher set once the user installs or enables them, but they are not part of the default first-run row set.
+- Demo/non-core apps are not part of the default launcher row set and should be discoverable via search or context-specific flows.
+
+Desktop icon behavior:
+
+- Desktop icons should be draggable, snap or align to a stable grid, and persist their positions.
+- Desktop icons should not show a permanent close/delete `x` button.
+- Removing, hiding, renaming, or configuring a desktop icon should happen through a right-click context menu, not through an always-visible corner control.
+- Right-clicking a desktop icon should open a context menu or submenu with relevant actions such as Open, Rename, Remove Shortcut, and host/app-specific commands.
+- Right-clicking the desktop background should open a desktop context menu for wallpaper, theme, icon arrangement, and launcher-related actions.
+- Wallpaper layout for the Default wallpaper source should default to Fill. The supported fill modes are Stretch, Fit, Fill, Fit with tile, Tile with original size, and Center.
+
+### 7.2 OS interaction model
+
+SwitchboardOS should behave like an operating environment. Basic interactions that users expect from Linux, Windows, and macOS should exist unless there is a deliberate product reason to omit them.
+
+Expected OS-grade interactions:
+
+- Right-click should be captured by SwitchboardOS and should open a SwitchboardOS context menu instead of the browser default context menu.
+- Context menus should be target-aware. The desktop background, desktop icons, taskbar/dock/panel items, tray/status items, open windows, app content regions, files, folders, hosts, terminals, and notifications should each be able to show relevant menu items.
+- Context menus should support nested submenus, disabled items, separators, destructive-action styling, icons, keyboard shortcut labels, and async action handlers.
+- Apps should be able to contribute context menu items through the App SDK for their own windows and for specific registered elements inside their windows.
+- App-contributed menu items must be scoped by capabilities and cannot bypass host, filesystem, policy, or audit controls.
+- Shell-owned menu items should remain predictable and should match common desktop conventions where applicable: Open, Open With, New Folder, Rename, Duplicate, Copy, Cut, Paste, Delete/Remove, Properties/Get Info, Pin/Unpin, Close Window, Minimize, Restore, Move to Workspace, and Settings.
+- The same action should be available through context menus, keyboard shortcuts, and command palette entries where that is a normal desktop expectation.
+
+Required target menus:
+
+- Desktop background: New Folder, New Applet, New Scriptlet, Paste, Arrange Icons, Change Wallpaper, Display/Theme Settings, Open File Explorer, and Refresh.
+- Desktop icon: Open, Open With where relevant, Rename, Duplicate Shortcut, Remove Shortcut, Properties, and app/host-specific actions.
+- Taskbar/dock/panel empty area: Panel Settings, Add Applet, Arrange/Lock Panel, Show Desktop, and Task Manager or running-window list.
+- Taskbar/dock/panel app item: Open/New Window, Pin/Unpin, Show/Hide, Minimize/Restore, Close Window, and app-specific actions.
+- File or folder: Open, Open With, New Folder where applicable, Rename, Copy, Cut, Paste, Duplicate, Delete/Move to Recycle Bin if implemented, Properties, and applet/scriptlet actions where permitted.
+- Host item: Open Dashboard, Open Terminal, Open File Explorer via SSH/SFTP, Run Scriptlet, Edit Host, Test Connection, and Properties.
+- Terminal selection or terminal window: Copy, Paste, Clear, Split/New Terminal, Open Host Dashboard, and terminal/session properties.
+
+### 7.3 SwitchboardOS system/workspace filesystem and basic utilities
+
+SwitchboardOS should provide a full-fledged app-owned system/workspace filesystem that supports OS-like file and folder workflows without granting arbitrary access to the user's full machine.
+
+This filesystem is a first-class SwitchboardOS storage layer, not a synonym for unrestricted local disk access. It should be capable enough to hold ordinary user-created workspace files and folders, applet/scriptlet source, notes, generated artifacts, desktop shortcut metadata, app manifests, app-owned configuration, caches, trash, exported profiles, and other SwitchboardOS-created artifacts.
+
+The user-facing mental model should be similar to a small OS filesystem rooted inside SwitchboardOS, with stable roots such as `workspace://` or `switchboard://`. The backing implementation may use native storage, SQLite metadata, package directories, or another local persistence mechanism, but all access must go through SwitchboardOS backend APIs and capability checks.
+
+System/workspace filesystem requirements:
+
+- SwitchboardOS should create and manage a workspace root folder. The built-in file explorer should be constrained to that root by default.
+- User-created applets, scriptlets, notes, saved generated files, layouts, exported profiles, and other SwitchboardOS-created artifacts should live under the workspace root unless the user explicitly exports them elsewhere.
+- Users should be able to create, rename, move, copy, duplicate, delete, and organize files and folders inside the workspace root.
+- The desktop should be able to contain file, folder, applet, scriptlet, host, and app shortcuts backed by workspace metadata.
+- File and folder operations should be available from the file explorer, desktop icons, context menus, keyboard shortcuts, and command palette where appropriate.
+- The file explorer should expose the current workspace path, breadcrumbs, list/grid views, sorting, filtering, preview/properties, and basic open-with behavior.
+- Apps may request scoped access to workspace files or folders through declared capabilities. They should not receive arbitrary local filesystem access.
+- Generated applets and scriptlets should be stored as workspace artifacts with manifest metadata, permissions, and audit-relevant provenance.
+- App installation files, app bundles, generated app code, app manifests, per-app settings, per-app caches, and uninstall records may be stored in the system/workspace filesystem, but installed app lifecycle state is owned by the app registry and package manager rather than by raw file presence alone.
+
+Remote filesystem requirements:
+
+- Access to a host filesystem should happen through SSH-backed workflows such as SFTP, SSH commands, applets, or scriptlets tied to a configured host.
+- Configured hosts should appear as separate filesystem providers or roots, for example `host://<host-id>/...`, rather than being merged with the SwitchboardOS workspace root.
+- SwitchboardOS should not treat remote filesystem access as a browser-side or renderer-side direct filesystem grant.
+- Remote file explorers, applets, and scriptlets should use host credentials and policy checks mediated by the SwitchboardOS backend.
+- Remote filesystem operations should be auditable when they modify files, run commands, or cross privilege boundaries.
+- A user may create applets or scriptlets that expose specific remote folders or operations, but those artifacts must declare their host scope, filesystem scope, and capabilities.
+- The current machine's host filesystem should not be implicitly exposed as arbitrary native local filesystem access. If SwitchboardOS needs to operate on the current machine as a managed host, it should use an explicit "This Machine" provider with separate approval and capabilities, preferably modeled like any other configured SSH host such as SSH-to-localhost.
+
+Basic utility expectations:
+
+- File Explorer for the SwitchboardOS workspace root.
+- Workspace properties/settings.
+- Applet and scriptlet creation from the desktop, launcher, file explorer, and context menus.
+- Properties/Get Info surfaces for files, folders, applets, scriptlets, hosts, windows, and apps.
+- Clipboard-aware copy/cut/paste for workspace items where supported.
+- Recycle Bin or delete semantics should be explicit. If Recycle Bin is not implemented, delete actions must clearly state that they are permanent.
+
+### 7.4 Window behavior
 
 Windows should support:
 
@@ -338,7 +465,7 @@ Window metadata:
 - Semantic state provider
 - Registered actions
 
-### 7.3 Tiling behavior
+### 7.5 Tiling behavior
 
 Tiling should be practical rather than over-engineered for MVP.
 
@@ -353,7 +480,7 @@ Initial tiling features:
 
 Advanced tiling can come later.
 
-### 7.4 Responsive behavior
+### 7.6 Responsive behavior
 
 SwitchboardOS should adapt to different screen sizes and window dimensions.
 
@@ -530,24 +657,39 @@ A generated bootstrap script should include:
 
 SwitchboardOS should support multiple app classes:
 
-1. Built-in apps
-2. User-created apps
-3. Agent-generated apps
-4. Imported app packages
+1. System applets
+2. User-created applets
+3. Agent-generated applets
+4. Imported applet packages
+5. Lower-level shell primitives
 
-MVP should prioritize built-in apps and local/generated apps. A marketplace is out of scope.
+MVP should prioritize system applets and local/generated applets. A marketplace is out of scope.
 
-### 11.2 Built-in apps
+### 11.2 System applets
 
-Initial built-in app candidates:
+Any app-like SwitchboardOS feature should be implemented as a system applet whenever it presents a launchable window, settings surface, file view, host tool, operator console, or other user-facing app experience. System applets should use the same applet programming language, manifest model, runtime lifecycle, window APIs, context menu APIs, and SDK surfaces that user-created and agent-generated applets use.
+
+System applet requirements:
+
+- System applets are first-party, trusted applets with system-level capabilities, not bespoke web panels that bypass the applet platform.
+- Settings, File Explorer, Recycle Bin, host tools, terminals, operator tools, bootstrap tools, and similar launchable experiences should be represented as system applets.
+- System applets should declare manifests, capabilities, launcher entries, context-menu contributions, default window behavior, semantic state, and app metadata through the same applet contract used by non-system applets.
+- System applets may receive privileged capabilities that user applets cannot request directly, but those capabilities still go through SwitchboardOS backend services, policy checks, and audit where applicable.
+- The shell primitives themselves, such as the desktop surface, taskbar/dock/panel, window manager, main menu, tray/status area, global context-menu dispatcher, and notification compositor, may remain shell-owned infrastructure rather than applets.
+- The applet programming language and SDK should be dogfooded by system applets so the applet platform is capable enough for real SwitchboardOS features before it is exposed as a user development surface.
+
+Initial system applet candidates:
 
 - Terminal
 - Host Dashboard
-- File Browser
+- File Explorer
+- Recycle Bin
+- Remote File Browser over SSH/SFTP
 - Process Viewer
 - Service Manager
 - Log Viewer
 - Bootstrap Generator
+- Applet/Scriptlet Studio
 - App Studio
 - Settings
 - Agent/Operator Console
@@ -587,12 +729,17 @@ Example capabilities:
 - host:exec:write
 - host:file:read
 - host:file:write
+- host:file:read:path-scoped
+- host:file:write:path-scoped
 - host:service:read
 - host:service:write
 - local:config:read
 - local:config:write
-- local:file:read
-- local:file:write
+- workspace:file:read
+- workspace:file:write
+- local:file:import
+- local:file:export
+- context-menu:contribute
 - agent:read-state
 - agent:invoke
 - network:http
@@ -602,7 +749,7 @@ The user can configure policy behavior around these capabilities.
 
 ### 11.5 App isolation
 
-For MVP, built-in apps can run inside the trusted Angular application. User-created and agent-generated apps should be designed with isolation in mind.
+For MVP, system applets can run inside the trusted Angular application. User-created and agent-generated applets should be designed with isolation in mind.
 
 Possible approaches:
 
@@ -614,11 +761,23 @@ Possible approaches:
 
 Even if early MVP starts with a simpler trusted model, the app contract should be designed so isolation can be strengthened later without rewriting the platform.
 
+### 11.6 App lifecycle and filesystem storage
+
+App installation, upgrade, disablement, and uninstallation should be managed by an app registry/package layer above the filesystem.
+
+App lifecycle requirements:
+
+- The app registry should be the source of truth for installed app identity, version, enabled/disabled state, requested capabilities, granted capabilities, shell contributions, context-menu contributions, launcher entries, desktop pins, taskbar/dock pins, and uninstall status.
+- App bundles, generated app source, app manifests, per-app settings, per-app caches, uninstall manifests, and user-created app artifacts may live in the SwitchboardOS system/workspace filesystem.
+- Deleting files in File Explorer should not silently uninstall, disable, or corrupt a registered app. Uninstall and disable actions should go through the app manager so permissions, menu contributions, pins, caches, generated files, audit records, and registry state are handled coherently.
+- App-created user documents should remain ordinary workspace files unless the user explicitly removes them during uninstall.
+- Remote host filesystems should not be used as the default installation location for SwitchboardOS apps. Remote app deployment or host-side helper installation should be an explicit host operation with SSH scope, policy checks, and audit.
+
 ## 12. SwitchboardOS App SDK
 
 ### 12.1 Purpose
 
-The App SDK allows built-in, user-created, and agent-generated apps to run inside SwitchboardOS windows and interact with hosts through controlled runtime APIs.
+The App SDK allows system, user-created, and agent-generated applets to run inside SwitchboardOS windows and interact with hosts through controlled runtime APIs.
 
 ### 12.2 SDK surfaces
 
@@ -629,6 +788,7 @@ Suggested SDK modules:
 - terminal
 - command
 - files
+- workspaceFiles
 - services
 - processes
 - logs
@@ -639,6 +799,7 @@ Suggested SDK modules:
 - graphics
 - agent
 - actions
+- contextMenu
 - notifications
 
 ### 12.3 Window API
@@ -679,7 +840,46 @@ Storage categories:
 
 Generated apps should not get arbitrary persistent storage without a declared capability.
 
-### 12.6 Agent state API
+### 12.6 Context menu API
+
+Apps should be able to register context menu contributions for their own windows and for specific elements they own.
+
+The context menu API should support:
+
+- Registering menu items by app/window/element scope
+- Nested submenus
+- Separators
+- Icons
+- Disabled/loading states
+- Keyboard shortcut labels
+- Destructive action styling
+- Async action handlers
+- Capability-gated actions
+- Shell-owned default items that apps can augment but not silently replace
+
+Apps should not be able to globally hijack shell context menus. Desktop, taskbar/dock/panel, host, workspace file, and system menus remain shell-owned surfaces that may accept declared app contributions only through explicit extension points.
+
+### 12.7 System/workspace and remote file APIs
+
+File APIs should distinguish between the SwitchboardOS system/workspace filesystem and remote host filesystems.
+
+System/workspace file API requirements:
+
+- Provide scoped access to files and folders inside the SwitchboardOS workspace root.
+- Support creating, reading, updating, renaming, moving, copying, deleting, and listing workspace files and folders when an app declares the relevant capability.
+- Preserve file/folder metadata needed for desktop shortcuts, applets, scriptlets, generated artifacts, and open-with behavior.
+- Prevent generated apps from receiving arbitrary local filesystem access by default.
+- Expose app installation artifacts only through app registry/package APIs unless the user is explicitly inspecting package contents.
+
+Remote file API requirements:
+
+- Access remote files through configured SSH/SFTP host services owned by the SwitchboardOS backend.
+- Require host scope, path scope where practical, and declared capabilities.
+- Route writes, deletes, command-backed transforms, and privilege-sensitive operations through policy and audit checks.
+- Allow applets and scriptlets to expose narrow remote filesystem workflows without granting broad direct filesystem access.
+- Treat the current machine's host filesystem as an explicit provider, not as an ambient local filesystem entitlement.
+
+### 12.8 Agent state API
 
 Apps should provide structured semantic state for the agent.
 
@@ -910,6 +1110,20 @@ Audit events should include:
 
 Do not log raw secrets.
 
+### 15.6 Hosted web mode security
+
+Hosted web mode increases the blast radius because browser clients can reach SwitchboardOS through a network port. It should therefore be secure by default:
+
+- Bind to localhost unless the user explicitly enables LAN or remote access.
+- Require login for all browser access.
+- Use short-lived sessions with explicit logout and idle timeout.
+- Enforce CSRF protection for state-changing requests.
+- Require capability and policy checks for every privileged API call.
+- Treat browser clients as untrusted UI surfaces.
+- Warn clearly before exposing the service beyond localhost.
+- Prefer TLS for non-local access, either built in or through a documented reverse proxy.
+- Audit login attempts, session changes, privileged calls, approvals, and denied actions.
+
 ## 16. Persistence Model
 
 ### 16.1 Persistent data
@@ -920,11 +1134,15 @@ Persist locally:
 - Host grouping/tags
 - Non-secret credential references
 - App manifests
+- Applet and scriptlet manifests
+- Workspace file/folder metadata where needed
+- Desktop shortcut/icon metadata
 - User preferences
 - Window layouts
 - Agent endpoint configuration metadata
 - Bootstrap preset metadata
 - Audit metadata
+- Context menu customization and extension metadata
 
 ### 16.2 Ephemeral/session data
 
@@ -934,6 +1152,7 @@ Treat as ephemeral unless explicitly saved:
 - Raw command outputs
 - Host file contents
 - Logs fetched from hosts
+- Remote filesystem listings and file previews fetched over SSH/SFTP
 - Metrics snapshots
 - Agent intermediate reasoning/context payloads
 
@@ -951,15 +1170,24 @@ Caches may be useful, but should be bounded and clearable:
 
 ### 17.1 First-run flow
 
-Suggested first-run sequence:
+Required first-run behavior:
 
-1. Welcome screen
-2. Choose theme/light/dark behavior
-3. Configure local secret storage preference if needed
-4. Add first SSH host
-5. Test connection
-6. Optionally configure agent endpoint
-7. Open host dashboard
+1. Open to the default desktop environment with the bundled wallpaper, neutral theme, taskbar/dock/panel, main menu affordance, and exactly two default desktop icons: File Explorer and Recycle Bin.
+2. Show a dismissible first-run panel on first launch until the user dismisses it.
+3. Teach OS primitives in that panel before surfacing advanced workflows:
+   - Start menu usage.
+   - Right-click context menus on desktop, icons, and windows.
+   - File Explorer workspace navigation and Recycle Bin behavior.
+   - Hosts and SSH setup basics for first host onboarding.
+   - Where advanced tools live (host operations, developer tools, and Operator) without flooding core launcher rows.
+4. Keep the desktop shell intact while showing the first-run panel.
+5. Provide quick actions for File Explorer, Hosts, Settings, App Manager, and Start menu.
+6. Choose theme/light/dark behavior if the user opens personalization or first-run setup.
+7. Configure local secret storage preference if needed.
+8. Add first SSH host.
+9. Test connection.
+10. Optionally configure agent endpoint.
+11. Open host dashboard.
 
 ### 17.2 Daily usage flow
 
@@ -1009,6 +1237,9 @@ Prove that SwitchboardOS is a useful local SSH operations desktop with an option
 Required MVP:
 
 - Electron + Angular application shell
+- Desktop-like default shell with bundled wallpaper, neutral theme, exactly two default desktop icons named File Explorer and Recycle Bin, a Start/menu-like launcher for everything else, taskbar/dock/panel, right-click desktop/icon/taskbar/window/file/host menus, and no default dashboard clutter
+- Constrained SwitchboardOS workspace root with File Explorer and basic file/folder creation, rename, move/copy, delete, properties, and open-with behavior
+- Applet and scriptlet artifacts stored in the workspace with manifests, declared capabilities, and context-menu integration
 - Local SQLite configuration database
 - Host inventory
 - Add/edit/delete SSH host
@@ -1052,8 +1283,10 @@ Deliver:
 - Main/renderer/preload structure
 - Basic desktop shell
 - Window manager prototype
+- OS-like context menu system for desktop, icons, taskbar/dock/panel, windows, hosts, and files
 - Settings storage
 - Theme toggle
+- Workspace root and basic File Explorer
 
 ### Milestone 2: Host and SSH foundation
 
@@ -1176,9 +1409,8 @@ Mitigation: use OS keychain/ssh-agent, avoid storing raw secrets in SQLite, expo
 
 ## 22. Positioning
 
-SwitchboardOS is a local-first operations desktop for remote SSH hosts.
+SwitchboardOS is a local-first operations desktop and optional hosted web control surface for remote SSH hosts.
 
-It gives users a desktop-like environment for managing machines through windows, apps, terminals, dashboards, and generated tools. Optional AI integration adds an Operator that can inspect structured workspace state, diagnose issues, create tools, and automate approved actions.
+It gives users a desktop-like environment for managing machines through windows, apps, terminals, dashboards, and generated tools. Optional hosted web mode makes that environment available from a browser through a SwitchboardOS backend on a configurable port. Optional AI integration adds an Operator that can inspect structured workspace state, diagnose issues, create tools, and automate approved actions.
 
 The product is not merely an AI chatbot, terminal emulator, or SSH client. It is an operations environment: a local OS-like shell for remote infrastructure work.
-

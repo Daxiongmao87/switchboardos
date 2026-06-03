@@ -1,19 +1,8 @@
 import { Component, OnInit } from '@angular/core';
-import type { AuditEvent, HostRecord, MvpSettings } from '../../../shared/mvp-models';
+import type { AgentEndpoint, AuditEvent, HostRecord, MvpSettings, OperatorProposal, OperatorProposeResult } from '../../../shared/mvp-models';
 import { getSwitchboardApi } from '../switchboard-api';
 
-type ProposalRisk = 'low' | 'medium';
-type ProposalStatus = 'pending' | 'approved' | 'dispatched' | 'failed';
-
-interface DiagnosticProposal {
-  id: string;
-  title: string;
-  command: string;
-  rationale: string;
-  risk: ProposalRisk;
-  status: ProposalStatus;
-  message: string;
-}
+type DiagnosticProposal = OperatorProposal;
 
 @Component({
   selector: 'app-agents',
@@ -23,7 +12,7 @@ interface DiagnosticProposal {
       <header class="page-header">
         <div>
           <h1>Agents</h1>
-          <p>Local Operator proposals with explicit approval before SSH command dispatch.</p>
+          <p>Provider-backed Operator proposals with explicit approval before SSH command dispatch.</p>
         </div>
         <div class="header-actions">
           <span class="status-pill" [class.is-disabled]="executionDisabled">{{ policyLabel }}</span>
@@ -34,7 +23,7 @@ interface DiagnosticProposal {
       </header>
 
       <p class="notice">
-        The MVP Operator reads local host state and proposes deterministic diagnostic commands. It does not execute autonomously and does not handle secrets.
+        The Operator builds a structured context, uses a configured provider when available, and falls back to local read-only diagnostics without exposing secrets.
       </p>
       <p *ngIf="statusMessage" class="notice success">{{ statusMessage }}</p>
       <p *ngIf="errorMessage" class="notice error">{{ errorMessage }}</p>
@@ -46,6 +35,14 @@ interface DiagnosticProposal {
             <div>
               <dt>Endpoint</dt>
               <dd>{{ endpointLabel }}</dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd>{{ endpointModelLabel }}</dd>
+            </div>
+            <div>
+              <dt>Context</dt>
+              <dd>{{ endpointContextLabel }}</dd>
             </div>
             <div>
               <dt>Policy</dt>
@@ -73,6 +70,10 @@ interface DiagnosticProposal {
               <dt>Recent audit events</dt>
               <dd>{{ auditEvents.length }}</dd>
             </div>
+            <div>
+              <dt>Host output trust</dt>
+              <dd>Untrusted and isolated</dd>
+            </div>
           </dl>
         </article>
 
@@ -86,6 +87,10 @@ interface DiagnosticProposal {
             <div>
               <dt>Execution mode</dt>
               <dd>{{ executionDisabled ? 'Disabled by policy' : 'Manual approval only' }}</dd>
+            </div>
+            <div>
+              <dt>Proposal source</dt>
+              <dd>{{ operatorModeLabel }}</dd>
             </div>
           </dl>
         </article>
@@ -147,6 +152,10 @@ interface DiagnosticProposal {
             <span>{{ proposals.length }} pending review</span>
           </div>
 
+          <ul *ngIf="operatorWarnings.length > 0" class="warning-list">
+            <li *ngFor="let warning of operatorWarnings">{{ warning }}</li>
+          </ul>
+
           <div *ngIf="proposals.length === 0" class="empty-state">
             <strong>No proposals generated</strong>
             <p>Select a host and generate local diagnostic proposals.</p>
@@ -159,7 +168,9 @@ interface DiagnosticProposal {
                   <h3>{{ proposal.title }}</h3>
                   <p>{{ proposal.rationale }}</p>
                 </div>
-                <span class="risk" [class.medium]="proposal.risk === 'medium'">{{ proposal.risk }}</span>
+                <span class="risk" [class.medium]="proposal.risk === 'medium'" [class.high]="proposal.risk === 'high'">
+                  {{ proposal.risk }} / {{ proposal.source }}
+                </span>
               </div>
 
               <code>{{ proposal.command }}</code>
@@ -402,6 +413,21 @@ interface DiagnosticProposal {
       color: #fde68a;
     }
 
+    .risk.high {
+      border-color: #991b1b;
+      color: #fecaca;
+    }
+
+    .warning-list {
+      margin: 0 0 12px;
+      padding: 10px 12px 10px 28px;
+      border: 1px solid #854d0e;
+      border-radius: 6px;
+      color: #fde68a;
+      background: rgba(133, 77, 14, 0.12);
+      font-size: 12px;
+    }
+
     .primary-action,
     .secondary-action {
       border: 1px solid #334155;
@@ -469,8 +495,11 @@ export class AgentsComponent implements OnInit {
   settings: MvpSettings | null = null;
   hosts: HostRecord[] = [];
   auditEvents: AuditEvent[] = [];
+  endpoints: AgentEndpoint[] = [];
   selectedHostId = '';
   proposals: DiagnosticProposal[] = [];
+  operatorResult: OperatorProposeResult | null = null;
+  operatorWarnings: string[] = [];
   terminalSessionId: string | null = null;
   terminalHostId: string | null = null;
   isLoading = false;
@@ -488,7 +517,34 @@ export class AgentsComponent implements OnInit {
   }
 
   get endpointLabel(): string {
+    const endpoint = this.activeEndpoint;
+    if (endpoint) {
+      return `${endpoint.name} (${endpoint.provider})`;
+    }
     return this.settings?.operator.endpoint.trim() || 'Not configured';
+  }
+
+  get endpointModelLabel(): string {
+    return this.activeEndpoint?.model || 'Not configured';
+  }
+
+  get endpointContextLabel(): string {
+    const endpoint = this.activeEndpoint;
+    if (!endpoint) {
+      return 'Fallback context only';
+    }
+    return `${endpoint.contextLimit} tokens, tools ${endpoint.toolUse ? 'on' : 'off'}, streaming ${endpoint.streaming ? 'on' : 'off'}`;
+  }
+
+  get operatorModeLabel(): string {
+    if (!this.operatorResult) {
+      return 'Not generated';
+    }
+    return this.operatorResult.mode === 'provider' ? 'Provider-backed' : 'Local fallback';
+  }
+
+  get activeEndpoint(): AgentEndpoint | null {
+    return this.endpoints.find((endpoint) => endpoint.enabled) ?? null;
   }
 
   get executionDisabled(): boolean {
@@ -513,14 +569,16 @@ export class AgentsComponent implements OnInit {
     this.errorMessage = '';
     this.statusMessage = '';
     try {
-      const [hosts, settings, auditEvents] = await Promise.all([
+      const [hosts, settings, auditEvents, endpoints] = await Promise.all([
         api.host.list(),
         api.settings.get(),
         api.audit.list(),
+        api.agentEndpoint.list(),
       ]);
       this.hosts = hosts;
       this.settings = settings;
       this.auditEvents = auditEvents;
+      this.endpoints = endpoints;
       if (!this.selectedHostId || !this.hosts.some((host) => host.id === this.selectedHostId)) {
         this.selectedHostId = this.hosts[0]?.id ?? '';
       }
@@ -543,21 +601,36 @@ export class AgentsComponent implements OnInit {
     this.errorMessage = '';
     this.statusMessage = '';
     try {
-      this.proposals = this.buildDiagnosticProposals(host);
-      await api.audit.log({
-        type: 'agent.proposals.generated',
-        entityType: 'host',
-        entityId: host.id,
-        message: `Generated ${this.proposals.length} local Operator diagnostic proposals for ${host.name}.`,
-        metadata: {
-          workflow: 'local-deterministic-operator',
+      if (api.agent?.propose) {
+        this.operatorResult = await api.agent.propose({
           hostId: host.id,
-          requiresApproval: true,
-          approved: false,
-          commands: this.proposals.map((proposal) => proposal.command),
-        },
-      });
-      this.statusMessage = 'Diagnostic proposals generated. Review each command before approval.';
+          request: 'Generate safe diagnostic proposals for this host.',
+        });
+        this.proposals = this.operatorResult.proposals;
+        this.operatorWarnings = this.operatorResult.warnings;
+        this.statusMessage = this.operatorResult.mode === 'provider'
+          ? 'Provider-backed proposals generated. Review each command before approval.'
+          : 'Local fallback proposals generated. Review each command before approval.';
+      } else {
+        this.operatorResult = null;
+        this.operatorWarnings = ['Operator provider service unavailable; using local fallback proposals.'];
+        this.proposals = this.buildDiagnosticProposals(host);
+        await api.audit.log({
+          type: 'agent.proposals.generated',
+          entityType: 'host',
+          entityId: host.id,
+          message: `Generated ${this.proposals.length} local Operator fallback proposals for ${host.name}.`,
+          metadata: {
+            workflow: 'local-fallback-operator',
+            hostId: host.id,
+            requiresApproval: true,
+            approved: false,
+            commands: this.proposals.map((proposal) => proposal.command),
+            secretsLogged: false,
+          },
+        });
+        this.statusMessage = 'Local fallback proposals generated. Review each command before approval.';
+      }
       await this.refreshAuditEvents(api);
     } catch {
       this.errorMessage = 'Unable to generate local Operator proposals.';
@@ -607,13 +680,16 @@ export class AgentsComponent implements OnInit {
         entityId: host.id,
         message: `Approved and dispatched local Operator command for ${host.name}: ${proposal.command}`,
         metadata: {
-          workflow: 'local-deterministic-operator',
+          workflow: proposal.source === 'provider' ? 'provider-backed-operator' : 'local-fallback-operator',
           hostId: host.id,
           terminalSessionId: sessionId,
           command: proposal.command,
+          proposalSource: proposal.source,
           requiresApproval: true,
           approved: true,
           autonomous: false,
+          untrustedHostOutputSeparated: true,
+          secretsLogged: false,
         },
       });
       this.statusMessage = `Approved command dispatched to ${host.name}.`;
@@ -654,6 +730,7 @@ export class AgentsComponent implements OnInit {
         risk: 'low',
         status: 'pending',
         message: '',
+        source: 'fallback',
       },
       {
         id: `${host.id}:uptime`,
@@ -663,6 +740,7 @@ export class AgentsComponent implements OnInit {
         risk: 'low',
         status: 'pending',
         message: '',
+        source: 'fallback',
       },
       {
         id: `${host.id}:disk`,
@@ -672,6 +750,7 @@ export class AgentsComponent implements OnInit {
         risk: 'low',
         status: 'pending',
         message: '',
+        source: 'fallback',
       },
       {
         id: `${host.id}:memory`,
@@ -681,6 +760,7 @@ export class AgentsComponent implements OnInit {
         risk: 'low',
         status: 'pending',
         message: '',
+        source: 'fallback',
       },
       {
         id: `${host.id}:services`,
@@ -690,6 +770,7 @@ export class AgentsComponent implements OnInit {
         risk: 'medium',
         status: 'pending',
         message: '',
+        source: 'fallback',
       },
     ];
   }

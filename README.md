@@ -1,12 +1,18 @@
 # SwitchboardOS
 
-A local-first desktop operations environment for managing remote computers over SSH.
+A local-first desktop and web-accessible operations environment for managing
+remote computers over SSH.
 
 ## Product Summary
 
 SwitchboardOS provides a full application shell with overlapping and tiling windows,
 desktop icons, host dashboards, terminals, file tools, logs, service/process views,
 generated utility apps, themes, and responsive layouts.
+
+SwitchboardOS should also support an optional hosted mode that serves the UI and
+backend API on a configurable local or LAN port. This makes the same operations
+environment accessible from a browser while keeping privileged SSH, filesystem,
+secret, policy, and audit operations behind the SwitchboardOS backend.
 
 The product is useful without AI. Its core value is a portable operations desktop
 for remote hosts. An optional agent endpoint ("Operator") supercharges the environment
@@ -18,6 +24,8 @@ automating approved actions.
 
 - **Electron** — Desktop runtime (privileged host operations, SSH transport,
   local filesystem access, OS keychain, IPC boundaries)
+- **Hosted web mode** — Optional local/LAN web server for browser access through
+  a configurable port and authenticated backend API
 - **Angular + TypeScript** — Application shell and app platform
 - **xterm.js** — Terminal rendering
 - **Monaco Editor** — Built-in code editing
@@ -25,9 +33,11 @@ automating approved actions.
 
 ## Architecture
 
-The Electron main process owns all privileged operations. Renderers communicate
-via typed IPC through a narrow preload layer. Every app exposes structured state
-and actions for agent/automation consumption.
+The Electron main process owns privileged operations in desktop mode. In hosted
+web mode, an equivalent SwitchboardOS backend owns those operations and serves
+browser clients over authenticated HTTP/WebSocket APIs on a configurable port.
+Renderers communicate via typed IPC or typed web APIs through narrow boundaries.
+Every app exposes structured state and actions for agent/automation consumption.
 
 ## Design Document
 
@@ -62,27 +72,24 @@ switchboardos/
 # Install dependencies
 npm install
 
-# Development: Angular dev server + Electron
-npm run start:dev
+# Development: TypeScript compiler + Electron
+npm run start
 
 # Production build
 npm run build
-npm run electron:build
+npm run electron:package
 ```
 
 ### Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm start` | Build renderer + Electron, then launch |
-| `npm run start:dev` | Angular dev server + Electron (hot reload) |
-| `npm run build` | Build renderer and Electron bundles |
-| `npm run build:renderer` | Build Angular app to `dist/switchboardos/` |
-| `npm run build:electron` | Bundle Electron main/preload to `dist-electron/` |
-| `npm run package` | Full build + package with electron-builder |
-| `npm run electron:build` | Build distributables (NSIS, DMG, AppImage) |
-| `npm run test` | Run Angular unit tests (Karma) |
+| `npm start` | Build TypeScript, then launch Electron |
+| `npm run build` | Build TypeScript only (`tsc`) |
+| `npm run build:ts` | Alias for `tsc` |
 | `npm run lint` | Run ESLint |
+| `npm run electron:package` | Build Electron distributables |
+| `npm test` | Run Angular unit tests (Karma) |
 
 ## License
 

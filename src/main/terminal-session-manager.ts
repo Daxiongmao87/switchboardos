@@ -12,12 +12,7 @@ import type {
   TerminalStopResult,
   TerminalWriteResult,
 } from '../shared/mvp-models';
-
-interface TerminalCommand {
-  command: string;
-  args: string[];
-  env?: NodeJS.ProcessEnv;
-}
+import { buildSystemSshShellCommand, type SshCommand } from './ssh-service';
 
 type TerminalEvent =
   | { channel: 'terminal:output'; payload: TerminalOutputEvent }
@@ -27,7 +22,7 @@ type TerminalEvent =
 export type TerminalEventSender = (event: TerminalEvent) => void;
 export type TerminalAuditLogger = (event: CreateAuditEventInput) => AuditEvent | Promise<AuditEvent>;
 export type TerminalHostResolver = (hostId: string) => HostRecord | null;
-export type TerminalCommandBuilder = (host: HostRecord) => TerminalCommand;
+export type TerminalCommandBuilder = (host: HostRecord) => SshCommand;
 
 interface TerminalSession {
   id: string;
@@ -43,38 +38,6 @@ const DEFAULT_COLS = 100;
 const DEFAULT_ROWS = 30;
 const FORCE_KILL_DELAY_MS = 2000;
 
-export function buildSshCommand(host: HostRecord): TerminalCommand {
-  const address = host.address || host.hostname;
-  const target = host.username ? `${host.username}@${address}` : address;
-  const port = String(host.port);
-  const keyPath = host.authMode === 'key' ? host.keyPath?.trim() : '';
-  const keyArgs = keyPath
-    ? ['-i', keyPath, '-o', 'IdentitiesOnly=yes']
-    : [];
-
-  return {
-    command: 'ssh',
-    args: [
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'StrictHostKeyChecking=accept-new',
-      '-o',
-      'NumberOfPasswordPrompts=0',
-      '-o',
-      'ConnectTimeout=10',
-      '-p',
-      port,
-      ...keyArgs,
-      target,
-    ],
-    env: {
-      ...process.env,
-      TERM: process.env.TERM || 'xterm-256color',
-    },
-  };
-}
-
 export class TerminalSessionManager {
   private readonly sessions = new Map<string, TerminalSession>();
 
@@ -82,7 +45,7 @@ export class TerminalSessionManager {
     private readonly resolveHost: TerminalHostResolver,
     private readonly sendEvent: TerminalEventSender,
     private readonly logAuditEvent: TerminalAuditLogger,
-    private readonly buildCommand: TerminalCommandBuilder = buildSshCommand,
+    private readonly buildCommand: TerminalCommandBuilder = buildSystemSshShellCommand,
   ) {}
 
   start(hostId: string): TerminalStartResult {
@@ -117,7 +80,7 @@ export class TerminalSessionManager {
     }
 
     const sessionId = randomUUID();
-    let command: TerminalCommand;
+    let command: SshCommand;
     try {
       command = this.buildCommand(host);
     } catch (error) {
@@ -164,7 +127,7 @@ export class TerminalSessionManager {
           address: host.address || host.hostname,
           port: host.port,
           username: host.username || null,
-          backend: 'ssh-spawn',
+          backend: 'ssh-spawn-tty',
           batchMode: true,
         },
       });
@@ -224,17 +187,23 @@ export class TerminalSessionManager {
     if (session) {
       session.cols = normalizedCols;
       session.rows = normalizedRows;
-      this.emitStatus(
-        session,
-        'active',
-        'Resize recorded, but SSH pipe backend does not support terminal resize propagation.'
-      );
+      if (session.process.stdin.writable) {
+        session.process.stdin.write(`stty cols ${normalizedCols} rows ${normalizedRows} 2>/dev/null\n`);
+      }
+      this.emitStatus(session, 'active', `Resize sent to SSH TTY: ${normalizedCols}x${normalizedRows}.`);
+      return {
+        sessionId,
+        success: true,
+        message: 'Resize sent to SSH TTY using stty.',
+        cols: normalizedCols,
+        rows: normalizedRows,
+      };
     }
 
     return {
       sessionId,
       success: false,
-      message: 'Resize is not supported by the SSH pipe backend in this MVP slice.',
+      message: 'Terminal session is not active.',
       cols: normalizedCols,
       rows: normalizedRows,
     };
@@ -260,7 +229,7 @@ export class TerminalSessionManager {
       metadata: {
         hostId: session.host.id,
         sessionId,
-        backend: 'ssh-spawn',
+        backend: 'ssh-spawn-tty',
       },
     });
 
@@ -317,7 +286,7 @@ export class TerminalSessionManager {
           hostId: session.host.id,
           sessionId: session.id,
           errorCode: error.code ?? null,
-          backend: 'ssh-spawn',
+          backend: 'ssh-spawn-tty',
         },
       });
       this.cleanupSession(session);
@@ -341,7 +310,7 @@ export class TerminalSessionManager {
           sessionId: session.id,
           exitCode: code,
           signal,
-          backend: 'ssh-spawn',
+          backend: 'ssh-spawn-tty',
         },
       });
       this.cleanupSession(session);

@@ -1,49 +1,44 @@
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
-import { RouterModule, Routes } from '@angular/router';
 import { AppComponent } from './app.component';
+import { AppStudioComponent } from './app-studio/app-studio.component';
 import { AgentsComponent } from './agents/agents.component';
 import { AppsComponent } from './apps/apps.component';
 import { AuditComponent } from './audit/audit.component';
 import { BootstrapComponent } from './bootstrap/bootstrap.component';
+import { CommandHistoryComponent } from './command-history/command-history.component';
 import { DashboardComponent } from './dashboard/dashboard.component';
+import { ExampleHostMapComponent } from './example-host-map/example-host-map.component';
+import { GeneratedAppRuntimeComponent } from './generated-app-runtime/generated-app-runtime.component';
 import { HostDetailComponent } from './host-detail/host-detail.component';
-import { HostsComponent } from './hosts/hosts.component';
+import { HostOperationsComponent } from './host-operations/host-operations.component';
+import { HostsComponent, FavoriteOnlyPipe } from './hosts/hosts.component';
 import { SettingsComponent } from './settings/settings.component';
 import { TerminalComponent } from './terminal/terminal.component';
-
-const routes: Routes = [
-  { path: 'dashboard', component: DashboardComponent },
-  { path: 'hosts', component: HostsComponent },
-  { path: 'hosts/:hostId', component: HostDetailComponent },
-  { path: 'terminal', component: TerminalComponent },
-  { path: 'bootstrap', component: BootstrapComponent },
-  { path: 'agents', component: AgentsComponent },
-  { path: 'apps', component: AppsComponent },
-  { path: 'audit', component: AuditComponent },
-  { path: 'settings', component: SettingsComponent },
-  { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
-  { path: '**', redirectTo: 'dashboard' },
-];
 
 @NgModule({
   declarations: [
     AppComponent,
+    AppStudioComponent,
     AgentsComponent,
     AppsComponent,
     AuditComponent,
     BootstrapComponent,
-    DashboardComponent,
+    CommandHistoryComponent,
+    ExampleHostMapComponent,
+    GeneratedAppRuntimeComponent,
     HostDetailComponent,
-    HostsComponent,
+    HostOperationsComponent,
     TerminalComponent,
   ],
   imports: [
     BrowserModule,
     FormsModule,
+    DashboardComponent,
+    HostsComponent,
+    FavoriteOnlyPipe,
     SettingsComponent,
-    RouterModule.forRoot(routes, { useHash: true }),
   ],
   providers: [],
   bootstrap: [AppComponent],

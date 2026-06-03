@@ -1,4 +1,4 @@
-import { SettingsStorageService, UserPreferences } from './settings-storage.service';
+import { SettingsStorageService } from './settings-storage.service';
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 

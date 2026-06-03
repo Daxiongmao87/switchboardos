@@ -25,10 +25,10 @@ const host = {
 };
 
 const presets = listBootstrapPresets();
-assert.equal(presets.length, 2, 'expected two bootstrap presets');
+assert.equal(presets.length, 6, 'expected full design-doc bootstrap preset set');
 assert.deepEqual(
   presets.map((preset) => preset.id).sort(),
-  ['debian-ubuntu', 'generic-posix'],
+  ['arch-linux', 'debian-ubuntu', 'generic-posix', 'macos', 'rhel-family', 'windows-openssh'],
 );
 
 const debian = generateBootstrapScript({
@@ -57,5 +57,21 @@ assert.equal(generic.hostId, null);
 assert.match(generic.script, /Host profile: none selected/);
 assert.doesNotMatch(generic.script, /apt-get install/);
 assert.doesNotMatch(generic.script, /Checking Docker availability/);
+
+const rhel = generateBootstrapScript({ presetId: 'rhel-family' }, host);
+assert.match(rhel.script, /dnf\/yum/);
+assert.match(rhel.script, /openssh-clients/);
+
+const arch = generateBootstrapScript({ presetId: 'arch-linux' }, host);
+assert.match(arch.script, /pacman/);
+assert.match(arch.script, /openssh/);
+
+const macos = generateBootstrapScript({ presetId: 'macos' }, host);
+assert.match(macos.script, /Darwin/);
+assert.match(macos.script, /Homebrew/);
+
+const windows = generateBootstrapScript({ presetId: 'windows-openssh' }, host);
+assert.match(windows.script, /PowerShell preset: windows-openssh/);
+assert.match(windows.script, /OpenSSH Server/);
 
 console.log('Bootstrap generator smoke passed.');
