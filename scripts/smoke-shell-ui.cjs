@@ -241,11 +241,16 @@ async function browserSmoke() {
     return normalizeColor(first.backgroundColor) === normalizeColor(second.backgroundColor)
       && normalizeColor(first.borderColor) === normalizeColor(second.borderColor);
   };
+  const launcherRowCapabilities = (row) => {
+    const raw = row.getAttribute('data-app-capabilities') || '';
+    return raw.split(',').map((item) => item.trim()).filter(Boolean);
+  };
   const launcherChromeState = (launcherPanel) => {
     if (!launcherPanel) {
       return {
         rowCount: 0,
         rowLabels: [],
+        launcherRowMetadata: [],
         iconCount: 0,
         miniButtonCount: 0,
         pinButtonCount: 0,
@@ -266,10 +271,16 @@ async function browserSmoke() {
     const fileExplorerIconChrome = iconChromeState([...document.querySelectorAll('.desktop-icon-frame')]
       .find((frame) => textIncludes(frame, 'File Explorer'))
       ?.querySelector('.desktop-icon-glyph'));
+    const launcherRowMetadata = launcherRows.map((row) => ({
+      label: row.querySelector('.launcher-text span')?.textContent?.trim() || '',
+      isSystemApplet: row.getAttribute('data-system-applet') === 'true',
+      capabilities: launcherRowCapabilities(row),
+    }));
 
     return {
       rowCount: launcherRows.length,
       rowLabels: launcherRows.map((row) => row.querySelector('.launcher-text span')?.textContent?.trim() || ''),
+      launcherRowMetadata,
       iconCount: launcherIcons.length,
       miniButtonCount: miniButtons.length,
       pinButtonCount: pinButtons.length,
@@ -434,6 +445,7 @@ async function browserSmoke() {
       launchFirstIconMatchesFileExplorerChrome: launcherVisual.launchFirstIconMatchesFileExplorerChrome,
       miniButtonsAtRestNoChrome: launcherVisual.miniButtonsAtRestNoChrome,
       pinButtonsAtRestNoChrome: launcherVisual.pinButtonsAtRestNoChrome,
+      launcherRowMetadata: launcherVisual.launcherRowMetadata,
     },
   };
 }
@@ -451,6 +463,21 @@ async function main() {
   writeFileSync(screenshotPath, Buffer.from(screenshot.data, 'base64'));
 
   cdp.close();
+  const requiredDefaultLauncherRows = [
+    'File Explorer',
+    'Recycle Bin',
+    'Hosts',
+    'Terminal',
+    'Settings',
+    'App Manager',
+  ];
+  const systemManifestRowMap = new Map(
+    report.launcher.launcherRowMetadata.map((row) => [row.label, row]),
+  );
+  const defaultLauncherRowsBackedBySystemApplet = requiredDefaultLauncherRows.every((label) => {
+    const row = systemManifestRowMap.get(label);
+    return Boolean(row?.isSystemApplet) && Array.isArray(row?.capabilities) && row.capabilities.length > 0;
+  });
 
   const checks = [
     report.initial.desktopShell,
@@ -532,6 +559,7 @@ async function main() {
     report.launcher.launchFirstIconMatchesFileExplorerChrome,
     report.launcher.miniButtonsAtRestNoChrome,
     report.launcher.pinButtonsAtRestNoChrome,
+    defaultLauncherRowsBackedBySystemApplet,
   ];
 
   if (checks.some((check) => !check)) {

@@ -590,6 +590,10 @@
         *ngFor="let app of launcherApps; trackBy: trackApp"
         class="launcher-row"
         (contextmenu)="openLauncherRowContextMenu($event, app.appId)"
+        [attr.data-system-applet]="app.manifest?.packageMetadata?.['systemApplet'] ? 'true' : null"
+        [attr.data-app-capabilities]="(app.manifest?.capabilities || []).join(',')"
+        [attr.data-app-sdk-contract]="app.manifest?.packageMetadata?.['sdkContract'] || null"
+        [attr.data-app-applet-language]="app.manifest?.packageMetadata?.['appletLanguage'] || null"
       >
         <button type="button" class="launcher-open-button" (click)="openFromLauncher(app.appId)">
           <span class="launcher-icon">{{ app.icon }}</span>

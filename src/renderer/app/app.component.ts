@@ -124,6 +124,73 @@ const LEGACY_DEFAULT_DESKTOP_SHORTCUT_IDS = [
   'audit',
   'settings',
 ] as const;
+const SYSTEM_APPLET_SDK_CONTRACT = 'switchboardos-app-sdk-v1';
+const SYSTEM_APPLET_LANGUAGE = 'typescript';
+const SYSTEM_APPLET_DEFAULT_WINDOW_BEHAVIOR: MvpSettings['defaultWindowBehavior'] = 'floating';
+type LauncherTarget =
+  | 'desktop'
+  | 'desktop-icon'
+  | 'taskbar'
+  | 'window'
+  | 'launcher-row'
+  | 'workspace-file';
+
+function buildSystemAppletManifest(input: {
+  appId: ShellAppId;
+  name: string;
+  description: string;
+  icon: string;
+  defaultBounds: ShellWindowBounds;
+  launcherCategory: LauncherCategory;
+  capabilities: string[];
+}): AppManifest {
+  const now = new Date().toISOString();
+  return {
+    id: `system-${input.appId}`,
+    appId: input.appId,
+    name: input.name,
+    description: input.description,
+    version: '1.0.0',
+    author: 'SwitchboardOS',
+    entrypoint: `system://${input.appId}`,
+    icon: input.icon,
+    category: 'system',
+    capabilities: [...input.capabilities],
+    sourceCode: '',
+    packageMetadata: {
+      systemApplet: true,
+      firstPartyTrust: true,
+      runtimeKind: 'renderer',
+      lifecycleKind: 'built-in',
+      launcherCategory: input.launcherCategory,
+      defaultWindowBehavior: SYSTEM_APPLET_DEFAULT_WINDOW_BEHAVIOR,
+      defaultWindowBounds: { ...input.defaultBounds },
+      supportedWindowModes: ['floating', 'tile-right', 'tile-bottom'],
+      contextMenuTargets: ['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'window'] as LauncherTarget[],
+      contextMenuContributions: {
+        open: true,
+        pin: true,
+        properties: true,
+        refresh: false,
+      },
+      semanticStateProvider: {
+        mode: 'shell-semantic-state',
+        providerId: `system.applet.${input.appId}`,
+      },
+      actionRegistryMarker: true,
+      actionRegistry: [
+        { id: 'open', label: 'Open', description: 'Open the app in a shell window.' },
+        { id: 'pin-to-desktop', label: 'Pin to desktop', description: 'Add app shortcut to desktop.' },
+      ],
+      appletLanguage: SYSTEM_APPLET_LANGUAGE,
+      sdkContract: SYSTEM_APPLET_SDK_CONTRACT,
+    },
+    enabled: true,
+    installedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 type ShellAppId = string;
 
@@ -384,6 +451,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 120, y: 72, width: 820, height: 560 },
       searchable: true,
       launcherCategory: 'core-launcher-system',
+      manifest: buildSystemAppletManifest({
+        appId: 'workspace-files',
+        name: 'File Explorer',
+        description: 'SwitchboardOS workspace root explorer.',
+        icon: 'FE',
+        defaultBounds: { x: 120, y: 72, width: 820, height: 560 },
+        launcherCategory: 'core-launcher-system',
+        capabilities: ['files:read', 'storage:scoped', 'local:config:read'],
+      }),
     },
     {
       appId: 'trash',
@@ -394,6 +470,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 180, y: 96, width: 620, height: 420 },
       searchable: true,
       launcherCategory: 'core-launcher-system',
+      manifest: buildSystemAppletManifest({
+        appId: 'trash',
+        name: 'Recycle Bin',
+        description: 'Deleted workspace recovery area.',
+        icon: 'TR',
+        defaultBounds: { x: 180, y: 96, width: 620, height: 420 },
+        launcherCategory: 'core-launcher-system',
+        capabilities: ['files:read', 'storage:scoped', 'local:config:read'],
+      }),
     },
     {
       appId: 'hosts',
@@ -404,6 +489,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 210, y: 48, width: 760, height: 610 },
       searchable: true,
       launcherCategory: 'core-launcher-system',
+      manifest: buildSystemAppletManifest({
+        appId: 'hosts',
+        name: 'Hosts',
+        description: 'Host inventory and reachability tooling.',
+        icon: 'H',
+        defaultBounds: { x: 210, y: 48, width: 760, height: 610 },
+        launcherCategory: 'core-launcher-system',
+        capabilities: ['host:read', 'host:actions'],
+      }),
     },
     {
       appId: 'terminal',
@@ -414,6 +508,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 530, y: 76, width: 780, height: 560 },
       searchable: true,
       launcherCategory: 'core-launcher-system',
+      manifest: buildSystemAppletManifest({
+        appId: 'terminal',
+        name: 'Terminal',
+        description: 'xterm SSH session workspace.',
+        icon: 'T',
+        defaultBounds: { x: 530, y: 76, width: 780, height: 560 },
+        launcherCategory: 'core-launcher-system',
+        capabilities: ['host:terminal', 'command:read', 'host:actions'],
+      }),
     },
     {
       appId: 'bootstrap',
@@ -424,6 +527,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 180, y: 74, width: 980, height: 620 },
       searchable: true,
       launcherCategory: 'advanced-developer',
+      manifest: buildSystemAppletManifest({
+        appId: 'bootstrap',
+        name: 'Bootstrap',
+        description: 'Script generator',
+        icon: 'B',
+        defaultBounds: { x: 180, y: 74, width: 980, height: 620 },
+        launcherCategory: 'advanced-developer',
+        capabilities: ['host:read', 'host:actions', 'actions:register', 'local:config:read'],
+      }),
     },
     {
       appId: 'file-browser',
@@ -434,6 +546,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 170, y: 82, width: 860, height: 560 },
       searchable: true,
       launcherCategory: 'contextual-host-file-window',
+      manifest: buildSystemAppletManifest({
+        appId: 'file-browser',
+        name: 'File Browser',
+        description: 'Read-only remote files',
+        icon: 'FB',
+        defaultBounds: { x: 170, y: 82, width: 860, height: 560 },
+        launcherCategory: 'contextual-host-file-window',
+        capabilities: ['host:read', 'files:read', 'command:read'],
+      }),
     },
     {
       appId: 'process-viewer',
@@ -444,6 +565,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 210, y: 90, width: 860, height: 560 },
       searchable: true,
       launcherCategory: 'contextual-host-file-window',
+      manifest: buildSystemAppletManifest({
+        appId: 'process-viewer',
+        name: 'Process Viewer',
+        description: 'Read-only process list',
+        icon: 'PV',
+        defaultBounds: { x: 210, y: 90, width: 860, height: 560 },
+        launcherCategory: 'contextual-host-file-window',
+        capabilities: ['host:read', 'processes:read', 'command:read'],
+      }),
     },
     {
       appId: 'service-manager',
@@ -454,6 +584,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 250, y: 98, width: 860, height: 560 },
       searchable: true,
       launcherCategory: 'contextual-host-file-window',
+      manifest: buildSystemAppletManifest({
+        appId: 'service-manager',
+        name: 'Service Manager',
+        description: 'Read-only service state',
+        icon: 'SM',
+        defaultBounds: { x: 250, y: 98, width: 860, height: 560 },
+        launcherCategory: 'contextual-host-file-window',
+        capabilities: ['host:read', 'services:read', 'command:read'],
+      }),
     },
     {
       appId: 'log-viewer',
@@ -464,6 +603,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 290, y: 106, width: 860, height: 560 },
       searchable: true,
       launcherCategory: 'contextual-host-file-window',
+      manifest: buildSystemAppletManifest({
+        appId: 'log-viewer',
+        name: 'Log Viewer',
+        description: 'Read-only host logs',
+        icon: 'LV',
+        defaultBounds: { x: 290, y: 106, width: 860, height: 560 },
+        launcherCategory: 'contextual-host-file-window',
+        capabilities: ['host:read', 'logs:read', 'command:read'],
+      }),
     },
     {
       appId: 'command-history',
@@ -474,6 +622,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 280, y: 96, width: 860, height: 560 },
       searchable: true,
       launcherCategory: 'advanced-developer',
+      manifest: buildSystemAppletManifest({
+        appId: 'command-history',
+        name: 'Command History',
+        description: 'SQLite command metadata',
+        icon: 'CH',
+        defaultBounds: { x: 280, y: 96, width: 860, height: 560 },
+        launcherCategory: 'advanced-developer',
+        capabilities: ['command:read', 'local:config:read'],
+      }),
     },
     {
       appId: 'app-studio',
@@ -484,6 +641,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 180, y: 76, width: 980, height: 620 },
       searchable: true,
       launcherCategory: 'advanced-developer',
+      manifest: buildSystemAppletManifest({
+        appId: 'app-studio',
+        name: 'App Studio',
+        description: 'Monaco app authoring review',
+        icon: 'AS',
+        defaultBounds: { x: 180, y: 76, width: 980, height: 620 },
+        launcherCategory: 'advanced-developer',
+        capabilities: ['storage:scoped', 'local:config:read', 'actions:register'],
+      }),
     },
     {
       appId: 'agents',
@@ -494,6 +660,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 164, y: 92, width: 860, height: 590 },
       searchable: true,
       launcherCategory: 'optional-configured',
+      manifest: buildSystemAppletManifest({
+        appId: 'agents',
+        name: 'Operator',
+        description: 'Agent endpoint and approvals',
+        icon: 'O',
+        defaultBounds: { x: 164, y: 92, width: 860, height: 590 },
+        launcherCategory: 'optional-configured',
+        capabilities: ['agent:read-state', 'actions:register', 'local:config:read'],
+      }),
     },
     {
       appId: 'apps',
@@ -504,6 +679,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 128, y: 70, width: 980, height: 630 },
       searchable: true,
       launcherCategory: 'core-launcher-system',
+      manifest: buildSystemAppletManifest({
+        appId: 'apps',
+        name: 'App Manager',
+        description: 'Local applets and package registry.',
+        icon: 'A',
+        defaultBounds: { x: 128, y: 70, width: 980, height: 630 },
+        launcherCategory: 'core-launcher-system',
+        capabilities: ['storage:scoped', 'local:config:read', 'actions:register'],
+      }),
     },
     {
       appId: 'host-map',
@@ -514,6 +698,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 190, y: 86, width: 920, height: 620 },
       searchable: true,
       launcherCategory: 'advanced-developer',
+      manifest: buildSystemAppletManifest({
+        appId: 'host-map',
+        name: 'Host Map',
+        description: 'Graphical SDK host health map',
+        icon: 'HM',
+        defaultBounds: { x: 190, y: 86, width: 920, height: 620 },
+        launcherCategory: 'advanced-developer',
+        capabilities: ['host:read', 'metrics:read', 'agent:read-state'],
+      }),
     },
     {
       appId: 'audit',
@@ -524,6 +717,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 280, y: 86, width: 820, height: 590 },
       searchable: true,
       launcherCategory: 'demo-non-core',
+      manifest: buildSystemAppletManifest({
+        appId: 'audit',
+        name: 'Audit',
+        description: 'Local action history',
+        icon: 'L',
+        defaultBounds: { x: 280, y: 86, width: 820, height: 590 },
+        launcherCategory: 'demo-non-core',
+        capabilities: ['local:config:read'],
+      }),
     },
     {
       appId: 'settings',
@@ -534,6 +736,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 340, y: 76, width: 760, height: 570 },
       searchable: true,
       launcherCategory: 'core-launcher-system',
+      manifest: buildSystemAppletManifest({
+        appId: 'settings',
+        name: 'Settings',
+        description: 'Local defaults and preferences.',
+        icon: 'S',
+        defaultBounds: { x: 340, y: 76, width: 760, height: 570 },
+        launcherCategory: 'core-launcher-system',
+        capabilities: ['local:config:read', 'actions:register'],
+      }),
     },
     {
       appId: 'status',
@@ -544,6 +755,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 96, y: 64, width: 700, height: 540 },
       searchable: true,
       launcherCategory: 'demo-non-core',
+      manifest: buildSystemAppletManifest({
+        appId: 'status',
+        name: 'Status',
+        description: 'Workspace overview',
+        icon: 'D',
+        defaultBounds: { x: 96, y: 64, width: 700, height: 540 },
+        launcherCategory: 'demo-non-core',
+        capabilities: ['host:read', 'metrics:read', 'local:config:read'],
+      }),
     },
     {
       appId: 'host-dashboard',
@@ -554,6 +774,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 240, y: 70, width: 620, height: 520 },
       searchable: false,
       launcherCategory: 'contextual-host-file-window',
+      manifest: buildSystemAppletManifest({
+        appId: 'host-dashboard',
+        name: 'Host Dashboard',
+        description: 'Host-scoped status surface',
+        icon: 'HD',
+        defaultBounds: { x: 240, y: 70, width: 620, height: 520 },
+        launcherCategory: 'contextual-host-file-window',
+        capabilities: ['host:read', 'metrics:read', 'host:actions'],
+      }),
     },
     {
       appId: 'host-terminal',
@@ -564,6 +793,15 @@ export class AppComponent implements OnInit, OnDestroy {
       defaultBounds: { x: 520, y: 92, width: 820, height: 580 },
       searchable: false,
       launcherCategory: 'contextual-host-file-window',
+      manifest: buildSystemAppletManifest({
+        appId: 'host-terminal',
+        name: 'Host Terminal',
+        description: 'Host-scoped terminal workspace',
+        icon: 'HT',
+        defaultBounds: { x: 520, y: 92, width: 820, height: 580 },
+        launcherCategory: 'contextual-host-file-window',
+        capabilities: ['host:read', 'host:terminal', 'command:read'],
+      }),
     },
   ];
   installedAppDefinitions: ShellAppDefinition[] = [];
@@ -1290,7 +1528,7 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         return;
       case 'add-applet':
-        this.createWorkspaceArtifact('applet', '');
+        void this.createWorkspaceArtifact('applet', '');
         return;
       case 'arrange-lock-panel':
         this.notify('Panel lock and arrangement controls are not available in this build.');
@@ -1311,13 +1549,13 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         return;
       case 'new-folder':
-        this.createWorkspaceArtifact('folder', '');
+        void this.createWorkspaceArtifact('folder', '');
         return;
       case 'new-applet':
-        this.createWorkspaceArtifact('applet', '');
+        void this.createWorkspaceArtifact('applet', '');
         return;
       case 'new-scriptlet':
-        this.createWorkspaceArtifact('scriptlet', '');
+        void this.createWorkspaceArtifact('scriptlet', '');
         return;
       case 'paste':
         void this.pasteWorkspaceArtifact();
