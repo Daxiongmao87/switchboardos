@@ -307,6 +307,7 @@ async function browserSmoke() {
 
   const iconLabels = [...document.querySelectorAll('.desktop-icon-label')].map((node) => node.textContent.trim());
   const desktop = document.querySelector('.desktop-surface');
+  const firstRunPanel = document.querySelector('[data-testid="first-run-panel"]');
   const desktopStyles = desktop ? getComputedStyle(desktop) : null;
   const fileExplorerIconChrome = desktopIconChrome('File Explorer');
   const initial = {
@@ -322,8 +323,19 @@ async function browserSmoke() {
     hostLauncherOpen: Boolean(document.querySelector('[data-testid="host-launcher"]')),
     inspectorOpen: Boolean(document.querySelector('[data-testid="semantic-inspector"]')),
     workspacePlaque: Boolean(document.querySelector('.workspace-plaque')),
-    firstRunOpen: Boolean(document.querySelector('[data-testid="first-run-panel"]')),
-    firstRunPanelText: (document.querySelector('[data-testid="first-run-panel"]')?.textContent || ''),
+    firstRunOpen: Boolean(firstRunPanel),
+    firstRunPanelText: (firstRunPanel?.textContent || ''),
+    firstRunPanelAppletMetadata: firstRunPanel ? {
+      appId: firstRunPanel.getAttribute('data-app-id') || '',
+      isSystemApplet: firstRunPanel.getAttribute('data-system-applet') === 'true',
+      sdkContract: firstRunPanel.getAttribute('data-app-sdk-contract') || '',
+      appletLanguage: firstRunPanel.getAttribute('data-app-applet-language') || '',
+      presentationMode: firstRunPanel.getAttribute('data-app-presentation-mode') || '',
+      capabilities: (firstRunPanel.getAttribute('data-app-capabilities') || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    } : null,
     firstRunQuickActions: [...(document.querySelectorAll('[data-testid="first-run-panel"] .first-run-actions button') || [])]
       .map((button) => (button.textContent || '').trim()),
     titlebarButtons: document.querySelectorAll('.window-btn').length,
@@ -488,6 +500,14 @@ async function main() {
     !report.initial.inspectorOpen,
     !report.initial.workspacePlaque,
     report.initial.firstRunOpen,
+    report.initial.firstRunPanelAppletMetadata?.appId === 'welcome',
+    report.initial.firstRunPanelAppletMetadata?.isSystemApplet,
+    report.initial.firstRunPanelAppletMetadata?.sdkContract === 'switchboardos-app-sdk-v1',
+    report.initial.firstRunPanelAppletMetadata?.appletLanguage === 'typescript',
+    report.initial.firstRunPanelAppletMetadata?.presentationMode === 'onboarding-panel',
+    report.initial.firstRunPanelAppletMetadata?.capabilities.includes('local:config:read'),
+    report.initial.firstRunPanelAppletMetadata?.capabilities.includes('local:config:write'),
+    report.initial.firstRunPanelAppletMetadata?.capabilities.includes('context-menu:contribute'),
     report.initial.firstRunPanelText.includes('Start menu'),
     report.initial.firstRunPanelText.includes('right-click'),
     report.initial.firstRunPanelText.includes('File Explorer'),

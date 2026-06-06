@@ -103,11 +103,17 @@ const DESKTOP_ICON_POSITIONS_STORAGE_KEY = 'switchboardos.desktopIconPositions.v
 const WORKSPACE_LAYOUT_STORAGE_KEY = 'switchboardos.workspaceLayout.v2';
 const WORKSPACE_PROFILES_STORAGE_KEY = 'switchboardos.workspaceProfiles.v1';
 const ACTIVE_WORKSPACE_PROFILE_STORAGE_KEY = 'switchboardos.activeWorkspaceProfile.v1';
-const FIRST_RUN_COMPLETE_STORAGE_KEY = 'switchboardos.firstRunComplete.v1';
+const LEGACY_FIRST_RUN_COMPLETE_STORAGE_KEY = 'switchboardos.firstRunComplete.v1';
 const WORKSPACE_ARTIFACTS_STORAGE_KEY = 'switchboardos.workspaceArtifacts.v1';
 const DEFAULT_WORKSPACE_PROFILE_ID = 'default';
 const DEFAULT_DESKTOP_SHORTCUT_IDS = ['workspace-files', 'trash'] as const;
 const DEFAULT_LAUNCHER_APP_IDS = ['workspace-files', 'trash', 'hosts', 'terminal', 'settings', 'apps'] as const;
+const WELCOME_APPLET_ID = 'welcome';
+const WELCOME_APPLET_STATE_KEY = 'switchboardos.systemApplet.welcome.state.v1';
+const WELCOME_APPLET_STATE_DESCRIPTOR: SystemAppletStateDescriptor = {
+  appId: WELCOME_APPLET_ID,
+  storageKey: WELCOME_APPLET_STATE_KEY,
+};
 const LEGACY_DEFAULT_DESKTOP_SHORTCUT_IDS = [
   'hosts',
   'terminal',
@@ -143,6 +149,7 @@ function buildSystemAppletManifest(input: {
   defaultBounds: ShellWindowBounds;
   launcherCategory: LauncherCategory;
   capabilities: string[];
+  packageMetadata?: Record<string, unknown>;
 }): AppManifest {
   const now = new Date().toISOString();
   return {
@@ -166,6 +173,8 @@ function buildSystemAppletManifest(input: {
       defaultWindowBehavior: SYSTEM_APPLET_DEFAULT_WINDOW_BEHAVIOR,
       defaultWindowBounds: { ...input.defaultBounds },
       supportedWindowModes: ['floating', 'tile-right', 'tile-bottom'],
+      presentationModes: input.packageMetadata?.['presentationModes'] ?? ['window'],
+      defaultPresentationMode: input.packageMetadata?.['defaultPresentationMode'] ?? 'window',
       contextMenuTargets: ['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'window'] as LauncherTarget[],
       contextMenuContributions: {
         open: true,
@@ -184,6 +193,7 @@ function buildSystemAppletManifest(input: {
       ],
       appletLanguage: SYSTEM_APPLET_LANGUAGE,
       sdkContract: SYSTEM_APPLET_SDK_CONTRACT,
+      ...input.packageMetadata,
     },
     enabled: true,
     installedAt: null,
@@ -310,6 +320,16 @@ interface ContextMenuState {
   windowId?: string;
   workspaceArtifact?: WorkspaceArtifact;
   items: ContextMenuItem[];
+}
+
+interface SystemAppletStateDescriptor {
+  appId: ShellAppId;
+  storageKey: string;
+}
+
+interface WelcomeAppletState {
+  dismissed: boolean;
+  dismissedAt?: string;
 }
 
 // WorkspaceProfile and WorkspaceLayoutSnapshot are imported from shared/mvp-models.ts
@@ -690,6 +710,35 @@ export class AppComponent implements OnInit, OnDestroy {
       }),
     },
     {
+      appId: WELCOME_APPLET_ID,
+      title: 'Welcome',
+      detail: 'First-run OS basics and setup entry points',
+      icon: 'W',
+      component: null,
+      defaultBounds: { x: 0, y: 0, width: 360, height: 300 },
+      searchable: false,
+      launcherCategory: 'optional-configured',
+      manifest: buildSystemAppletManifest({
+        appId: WELCOME_APPLET_ID,
+        name: 'Welcome',
+        description: 'First-run OS basics and setup entry points.',
+        icon: 'W',
+        defaultBounds: { x: 0, y: 0, width: 360, height: 300 },
+        launcherCategory: 'optional-configured',
+        capabilities: ['local:config:read', 'local:config:write', 'context-menu:contribute'],
+        packageMetadata: {
+          shellSurface: true,
+          presentationModes: ['panel', 'onboarding'],
+          defaultPresentationMode: 'onboarding-panel',
+          lifecycleKind: 'system-first-run',
+          stateOwner: 'system-applet',
+          stateStorageKey: WELCOME_APPLET_STATE_KEY,
+          launcherHiddenByDefault: true,
+          desktopPinnedByDefault: false,
+        },
+      }),
+    },
+    {
       appId: 'host-map',
       title: 'Host Map',
       detail: 'Graphical SDK host health map',
@@ -1011,6 +1060,23 @@ export class AppComponent implements OnInit, OnDestroy {
     return [...this.appDefinitions, ...this.installedAppDefinitions];
   }
 
+  get welcomeApplet(): ShellAppDefinition | null {
+    return this.getAppDefinition(WELCOME_APPLET_ID);
+  }
+
+  get welcomeAppletManifest(): AppManifest | null {
+    return this.welcomeApplet?.manifest ?? null;
+  }
+
+  get welcomeAppletCapabilities(): string {
+    return (this.welcomeAppletManifest?.capabilities ?? []).join(',');
+  }
+
+  get welcomeAppletPresentationMode(): string | null {
+    const mode = this.welcomeAppletManifest?.packageMetadata['defaultPresentationMode'];
+    return typeof mode === 'string' ? mode : null;
+  }
+
   get activeProfile(): WorkspaceProfile {
     const profile = this.workspaceProfiles.find((candidate) => candidate.profileId === this.activeProfileId);
     if (profile) {
@@ -1172,11 +1238,19 @@ export class AppComponent implements OnInit, OnDestroy {
 
   dismissFirstRun(): void {
     this.firstRunOpen = false;
-    window.localStorage.setItem(FIRST_RUN_COMPLETE_STORAGE_KEY, 'true');
+    this.writeWelcomeAppletState({
+      dismissed: true,
+      dismissedAt: new Date().toISOString(),
+    });
   }
 
   startFirstRunStep(appId: ShellAppId): void {
     this.openApp(appId);
+  }
+
+  openStartMenuFromWelcome(): void {
+    this.launcherOpen = true;
+    this.firstRunOpen = false;
   }
 
   closeWindow(windowItem: ShellWindow): void {
@@ -3031,8 +3105,50 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private syncFirstRunState(): void {
-    // First-run is a dismissible onboarding overlay on top of the desktop shell.
-    this.firstRunOpen = window.localStorage.getItem(FIRST_RUN_COMPLETE_STORAGE_KEY) !== 'true';
+    const welcomeState = this.readWelcomeAppletState();
+    this.firstRunOpen = !welcomeState.dismissed;
+  }
+
+  private readWelcomeAppletState(): WelcomeAppletState {
+    const state = this.readSystemAppletState<WelcomeAppletState>(WELCOME_APPLET_STATE_DESCRIPTOR);
+    if (state) {
+      return state;
+    }
+
+    const legacyDismissed = window.localStorage.getItem(LEGACY_FIRST_RUN_COMPLETE_STORAGE_KEY) === 'true';
+    const migratedState: WelcomeAppletState = legacyDismissed
+      ? { dismissed: true }
+      : { dismissed: false };
+    this.writeWelcomeAppletState(migratedState);
+    return migratedState;
+  }
+
+  private writeWelcomeAppletState(state: WelcomeAppletState): void {
+    this.writeSystemAppletState(WELCOME_APPLET_STATE_DESCRIPTOR, state);
+  }
+
+  private readSystemAppletState<TState>(descriptor: SystemAppletStateDescriptor): TState | null {
+    try {
+      const raw = window.localStorage.getItem(descriptor.storageKey);
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw) as { state?: TState } | TState;
+      if (parsed && typeof parsed === 'object' && 'state' in parsed) {
+        return parsed.state ?? null;
+      }
+      return parsed as TState;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeSystemAppletState<TState>(descriptor: SystemAppletStateDescriptor, state: TState): void {
+    window.localStorage.setItem(descriptor.storageKey, JSON.stringify({
+      appId: descriptor.appId,
+      state,
+      updatedAt: new Date().toISOString(),
+    }));
   }
 
   private createWindow(definition: ShellAppDefinition, host: HostRecord | null, overrideTitle?: string): ShellWindow {

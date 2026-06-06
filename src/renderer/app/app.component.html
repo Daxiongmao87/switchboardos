@@ -40,7 +40,18 @@
       <button type="button" (click)="toggleLauncher()">Open launcher</button>
     </section>
 
-    <section *ngIf="firstRunOpen" class="first-run-panel" aria-label="First run setup" data-testid="first-run-panel">
+    <section
+      *ngIf="firstRunOpen && welcomeAppletManifest as welcomeManifest"
+      class="first-run-panel applet-panel"
+      aria-label="First run setup"
+      data-testid="first-run-panel"
+      [attr.data-app-id]="welcomeManifest.appId"
+      [attr.data-system-applet]="welcomeManifest.packageMetadata?.['systemApplet'] ? 'true' : null"
+      [attr.data-app-capabilities]="welcomeAppletCapabilities"
+      [attr.data-app-sdk-contract]="welcomeManifest.packageMetadata?.['sdkContract'] || null"
+      [attr.data-app-applet-language]="welcomeManifest.packageMetadata?.['appletLanguage'] || null"
+      [attr.data-app-presentation-mode]="welcomeAppletPresentationMode"
+    >
       <header>
         <div>
           <h2>Welcome to SwitchboardOS</h2>
@@ -59,7 +70,7 @@
         <button type="button" class="mini-button" (click)="startFirstRunStep('workspace-files')">File Explorer</button>
         <button type="button" class="mini-button" (click)="startFirstRunStep('settings')">Settings</button>
         <button type="button" class="mini-button" (click)="startFirstRunStep('apps')">App Manager</button>
-        <button type="button" class="mini-button" (click)="launcherOpen = true; firstRunOpen = false">Start menu</button>
+        <button type="button" class="mini-button" (click)="openStartMenuFromWelcome()">Start menu</button>
       </div>
     </section>
 
