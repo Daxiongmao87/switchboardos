@@ -63,6 +63,17 @@ interface WorkspaceFileEntry {
   size?: number;
 }
 
+export interface WorkspaceTrashEntry {
+  id: string;
+  name: string;
+  kind: 'folder' | 'applet' | 'scriptlet' | 'note';
+  originalPath: string;
+  trashPath: string;
+  deletedAt: string;
+  updatedAt: string;
+  size: number;
+}
+
 interface WindowBounds {
   x: number;
   y: number;
@@ -138,6 +149,11 @@ export interface SwitchboardApi {
     copy: (path: string, targetPath?: string) => Promise<WorkspaceFileEntry>;
     move: (path: string, targetPath?: string) => Promise<WorkspaceFileEntry>;
     deletePermanent: (path: string) => Promise<boolean>;
+    listTrash: () => Promise<WorkspaceTrashEntry[]>;
+    moveToTrash: (path: string) => Promise<WorkspaceTrashEntry>;
+    restoreTrashItem: (id: string) => Promise<WorkspaceFileEntry>;
+    deleteTrashItemPermanent: (id: string) => Promise<boolean>;
+    emptyTrash: () => Promise<boolean>;
   };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;

@@ -260,7 +260,7 @@
                     <div class="workspace-file-type" *ngIf="workspaceArtifactViewMode === 'grid'">{{ workspaceArtifactKindLabel(artifact) }}</div>
                     <div class="workspace-file-actions">
                       <button type="button" class="mini-button" (click)="$event.stopPropagation(); renameWorkspaceArtifact(artifact)">Rename</button>
-                      <button type="button" class="mini-button workspace-file-danger" (click)="$event.stopPropagation(); deleteWorkspaceArtifact(artifact)">Delete Permanently</button>
+                      <button type="button" class="mini-button workspace-file-danger" (click)="$event.stopPropagation(); deleteWorkspaceArtifact(artifact)">Move to Recycle Bin</button>
                     </div>
                   </article>
                 </ng-container>
@@ -317,7 +317,25 @@
               </div>
               <button type="button" class="mini-button" (click)="clearTrash()">Empty Recycle Bin</button>
             </header>
-            <div class="trash-empty" data-testid="trash-empty">Recycle Bin is empty.</div>
+            <div class="trash-list" data-testid="trash-list">
+              <div class="trash-empty" data-testid="trash-empty" *ngIf="trashItems.length === 0">Recycle Bin is empty.</div>
+              <article
+                *ngFor="let item of trashItems; trackBy: trackTrashItem"
+                class="trash-item"
+                data-testid="trash-item"
+              >
+                <span class="workspace-file-icon">{{ item.kind === 'folder' ? 'DIR' : item.kind === 'applet' ? 'APP' : item.kind === 'scriptlet' ? 'SH' : 'TXT' }}</span>
+                <div class="trash-item-main">
+                  <strong>{{ item.name }}</strong>
+                  <small class="trash-item-path">{{ item.originalPath }}</small>
+                  <small class="trash-item-meta">Deleted {{ item.deletedAt }}{{ item.size !== undefined ? ' · ' + formatWorkspaceArtifactSize(item.size) : '' }}</small>
+                </div>
+                <div class="trash-item-actions">
+                  <button type="button" class="mini-button" data-testid="trash-restore" (click)="restoreTrashItem(item)">Restore</button>
+                  <button type="button" class="mini-button workspace-file-danger" data-testid="trash-delete-permanent" (click)="deleteTrashItemPermanent(item)">Delete Permanently</button>
+                </div>
+              </article>
+            </div>
           </section>
 
           <section *ngSwitchCase="'host-dashboard'" class="host-dashboard-window">

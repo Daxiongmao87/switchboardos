@@ -74,6 +74,17 @@ interface WorkspaceFileEntry {
   size: number;
 }
 
+interface WorkspaceTrashEntry {
+  id: string;
+  name: string;
+  kind: 'folder' | 'applet' | 'scriptlet' | 'note';
+  originalPath: string;
+  trashPath: string;
+  deletedAt: string;
+  updatedAt: string;
+  size: number;
+}
+
 interface HostedServerOptions {
   host: string;
   port: number;
@@ -93,6 +104,11 @@ interface HostedServerOptions {
   copyWorkspaceFile: (relativePath: string, targetRelativePath?: string) => WorkspaceFileEntry;
   moveWorkspaceFile: (relativePath: string, targetRelativePath?: string) => WorkspaceFileEntry;
   deleteWorkspaceFilePermanent: (relativePath: string) => boolean;
+  listWorkspaceTrash: () => WorkspaceTrashEntry[];
+  moveWorkspaceFileToTrash: (relativePath: string) => WorkspaceTrashEntry;
+  restoreWorkspaceTrashItem: (id: string) => WorkspaceFileEntry;
+  deleteWorkspaceTrashItemPermanent: (id: string) => boolean;
+  emptyWorkspaceTrash: () => boolean;
   auth: HostedAuthOptions;
 }
 
@@ -635,7 +651,7 @@ export class HostedServer {
     body: unknown,
     url: URL,
   ): unknown {
-    const [, action] = segments;
+    const [, action, subAction] = segments;
 
     if (!action && method === 'GET') {
       return this.options.listWorkspaceFiles(url.searchParams.get('path') ?? '');
@@ -679,6 +695,10 @@ export class HostedServer {
       return this.options.moveWorkspaceFile(sourcePath, targetRelativePath);
     }
 
+    if (action === 'trash') {
+      return this.routeWorkspaceTrashApi(method, subAction, body);
+    }
+
     if (!action && method === 'PATCH') {
       const record = asRecord(body);
       const renamePath = stringField(record, 'path');
@@ -702,6 +722,36 @@ export class HostedServer {
     }
 
     throw new HttpError(404, `No hosted workspace-files route for ${method} /api/${segments.join('/')}.`);
+  }
+
+  private routeWorkspaceTrashApi(
+    method: string,
+    subAction: string | undefined,
+    body: unknown,
+  ): unknown {
+    if (subAction === 'restore' && method === 'POST') {
+      const id = stringField(asRecord(body), 'id');
+      return this.options.restoreWorkspaceTrashItem(id);
+    }
+
+    if (subAction && method === 'DELETE') {
+      return this.options.deleteWorkspaceTrashItemPermanent(decodeURIComponent(subAction));
+    }
+
+    if (!subAction && method === 'GET') {
+      return this.options.listWorkspaceTrash();
+    }
+
+    if (!subAction && method === 'POST') {
+      const path = stringField(asRecord(body), 'path');
+      return this.options.moveWorkspaceFileToTrash(path);
+    }
+
+    if (!subAction && method === 'DELETE') {
+      return this.options.emptyWorkspaceTrash();
+    }
+
+    throw new HttpError(404, `No hosted workspace trash route for ${method}.`);
   }
 
   private routeCommandHistoryApi(method: string, action: string | undefined, body: unknown): unknown {

@@ -412,6 +412,129 @@ async function browserSmoke() {
   recycleBinIcon.querySelector('.desktop-icon').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
   await waitFor(() => document.querySelector('.desktop-window[data-app-id="trash"]'), 'trash window');
 
+  // Recycle Bin smoke: delete New Folder from File Explorer, verify in trash, restore, verify back
+  const trashResult = await (async () => {
+    // Navigate back to root in File Explorer
+    const rootBtn = fileWindow.querySelector('.workspace-file-navigation .mini-button');
+    if (rootBtn) {
+      rootBtn.click();
+      await waitFor(
+        () => {
+          const path = fileWindow.querySelector('[data-testid="workspace-current-path"]')?.textContent?.trim() || '';
+          return !path.includes('/New Folder');
+        },
+        'File Explorer navigated back to root',
+      );
+    }
+
+    // Find New Folder row in File Explorer and delete it
+    const folderToDelete = [...fileWindow.querySelectorAll('.workspace-file-item')]
+      .find((row) => textIncludes(row, 'New Folder'));
+    if (!folderToDelete) {
+      return { error: 'New Folder not found in File Explorer for trash test' };
+    }
+
+    // Override window.confirm to auto-accept the "Move to Recycle Bin" prompt
+    const origConfirm = window.confirm;
+    Object.defineProperty(window, 'confirm', {
+      get: () => () => true,
+      configurable: true,
+    });
+
+    // Click the "Move to Recycle Bin" button on the row
+    const deleteBtn = folderToDelete.querySelector('.workspace-file-danger');
+    if (deleteBtn) {
+      deleteBtn.click();
+      await sleep(500);
+    }
+
+    // Restore original confirm
+    Object.defineProperty(window, 'confirm', {
+      get: () => origConfirm,
+      configurable: true,
+    });
+
+    // Verify New Folder disappeared from File Explorer
+    const folderGone = ![...fileWindow.querySelectorAll('.workspace-file-item')]
+      .some((row) => textIncludes(row, 'New Folder'));
+    if (!folderGone) {
+      return { error: 'New Folder still visible in File Explorer after delete', folderGone };
+    }
+
+    // Navigate to root to refresh the view
+    const rootBtn2 = fileWindow.querySelector('.workspace-file-navigation .mini-button');
+    if (rootBtn2) {
+      rootBtn2.click();
+      await sleep(300);
+    }
+
+    // Open Recycle Bin window - find existing trash window or open new
+    let trashWindow = document.querySelector('.desktop-window[data-app-id="trash"]');
+    if (!trashWindow) {
+      const trashIconFrame = [...document.querySelectorAll('.desktop-icon-frame')]
+        .find((frame) => textIncludes(frame, 'Recycle Bin'));
+      if (trashIconFrame) {
+        trashIconFrame.querySelector('.desktop-icon').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+        trashWindow = await waitFor(
+          () => document.querySelector('.desktop-window[data-app-id="trash"]'),
+          'trash window opened',
+        );
+      }
+    }
+    if (!trashWindow) {
+      return { error: 'Could not open trash window' };
+    }
+
+    // Verify trash-item containing New Folder appears
+    const trashItem = await waitFor(
+      () => [...trashWindow.querySelectorAll('[data-testid="trash-item"]')]
+        .find((item) => textIncludes(item, 'New Folder')),
+      'trash item containing New Folder',
+      5000,
+    );
+    if (!trashItem) {
+      return { error: 'New Folder not found in Recycle Bin trash items', trashItem };
+    }
+
+    // Click restore button
+    const restoreBtn = trashItem.querySelector('[data-testid="trash-restore"]');
+    if (restoreBtn) {
+      restoreBtn.click();
+      await sleep(500);
+    }
+
+    // Verify trash empty state or New Folder gone from trash
+    const trashItemGone = ![...trashWindow.querySelectorAll('[data-testid="trash-item"]')]
+      .some((item) => textIncludes(item, 'New Folder'));
+    const trashEmptyVisible = Boolean(trashWindow.querySelector('[data-testid="trash-empty"]'));
+
+    // Refresh File Explorer to see restored item
+    // Navigate back to root
+    const rootBtn3 = fileWindow.querySelector('.workspace-file-navigation .mini-button');
+    if (rootBtn3) {
+      rootBtn3.click();
+      await sleep(300);
+    }
+
+    // Check New Folder is back in File Explorer
+    const folderRestored = await waitFor(
+      () => {
+        const rows = [...fileWindow.querySelectorAll('.workspace-file-item')];
+        return rows.find((row) => textIncludes(row, 'New Folder'));
+      },
+      'New Folder restored to File Explorer',
+      5000,
+    );
+
+    return {
+      folderMovedToTrash: true,
+      trashItemFound: true,
+      trashItemGone,
+      trashEmptyVisible,
+      folderRestored: Boolean(folderRestored),
+    };
+  })();
+
   await waitFor(() => document.querySelector('.toast'), 'toast after opening windows');
   await waitFor(
     () => document.querySelectorAll('.toast:not(.error)').length === 0,
@@ -438,6 +561,7 @@ async function browserSmoke() {
       workspaceNavigatedPath,
       workspaceBreadcrumbText,
     },
+    trash: trashResult,
     launcher: {
       open: Boolean(launcher),
       includesHosts: launcherText.includes('Hosts'),
@@ -580,6 +704,11 @@ async function main() {
     report.launcher.miniButtonsAtRestNoChrome,
     report.launcher.pinButtonsAtRestNoChrome,
     defaultLauncherRowsBackedBySystemApplet,
+    // Recycle Bin smoke checks
+    report.trash?.folderMovedToTrash,
+    report.trash?.trashItemFound,
+    report.trash?.trashItemGone,
+    report.trash?.folderRestored,
   ];
 
   if (checks.some((check) => !check)) {

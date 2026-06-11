@@ -70,6 +70,11 @@ interface ShellApi {
     copy: (path: string, targetPath?: string) => Promise<WorkspaceArtifact>;
     move: (path: string, targetPath?: string) => Promise<WorkspaceArtifact>;
     deletePermanent: (path: string) => Promise<boolean>;
+    listTrash: () => Promise<WorkspaceTrashEntry[]>;
+    moveToTrash: (path: string) => Promise<WorkspaceTrashEntry>;
+    restoreTrashItem: (id: string) => Promise<WorkspaceArtifact>;
+    deleteTrashItemPermanent: (id: string) => Promise<boolean>;
+    emptyTrash: () => Promise<boolean>;
   };
   appManifest: {
     list: () => Promise<AppManifest[]>;
@@ -245,6 +250,17 @@ interface WorkspaceArtifact {
   size?: number;
 }
 
+interface WorkspaceTrashEntry {
+  id: string;
+  name: string;
+  kind: WorkspaceArtifactKind;
+  originalPath: string;
+  trashPath: string;
+  deletedAt: string;
+  updatedAt: string;
+  size?: number;
+}
+
 type WorkspaceClipboardMode = 'copy' | 'cut';
 
 interface WorkspaceClipboardItem {
@@ -411,6 +427,7 @@ export class AppComponent implements OnInit, OnDestroy {
   workspaceArtifactKindFilter: WorkspaceArtifactKindFilter = 'all';
   workspaceArtifactSortBy: WorkspaceArtifactSortField = 'name';
   workspaceArtifactViewMode: WorkspaceArtifactViewMode = 'list';
+  trashItems: WorkspaceTrashEntry[] = [];
 
   get workspaceArtifactsView(): WorkspaceArtifact[] {
     const query = this.workspaceArtifactSearchText.trim().toLowerCase();
@@ -2259,25 +2276,22 @@ export class AppComponent implements OnInit, OnDestroy {
   async deleteWorkspaceArtifact(artifact: WorkspaceArtifact): Promise<void> {
     const path = this.workspaceArtifactPath(artifact);
     const confirmed = window.confirm(
-      `Delete "${artifact.name}" permanently? Recycle Bin is not implemented, so this is permanent.`,
+      `Move "${artifact.name}" to Recycle Bin?`,
     );
     if (!confirmed) {
       return;
     }
 
     const api = getSwitchboardApi();
-    if (api?.workspaceFile) {
+    if (api?.workspaceFile?.moveToTrash) {
       try {
-        const deleted = await api.workspaceFile.deletePermanent(path);
-        if (!deleted) {
-          this.errorMessage = 'Workspace artifact was not found.';
-          return;
-        }
+        await api.workspaceFile.moveToTrash(path);
         await this.loadWorkspaceArtifactsFromBackend();
-        this.notify(`Workspace artifact "${artifact.name}" deleted permanently.`);
+        await this.loadTrashItemsFromBackend();
+        this.notify(`"${artifact.name}" moved to Recycle Bin.`);
         return;
       } catch (error) {
-        this.errorMessage = this.errorText(error, 'Workspace artifact delete failed.');
+        this.errorMessage = this.errorText(error, 'Unable to move workspace artifact to Recycle Bin.');
         return;
       }
     }
@@ -2289,11 +2303,88 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
     this.saveWorkspaceArtifacts();
-    this.notify(`Workspace artifact "${artifact.name}" deleted permanently (local).`);
+    this.notify(`"${artifact.name}" moved to Recycle Bin (local placeholder).`);
   }
 
-  clearTrash(): void {
-    this.notify('Recycle Bin is empty.');
+  async clearTrash(): Promise<void> {
+    if (this.trashItems.length === 0) {
+      this.notify('Recycle Bin is empty.');
+      return;
+    }
+    const confirmed = window.confirm('Empty Recycle Bin permanently? This cannot be undone.');
+    if (!confirmed) {
+      return;
+    }
+
+    const api = getSwitchboardApi();
+    if (api?.workspaceFile?.emptyTrash) {
+      try {
+        await api.workspaceFile.emptyTrash();
+        await this.loadTrashItemsFromBackend();
+        this.notify('Recycle Bin emptied.');
+        return;
+      } catch (error) {
+        this.errorMessage = this.errorText(error, 'Unable to empty Recycle Bin.');
+        return;
+      }
+    }
+
+    this.trashItems = [];
+    this.notify('Recycle Bin emptied (local placeholder).');
+  }
+
+  async loadTrashItemsFromBackend(): Promise<void> {
+    const api = getSwitchboardApi();
+    if (api?.workspaceFile?.listTrash) {
+      try {
+        this.trashItems = await api.workspaceFile.listTrash();
+        return;
+      } catch {
+        // Fallback to empty array
+      }
+    }
+    this.trashItems = [];
+  }
+
+  async restoreTrashItem(item: WorkspaceTrashEntry): Promise<void> {
+    const api = getSwitchboardApi();
+    if (api?.workspaceFile?.restoreTrashItem) {
+      try {
+        await api.workspaceFile.restoreTrashItem(item.id);
+        await this.loadWorkspaceArtifactsFromBackend();
+        await this.loadTrashItemsFromBackend();
+        this.notify(`"${item.name}" restored.`);
+        return;
+      } catch (error) {
+        this.errorMessage = this.errorText(error, 'Unable to restore item from Recycle Bin.');
+        return;
+      }
+    }
+    this.trashItems = this.trashItems.filter((entry) => entry.id !== item.id);
+    this.notify(`"${item.name}" restored (local placeholder).`);
+  }
+
+  async deleteTrashItemPermanent(item: WorkspaceTrashEntry): Promise<void> {
+    const confirmed = window.confirm(`Permanently delete "${item.name}"? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    const api = getSwitchboardApi();
+    if (api?.workspaceFile?.deleteTrashItemPermanent) {
+      try {
+        await api.workspaceFile.deleteTrashItemPermanent(item.id);
+        await this.loadTrashItemsFromBackend();
+        this.notify(`"${item.name}" removed permanently.`);
+        return;
+      } catch (error) {
+        this.errorMessage = this.errorText(error, 'Unable to permanently delete item.');
+        return;
+      }
+    }
+
+    this.trashItems = this.trashItems.filter((entry) => entry.id !== item.id);
+    this.notify(`"${item.name}" removed permanently (local placeholder).`);
   }
 
   showDesktop(): void {
@@ -2750,6 +2841,10 @@ export class AppComponent implements OnInit, OnDestroy {
     return artifact.id;
   }
 
+  trackTrashItem(_index: number, item: WorkspaceTrashEntry): string {
+    return item.id;
+  }
+
   minimize(): void {
     void getSwitchboardApi()?.window.minimize();
   }
@@ -2944,9 +3039,9 @@ export class AppComponent implements OnInit, OnDestroy {
       { id: 'duplicate-workspace-artifact', label: 'Duplicate', detail: 'Creates a workspace copy.' },
       {
         id: 'delete-workspace-artifact',
-        label: 'Delete Permanently',
+        label: 'Move to Recycle Bin',
         danger: true,
-        detail: 'Permanent; Recycle Bin recovery is not implemented.',
+        detail: 'Moves the item to the Recycle Bin.',
       },
       { id: 'properties-workspace-artifact', label: 'Properties', detail: path },
       {
@@ -3178,6 +3273,9 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     this.windows = [...this.windows, windowItem];
     this.notify(`${title} opened.`);
+    if (definition.appId === 'trash') {
+      void this.loadTrashItemsFromBackend();
+    }
     return windowItem;
   }
 

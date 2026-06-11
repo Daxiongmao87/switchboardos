@@ -63,6 +63,17 @@ interface WorkspaceFileEntry {
   size: number;
 }
 
+interface WorkspaceTrashEntry {
+  id: string;
+  name: string;
+  kind: 'folder' | 'applet' | 'scriptlet' | 'note';
+  originalPath: string;
+  trashPath: string;
+  deletedAt: string;
+  updatedAt: string;
+  size: number;
+}
+
 interface HostedSwitchboardApi {
   app: {
     getInfo: () => Promise<AppInfo & { hosted?: boolean }>;
@@ -126,6 +137,11 @@ interface HostedSwitchboardApi {
     copy: (path: string, targetPath?: string) => Promise<WorkspaceFileEntry>;
     move: (path: string, targetPath?: string) => Promise<WorkspaceFileEntry>;
     deletePermanent: (path: string) => Promise<boolean>;
+    listTrash: () => Promise<WorkspaceTrashEntry[]>;
+    moveToTrash: (path: string) => Promise<WorkspaceTrashEntry>;
+    restoreTrashItem: (id: string) => Promise<WorkspaceFileEntry>;
+    deleteTrashItemPermanent: (id: string) => Promise<boolean>;
+    emptyTrash: () => Promise<boolean>;
   };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;
@@ -274,6 +290,15 @@ function createHostedApi(): HostedSwitchboardApi {
         request('/api/workspace-files/move', { method: 'POST', body: { path, targetPath } }),
       deletePermanent: (path: string) =>
         request<boolean>(`/api/workspace-files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+      listTrash: () => request('/api/workspace-files/trash'),
+      moveToTrash: (path: string) =>
+        request('/api/workspace-files/trash', { method: 'POST', body: { path } }),
+      restoreTrashItem: (id: string) =>
+        request('/api/workspace-files/trash/restore', { method: 'POST', body: { id } }),
+      deleteTrashItemPermanent: (id: string) =>
+        request<boolean>(`/api/workspace-files/trash/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      emptyTrash: () =>
+        request<boolean>('/api/workspace-files/trash', { method: 'DELETE' }),
     },
     bootstrap: {
       presets: () => request('/api/bootstrap/presets'),

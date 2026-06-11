@@ -81,6 +81,17 @@ interface WorkspaceFileEntry {
   size?: number;
 }
 
+interface WorkspaceTrashEntry {
+  id: string;
+  name: string;
+  kind: 'folder' | 'applet' | 'scriptlet' | 'note';
+  originalPath: string;
+  trashPath: string;
+  deletedAt: string;
+  updatedAt: string;
+  size: number;
+}
+
 interface AppInfo {
   isPackaged: boolean;
   version: string;
@@ -253,6 +264,16 @@ contextBridge.exposeInMainWorld('sb', {
       invoke('workspace-file:move', path, targetPath),
     deletePermanent: (path: string): Promise<boolean> =>
       invoke('workspace-file:delete-permanent', path),
+    listTrash: (): Promise<WorkspaceTrashEntry[]> =>
+      invoke('workspace-file:list-trash'),
+    moveToTrash: (path: string): Promise<WorkspaceTrashEntry> =>
+      invoke('workspace-file:move-to-trash', path),
+    restoreTrashItem: (id: string): Promise<WorkspaceFileEntry> =>
+      invoke('workspace-file:restore-trash', id),
+    deleteTrashItemPermanent: (id: string): Promise<boolean> =>
+      invoke('workspace-file:delete-trash-permanent', id),
+    emptyTrash: (): Promise<boolean> =>
+      invoke('workspace-file:empty-trash'),
   },
 
   // --- Host Groups ---
@@ -426,6 +447,11 @@ declare global {
         copy: (path: string, targetPath?: string) => Promise<WorkspaceFileEntry>;
         move: (path: string, targetPath?: string) => Promise<WorkspaceFileEntry>;
         deletePermanent: (path: string) => Promise<boolean>;
+        listTrash: () => Promise<WorkspaceTrashEntry[]>;
+        moveToTrash: (path: string) => Promise<WorkspaceTrashEntry>;
+        restoreTrashItem: (id: string) => Promise<WorkspaceFileEntry>;
+        deleteTrashItemPermanent: (id: string) => Promise<boolean>;
+        emptyTrash: () => Promise<boolean>;
       };
       hostGroup: {
         list: () => Promise<HostGroup[]>;

@@ -14,7 +14,7 @@
  */
 
 import { app, BrowserWindow, ipcMain, dialog, safeStorage } from 'electron';
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { basename, dirname, extname, join, isAbsolute, relative, resolve } from 'path';
 import { randomBytes } from 'crypto';
 import { networkInterfaces } from 'os';
@@ -134,10 +134,22 @@ interface WorkspaceFileEntry {
   size: number;
 }
 
+interface WorkspaceTrashEntry {
+  id: string;
+  name: string;
+  kind: 'folder' | 'applet' | 'scriptlet' | 'note';
+  originalPath: string;
+  trashPath: string;
+  deletedAt: string;
+  updatedAt: string;
+  size: number;
+}
+
 const HOSTED_DEFAULT_HOST = '127.0.0.1';
 const HOSTED_DEFAULT_PORT = 7878;
 const HOSTED_DEFAULT_SESSION_IDLE_MINUTES = 30;
 const HOSTED_DISABLED_VALUES = new Set(['0', 'false', 'off', 'no']);
+const WORKSPACE_TRASH_DIRECTORY_NAME = '.switchboard-trash';
 const HOSTED_ENABLED_VALUES = new Set(['1', 'true', 'on', 'yes']);
 const HOSTED_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
@@ -258,6 +270,11 @@ async function startHostedServer(config: HostedConfig): Promise<void> {
     copyWorkspaceFile,
     moveWorkspaceFile,
     deleteWorkspaceFilePermanent,
+    listWorkspaceTrash,
+    moveWorkspaceFileToTrash,
+    restoreWorkspaceTrashItem,
+    deleteWorkspaceTrashItemPermanent,
+    emptyWorkspaceTrash,
     auth: {
       required: config.authRequired,
       accessToken: config.authToken,
@@ -357,6 +374,19 @@ function workspacePath(relativePath = ''): string {
   return target;
 }
 
+function workspaceUserPath(relativePath = ''): string {
+  const target = workspacePath(relativePath);
+  const root = workspaceRoot();
+  const rel = relative(root, target);
+  if (rel !== '' && rel !== '.') {
+    const firstSegment = rel.split(/[/\\]/)[0];
+    if (firstSegment === WORKSPACE_TRASH_DIRECTORY_NAME) {
+      throw new Error('Cannot access internal SwitchboardOS workspace storage.');
+    }
+  }
+  return target;
+}
+
 function artifactKindForName(name: string, isDirectory: boolean): WorkspaceFileEntry['kind'] {
   if (isDirectory) {
     return 'folder';
@@ -394,11 +424,12 @@ function workspaceEntryForPath(root: string, absolutePath: string): WorkspaceFil
 
 function listWorkspaceFiles(relativePath = ''): WorkspaceFileEntry[] {
   const root = workspaceRoot();
-  const directory = workspacePath(relativePath);
+  const directory = workspaceUserPath(relativePath);
   if (!existsSync(directory)) {
     mkdirSync(directory, { recursive: true });
   }
   return readdirSync(directory)
+    .filter((name) => name !== WORKSPACE_TRASH_DIRECTORY_NAME)
     .map((name) => workspaceEntryForPath(root, join(directory, name)))
     .sort((a, b) => {
       if (a.kind === 'folder' && b.kind !== 'folder') {
@@ -432,7 +463,7 @@ function workspaceFileExtensionForName(name: string): string {
 }
 
 function resolveWorkspaceDirectory(relativePath = ''): string {
-  const directory = workspacePath(relativePath);
+  const directory = workspaceUserPath(relativePath);
   if (!existsSync(directory)) {
     throw new Error(`Workspace target directory does not exist: "${relativePath || '/'}".`);
   }
@@ -519,7 +550,7 @@ function createWorkspaceFile(kind: WorkspaceFileEntry['kind'], targetRelativePat
 
 function duplicateWorkspaceFile(relativePath: string): WorkspaceFileEntry {
   const root = workspaceRoot();
-  const sourceAbsolutePath = workspacePath(relativePath);
+  const sourceAbsolutePath = workspaceUserPath(relativePath);
   if (sourceAbsolutePath === root) {
     throw new Error('Cannot duplicate the workspace root directory.');
   }
@@ -538,7 +569,7 @@ function duplicateWorkspaceFile(relativePath: string): WorkspaceFileEntry {
 
 function copyWorkspaceFile(relativePath: string, targetRelativePath = ''): WorkspaceFileEntry {
   const root = workspaceRoot();
-  const sourceAbsolutePath = workspacePath(relativePath);
+  const sourceAbsolutePath = workspaceUserPath(relativePath);
   if (sourceAbsolutePath === root) {
     throw new Error('Cannot copy the workspace root directory.');
   }
@@ -563,7 +594,7 @@ function copyWorkspaceFile(relativePath: string, targetRelativePath = ''): Works
 
 function moveWorkspaceFile(relativePath: string, targetRelativePath = ''): WorkspaceFileEntry {
   const root = workspaceRoot();
-  const sourceAbsolutePath = workspacePath(relativePath);
+  const sourceAbsolutePath = workspaceUserPath(relativePath);
   if (sourceAbsolutePath === root) {
     throw new Error('Cannot move the workspace root directory.');
   }
@@ -606,7 +637,7 @@ function sanitizeWorkspaceFileName(name: string): string {
 function renameWorkspaceFile(relativePath: string, newName: string): WorkspaceFileEntry {
   const safeNewName = sanitizeWorkspaceFileName(newName);
   const root = workspaceRoot();
-  const currentAbsolutePath = workspacePath(relativePath);
+  const currentAbsolutePath = workspaceUserPath(relativePath);
   if (currentAbsolutePath === root) {
     throw new Error('Cannot rename the workspace root directory.');
   }
@@ -615,7 +646,7 @@ function renameWorkspaceFile(relativePath: string, newName: string): WorkspaceFi
   const targetRelativePath = currentDirRelative === '.'
     ? safeNewName
     : join(currentDirRelative, safeNewName);
-  const targetAbsolutePath = workspacePath(targetRelativePath);
+  const targetAbsolutePath = workspaceUserPath(targetRelativePath);
   if (targetAbsolutePath === root) {
     throw new Error('Invalid workspace rename target.');
   }
@@ -628,7 +659,7 @@ function renameWorkspaceFile(relativePath: string, newName: string): WorkspaceFi
 
 function deleteWorkspaceFilePermanent(relativePath: string): boolean {
   const root = workspaceRoot();
-  const absolutePath = workspacePath(relativePath);
+  const absolutePath = workspaceUserPath(relativePath);
   if (absolutePath === root) {
     throw new Error('Cannot delete the workspace root directory.');
   }
@@ -636,6 +667,176 @@ function deleteWorkspaceFilePermanent(relativePath: string): boolean {
     return false;
   }
   rmSync(absolutePath, { recursive: true, force: true });
+  return true;
+}
+
+function trashRoot(): string {
+  return join(workspaceRoot(), WORKSPACE_TRASH_DIRECTORY_NAME);
+}
+
+function trashFilesRoot(): string {
+  return join(trashRoot(), 'files');
+}
+
+function trashEntryDir(id: string): string {
+  return join(trashFilesRoot(), validateTrashId(id));
+}
+
+function trashContentPath(entry: WorkspaceTrashEntry): string {
+  return join(trashEntryDir(entry.id), sanitizeWorkspaceFileName(entry.name));
+}
+
+function trashManifestPath(): string {
+  return join(trashRoot(), 'manifest.json');
+}
+
+function readTrashManifest(): WorkspaceTrashEntry[] {
+  const path = trashManifestPath();
+  if (!existsSync(path)) {
+    return [];
+  }
+  try {
+    const data = JSON.parse(readFileSync(path, 'utf-8'));
+    if (Array.isArray(data)) {
+      return data as WorkspaceTrashEntry[];
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function writeTrashManifest(entries: WorkspaceTrashEntry[]): void {
+  mkdirSync(trashRoot(), { recursive: true });
+  writeFileSync(trashManifestPath(), JSON.stringify(entries, null, 2), { flag: 'w' });
+}
+
+function generateTrashId(): string {
+  return randomBytes(12).toString('hex');
+}
+
+function validateTrashId(id: string): string {
+  if (typeof id !== 'string' || !/^[0-9a-f]{24}$/.test(id)) {
+    throw new Error(`Invalid trash id: "${id}".`);
+  }
+  return id;
+}
+
+function listWorkspaceTrash(): WorkspaceTrashEntry[] {
+  const entries = readTrashManifest();
+  return entries.filter((entry) => {
+    try {
+      return existsSync(trashContentPath(entry));
+    } catch {
+      return false;
+    }
+  });
+}
+
+function moveWorkspaceFileToTrash(relativePath: string): WorkspaceTrashEntry {
+  const absolutePath = workspaceUserPath(relativePath);
+  if (absolutePath === workspaceRoot()) {
+    throw new Error('Cannot move the workspace root to trash.');
+  }
+  if (!existsSync(absolutePath)) {
+    throw new Error(`Workspace file does not exist: "${relativePath}".`);
+  }
+
+  const id = generateTrashId();
+  const stats = statSync(absolutePath);
+  const name = basename(absolutePath);
+  const kind = artifactKindForName(name, stats.isDirectory());
+  const now = new Date().toISOString();
+
+  const entryDir = trashEntryDir(id);
+  mkdirSync(entryDir, { recursive: true });
+  const contentTarget = join(entryDir, name);
+  renameSync(absolutePath, contentTarget);
+
+  const entry: WorkspaceTrashEntry = {
+    id,
+    name,
+    kind,
+    originalPath: relativePath,
+    trashPath: join('.switchboard-trash', 'files', id, name),
+    deletedAt: now,
+    updatedAt: now,
+    size: stats.size,
+  };
+
+  const manifest = readTrashManifest();
+  manifest.push(entry);
+  writeTrashManifest(manifest);
+  return entry;
+}
+
+function restoreWorkspaceTrashItem(id: string): WorkspaceFileEntry {
+  const root = workspaceRoot();
+  const validatedId = validateTrashId(id);
+  const manifest = readTrashManifest();
+  const entryIndex = manifest.findIndex((e) => e.id === validatedId);
+  if (entryIndex === -1) {
+    throw new Error(`Trashed item not found: "${id}".`);
+  }
+
+  const entry = manifest[entryIndex];
+  const sourcePath = trashContentPath(entry);
+  if (!existsSync(sourcePath)) {
+    manifest.splice(entryIndex, 1);
+    writeTrashManifest(manifest);
+    throw new Error(`Trashed content missing on disk: "${id}".`);
+  }
+
+  const targetPath = workspaceUserPath(entry.originalPath);
+  const targetPathDir = dirname(targetPath);
+  mkdirSync(targetPathDir, { recursive: true });
+
+  let finalTarget = targetPath;
+  if (existsSync(targetPath)) {
+    const conflictName = nextWorkspaceCopyNameForTarget(
+      sourcePath,
+      entry.name,
+      dirname(sourcePath),
+      targetPathDir,
+    );
+    finalTarget = join(targetPathDir, conflictName);
+  }
+
+  renameSync(sourcePath, finalTarget);
+
+  manifest.splice(entryIndex, 1);
+  writeTrashManifest(manifest);
+
+  const entryDirPath = trashEntryDir(entry.id);
+  if (existsSync(entryDirPath)) {
+    rmSync(entryDirPath, { recursive: true, force: true });
+  }
+
+  return workspaceEntryForPath(root, finalTarget);
+}
+
+function deleteWorkspaceTrashItemPermanent(id: string): boolean {
+  const validatedId = validateTrashId(id);
+  const manifest = readTrashManifest();
+  const entryIndex = manifest.findIndex((e) => e.id === validatedId);
+  if (entryIndex === -1) {
+    return false;
+  }
+
+  const entryDirPath = trashEntryDir(validatedId);
+  if (existsSync(entryDirPath)) {
+    rmSync(entryDirPath, { recursive: true, force: true });
+  }
+
+  manifest.splice(entryIndex, 1);
+  writeTrashManifest(manifest);
+  return true;
+}
+
+function emptyWorkspaceTrash(): boolean {
+  const filesDir = trashFilesRoot();
+  if (existsSync(filesDir)) {
+    rmSync(filesDir, { recursive: true, force: true });
+  }
+  writeTrashManifest([]);
   return true;
 }
 
@@ -1244,6 +1445,41 @@ ipcMain.handle(
   'workspace-file:delete-permanent',
   async (_event, relativePath: string): Promise<boolean> => {
     return deleteWorkspaceFilePermanent(typeof relativePath === 'string' ? relativePath : '');
+  }
+);
+
+ipcMain.handle(
+  'workspace-file:list-trash',
+  async (): Promise<WorkspaceTrashEntry[]> => {
+    return listWorkspaceTrash();
+  }
+);
+
+ipcMain.handle(
+  'workspace-file:move-to-trash',
+  async (_event, relativePath: string): Promise<WorkspaceTrashEntry> => {
+    return moveWorkspaceFileToTrash(typeof relativePath === 'string' ? relativePath : '');
+  }
+);
+
+ipcMain.handle(
+  'workspace-file:restore-trash',
+  async (_event, id: string): Promise<WorkspaceFileEntry> => {
+    return restoreWorkspaceTrashItem(typeof id === 'string' ? id : '');
+  }
+);
+
+ipcMain.handle(
+  'workspace-file:delete-trash-permanent',
+  async (_event, id: string): Promise<boolean> => {
+    return deleteWorkspaceTrashItemPermanent(typeof id === 'string' ? id : '');
+  }
+);
+
+ipcMain.handle(
+  'workspace-file:empty-trash',
+  async (): Promise<boolean> => {
+    return emptyWorkspaceTrash();
   }
 );
 
