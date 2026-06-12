@@ -413,8 +413,17 @@ button {
 }
 
 .desktop-icon-glyph,
-.window-icon,
 .launcher-icon {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.window-icon {
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-accent);

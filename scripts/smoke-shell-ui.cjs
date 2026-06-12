@@ -224,15 +224,12 @@ async function browserSmoke() {
       borderWidth: parseFloat(styles.borderTopWidth || '0'),
     };
   };
-  const iconChromeIsVisible = (state) => {
+  const iconChromeIsQuiet = (state) => {
     if (!state) {
       return false;
     }
-    return (
-      !isTransparentBackgroundColor(state.backgroundColor)
-      && !isTransparentBackgroundColor(state.borderColor)
-      && state.borderWidth > 0
-    );
+    return isTransparentBackgroundColor(state.backgroundColor)
+      && isTransparentBackgroundColor(state.borderColor);
   };
   const iconChromeMatches = (first, second) => {
     if (!first || !second) {
@@ -255,8 +252,8 @@ async function browserSmoke() {
         miniButtonCount: 0,
         pinButtonCount: 0,
         rowsAtRestNoChrome: false,
-        launchIconsHaveChrome: false,
-        launchFirstIconHasVisibleChrome: false,
+        launchIconsQuiet: false,
+        launchFirstIconIsQuiet: false,
         launchFirstIconMatchesFileExplorerChrome: false,
         miniButtonsAtRestNoChrome: false,
         pinButtonsAtRestNoChrome: false,
@@ -285,10 +282,10 @@ async function browserSmoke() {
       miniButtonCount: miniButtons.length,
       pinButtonCount: pinButtons.length,
       rowsAtRestNoChrome: launcherRows.every((row) => isTransparentBackgroundColor(getComputedStyle(row).backgroundColor) && hasNoVisibleBorder(row)),
-      launchIconsHaveChrome: launcherIcons.every((icon) => iconChromeIsVisible(iconChromeState(icon))),
+      launchIconsQuiet: launcherIcons.every((icon) => iconChromeIsQuiet(iconChromeState(icon))),
       miniButtonsAtRestNoChrome: miniButtons.every((button) => hasNoWebButtonChrome(button)),
       pinButtonsAtRestNoChrome: pinButtons.every((button) => hasNoWebButtonChrome(button)),
-      launchFirstIconHasVisibleChrome: iconChromeIsVisible(firstLauncherChrome),
+      launchFirstIconIsQuiet: iconChromeIsQuiet(firstLauncherChrome),
       launchFirstIconMatchesFileExplorerChrome: iconChromeMatches(firstLauncherChrome, fileExplorerIconChrome),
     };
   };
@@ -346,7 +343,7 @@ async function browserSmoke() {
     startButtonText: document.querySelector('[data-testid="app-launcher-button"]')?.textContent?.trim() || '',
     iconLabels,
     fileExplorerIconChrome,
-    fileExplorerIconChromeHasVisibleChrome: iconChromeIsVisible(fileExplorerIconChrome),
+    fileExplorerIconChromeIsQuiet: iconChromeIsQuiet(fileExplorerIconChrome),
     removeButtons: document.querySelectorAll('.desktop-shortcut-remove').length,
   };
 
@@ -576,8 +573,8 @@ async function browserSmoke() {
       miniButtonCount: launcherVisual.miniButtonCount,
       pinButtonCount: launcherVisual.pinButtonCount,
       rowsAtRestNoChrome: launcherVisual.rowsAtRestNoChrome,
-      launchIconsHaveChrome: launcherVisual.launchIconsHaveChrome,
-      launchFirstIconHasVisibleChrome: launcherVisual.launchFirstIconHasVisibleChrome,
+      launchIconsQuiet: launcherVisual.launchIconsQuiet,
+      launchFirstIconIsQuiet: launcherVisual.launchFirstIconIsQuiet,
       launchFirstIconMatchesFileExplorerChrome: launcherVisual.launchFirstIconMatchesFileExplorerChrome,
       miniButtonsAtRestNoChrome: launcherVisual.miniButtonsAtRestNoChrome,
       pinButtonsAtRestNoChrome: launcherVisual.pinButtonsAtRestNoChrome,
@@ -654,7 +651,7 @@ async function main() {
     report.initial.wallpaperComputed.backgroundSize.includes('cover'),
     report.initial.wallpaperComputed.backgroundRepeat.includes('no-repeat'),
     JSON.stringify(report.initial.iconLabels) === JSON.stringify(['File Explorer', 'Recycle Bin']),
-    report.initial.fileExplorerIconChromeHasVisibleChrome,
+    report.initial.fileExplorerIconChromeIsQuiet,
     report.initial.removeButtons === 0,
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
@@ -698,8 +695,8 @@ async function main() {
     report.launcher.rowLabels.includes('Host Dashboard') === false,
     report.launcher.rowLabels.includes('Host Terminal') === false,
     report.launcher.rowsAtRestNoChrome,
-    report.launcher.launchIconsHaveChrome,
-    report.launcher.launchFirstIconHasVisibleChrome,
+    report.launcher.launchIconsQuiet,
+    report.launcher.launchFirstIconIsQuiet,
     report.launcher.launchFirstIconMatchesFileExplorerChrome,
     report.launcher.miniButtonsAtRestNoChrome,
     report.launcher.pinButtonsAtRestNoChrome,
