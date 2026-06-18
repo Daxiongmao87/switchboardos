@@ -175,6 +175,9 @@ async function browserSmoke() {
     const clientY = rect.top + Math.min(24, Math.max(4, rect.height / 2));
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX, clientY }));
   };
+  const keydown = (key, options = {}) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, ...options }));
+  };
   const menuLabels = () => [...document.querySelectorAll('[data-testid="context-menu"] button, [data-testid="context-menu"] .context-menu-item')]
     .map((item) => (item.textContent || '').trim());
   const forbiddenWindowStateWords = ['floating', 'tiled', 'maximized', 'fullscreen'];
@@ -346,6 +349,14 @@ async function browserSmoke() {
     fileExplorerIconChromeIsQuiet: iconChromeIsQuiet(fileExplorerIconChrome),
     removeButtons: document.querySelectorAll('.desktop-shortcut-remove').length,
   };
+
+  keydown('k', { ctrlKey: true });
+  const commandPalette = await waitFor(() => document.querySelector('[data-testid="command-palette"]'), 'command palette');
+  const commandPaletteLabels = [...commandPalette.querySelectorAll('.palette-result span')]
+    .map((node) => (node.textContent || '').trim());
+  const commandPaletteText = commandPalette.textContent || '';
+  keydown('Escape');
+  await waitFor(() => !document.querySelector('[data-testid="command-palette"]'), 'command palette closed');
 
   rightClick(desktop);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop"]'), 'desktop context menu');
@@ -548,6 +559,11 @@ async function browserSmoke() {
       taskbarMenu,
       launcherRowMenu,
     },
+    commandPalette: {
+      opened: Boolean(commandPalette),
+      rowLabels: commandPaletteLabels,
+      text: commandPaletteText,
+    },
     windows: {
       fileExplorerOpen: Boolean(fileWindow),
       trashOpen: Boolean(document.querySelector('.desktop-window[data-app-id="trash"]')),
@@ -653,6 +669,15 @@ async function main() {
     JSON.stringify(report.initial.iconLabels) === JSON.stringify(['File Explorer', 'Recycle Bin']),
     report.initial.fileExplorerIconChromeIsQuiet,
     report.initial.removeButtons === 0,
+    report.commandPalette.opened,
+    report.commandPalette.rowLabels.includes('File Explorer'),
+    report.commandPalette.rowLabels.includes('Recycle Bin'),
+    report.commandPalette.rowLabels.includes('Hosts'),
+    report.commandPalette.rowLabels.includes('Terminal'),
+    report.commandPalette.rowLabels.includes('Bootstrap'),
+    report.commandPalette.rowLabels.includes('App Studio'),
+    report.commandPalette.rowLabels.includes('Operator') === false,
+    report.commandPalette.text.includes('Agent endpoint and approvals') === false,
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
     report.menus.iconMenu.some((label) => label.includes('Open')),

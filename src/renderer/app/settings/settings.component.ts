@@ -781,6 +781,7 @@ export class SettingsComponent implements OnInit {
       this.endpointSecretValue = '';
       this.endpointMessage = creating ? 'Endpoint created.' : 'Endpoint saved.';
       this.savedMessage = 'Saved local agent endpoint configuration.';
+      window.postMessage({ type: 'sb:agent-endpoints-saved' }, '*');
     } catch (error) {
       this.errorMessage = error instanceof Error ? error.message : 'Unable to save agent endpoint.';
     } finally {
@@ -809,6 +810,7 @@ export class SettingsComponent implements OnInit {
       this.endpoints = await api.agentEndpoint.list();
       this.resetEndpointForm();
       this.endpointMessage = 'Endpoint deleted.';
+      window.postMessage({ type: 'sb:agent-endpoints-saved' }, '*');
     } catch (error) {
       this.errorMessage = error instanceof Error ? error.message : 'Unable to delete agent endpoint.';
     } finally {

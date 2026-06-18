@@ -1,6 +1,7 @@
 import { Component, HostListener, OnDestroy, OnInit, Type } from '@angular/core';
 import type {
   AuditEvent,
+  AgentEndpoint,
   AppManifest,
   AppPermission,
   ConnectionTestResult,
@@ -87,6 +88,9 @@ interface ShellApi {
     list: (appId?: string) => Promise<AppPermission[]>;
     create: (input: CreateAppPermissionInput) => Promise<AppPermission>;
     remove: (permissionId: string) => Promise<boolean>;
+  };
+  agentEndpoint?: {
+    list: () => Promise<AgentEndpoint[]>;
   };
   hostOperations: {
     run: (input: { hostId: string; kind: HostOperationKind; path?: string; filter?: string; limit?: number }) => Promise<HostOperationResult>;
@@ -418,6 +422,8 @@ export class AppComponent implements OnInit, OnDestroy {
   firstRunOpen = false;
   desktopWallpaper: MvpSettings['desktopWallpaper'] = 'default';
   desktopWallpaperLayout: MvpSettings['desktopWallpaperLayout'] = 'fill';
+  operatorSettingsConfigured = false;
+  operatorAgentEndpointConfigured = false;
   contextMenu: ContextMenuState | null = null;
   workspaceArtifacts: WorkspaceArtifact[] = [];
   workspaceCurrentPath = '';
@@ -925,6 +931,9 @@ export class AppComponent implements OnInit, OnDestroy {
             })
             .catch(() => {});
         }
+        void this.refreshOperatorConfigurationState();
+      } else if (event.data?.type === 'sb:agent-endpoints-saved') {
+        void this.refreshOperatorConfigurationState();
       }
     };
     this._navHandler = navHandler;
@@ -942,11 +951,13 @@ export class AppComponent implements OnInit, OnDestroy {
         this.applyTheme(settings.theme);
         this.applyDesktopWallpaper(settings.desktopWallpaper);
         this.applyDesktopWallpaperLayout(settings.desktopWallpaperLayout);
+        this.operatorSettingsConfigured = this.hasLegacyOperatorEndpoint(settings);
       })
       .catch(() => {
         this.applyTheme('dark');
         this.applyDesktopWallpaper('default');
         this.applyDesktopWallpaperLayout('fill');
+        this.operatorSettingsConfigured = false;
       });
     void this.loadWorkspaceContext()
       .then(() => this.loadWorkspaceArtifactsFromBackend());
@@ -1054,7 +1065,11 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   get searchableApps(): ShellAppDefinition[] {
-    return this.allAppDefinitions.filter((definition) => definition.searchable);
+    return this.allAppDefinitions.filter((definition) => this.isAppDiscoverable(definition));
+  }
+
+  get operatorConfigured(): boolean {
+    return this.operatorSettingsConfigured || this.operatorAgentEndpointConfigured;
   }
 
   get launcherApps(): ShellAppDefinition[] {
@@ -1181,12 +1196,14 @@ export class AppComponent implements OnInit, OnDestroy {
     this.isLoadingHosts = true;
     this.errorMessage = '';
     try {
-      const [hosts, auditEvents] = await Promise.all([
+      const [hosts, auditEvents, agentEndpoints] = await Promise.all([
         api.host.list(),
         api.audit.list(),
+        api.agentEndpoint?.list?.().catch(() => [] as AgentEndpoint[]) ?? Promise.resolve([] as AgentEndpoint[]),
       ]);
       this.hosts = hosts;
       this.auditEvents = auditEvents;
+      this.operatorAgentEndpointConfigured = agentEndpoints.some((endpoint) => this.isConfiguredAgentEndpoint(endpoint));
       await this.loadInstalledApps();
       this.refreshHostScopedWindows();
       this.syncFirstRunState();
@@ -3532,6 +3549,47 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private getAppDefinition(appId: ShellAppId): ShellAppDefinition | null {
     return this.allAppDefinitions.find((definition) => definition.appId === appId) ?? null;
+  }
+
+  private isAppDiscoverable(definition: ShellAppDefinition): boolean {
+    if (!definition.searchable) {
+      return false;
+    }
+
+    if (definition.appId === 'agents') {
+      return this.operatorConfigured;
+    }
+
+    if (definition.launcherCategory === 'optional-configured' && !definition.generated) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private async refreshOperatorConfigurationState(): Promise<void> {
+    const api = getSwitchboardApi();
+    if (!api) {
+      this.operatorSettingsConfigured = false;
+      this.operatorAgentEndpointConfigured = false;
+      return;
+    }
+
+    const [settings, agentEndpoints] = await Promise.all([
+      api.settings.get().catch(() => null),
+      api.agentEndpoint?.list?.().catch(() => [] as AgentEndpoint[]) ?? Promise.resolve([] as AgentEndpoint[]),
+    ]);
+
+    this.operatorSettingsConfigured = settings ? this.hasLegacyOperatorEndpoint(settings) : false;
+    this.operatorAgentEndpointConfigured = agentEndpoints.some((endpoint) => this.isConfiguredAgentEndpoint(endpoint));
+  }
+
+  private hasLegacyOperatorEndpoint(settings: MvpSettings): boolean {
+    return Boolean(settings.operator.endpoint.trim());
+  }
+
+  private isConfiguredAgentEndpoint(endpoint: AgentEndpoint): boolean {
+    return Boolean(endpoint.enabled && endpoint.baseUrl.trim() && endpoint.model.trim());
   }
 
   private definitionFromManifest(manifest: AppManifest): ShellAppDefinition {
