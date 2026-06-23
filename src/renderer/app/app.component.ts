@@ -146,6 +146,7 @@ type LauncherTarget =
   | 'desktop'
   | 'desktop-icon'
   | 'taskbar'
+  | 'taskbar-window'
   | 'window'
   | 'launcher-row'
   | 'workspace-file';
@@ -334,7 +335,7 @@ interface ContextMenuItem {
 interface ContextMenuState {
   x: number;
   y: number;
-  target: 'desktop' | 'desktop-icon' | 'taskbar' | 'window' | 'launcher-row' | 'workspace-file';
+  target: 'desktop' | 'desktop-icon' | 'taskbar' | 'taskbar-window' | 'window' | 'launcher-row' | 'workspace-file';
   label: string;
   appId?: ShellAppId;
   windowId?: string;
@@ -1534,6 +1535,17 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showContextMenu(event, 'taskbar', 'Taskbar', this.taskbarContextItems());
   }
 
+  openTaskbarWindowContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
+    this.showContextMenu(
+      event,
+      'taskbar-window',
+      windowItem.title,
+      this.taskbarWindowContextItems(windowItem),
+      windowItem.appId,
+      windowItem.windowId,
+    );
+  }
+
   openWindowContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
     this.showContextMenu(event, 'window', windowItem.title, this.windowContextItems(windowItem), windowItem.appId, windowItem.windowId);
   }
@@ -1555,6 +1567,13 @@ export class AppComponent implements OnInit, OnDestroy {
     const menu = this.contextMenu;
     this.contextMenu = null;
     const workspaceArtifact = menu?.workspaceArtifact;
+    if (item.id.startsWith('window-action:')) {
+      const actionId = item.id.slice('window-action:'.length);
+      this.runWindowMenuAction(menu?.windowId, (windowItem) => {
+        void this.runWindowAction(windowItem, actionId);
+      });
+      return;
+    }
     switch (item.id) {
       case 'open-menu':
         this.launcherOpen = true;
@@ -1566,6 +1585,21 @@ export class AppComponent implements OnInit, OnDestroy {
         if (menu?.appId) {
           this.openApp(menu.appId);
         }
+        return;
+      case 'show-taskbar-window':
+        this.runWindowMenuAction(menu?.windowId, (windowItem) => this.restoreWindow(windowItem));
+        return;
+      case 'new-window':
+        this.openNewWindowForContext(menu?.windowId, menu?.appId);
+        return;
+      case 'toggle-minimize-window':
+        this.runWindowMenuAction(menu?.windowId, (windowItem) => {
+          if (windowItem.state === 'minimized') {
+            this.restoreWindow(windowItem);
+            return;
+          }
+          this.minimizeWindow(windowItem);
+        });
         return;
       case 'pin-app':
         if (menu?.appId) {
@@ -3135,6 +3169,22 @@ export class AppComponent implements OnInit, OnDestroy {
     ];
   }
 
+  private taskbarWindowContextItems(windowItem: ShellWindow): ContextMenuItem[] {
+    const appActions = this.taskbarWindowAppActions(windowItem);
+    return [
+      { id: 'show-taskbar-window', label: windowItem.state === 'minimized' ? 'Restore' : 'Show' },
+      { id: 'new-window', label: 'New Window' },
+      { id: 'toggle-minimize-window', label: windowItem.state === 'minimized' ? 'Restore Window' : 'Minimize' },
+      {
+        id: 'pin-app',
+        label: this.isShortcutPinned(windowItem.appId) ? 'Pinned to Desktop' : 'Pin to Desktop',
+        disabled: this.isShortcutPinned(windowItem.appId),
+      },
+      ...(appActions.length > 0 ? [{ id: 'taskbar-app-actions', label: 'App Actions', submenu: appActions }] : []),
+      { id: 'close-window', label: 'Close Window', danger: true },
+    ];
+  }
+
   private windowContextItems(windowItem: ShellWindow): ContextMenuItem[] {
     return [
       { id: 'minimize-window', label: 'Minimize' },
@@ -3165,6 +3215,28 @@ export class AppComponent implements OnInit, OnDestroy {
     if (windowItem) {
       callback(windowItem);
     }
+  }
+
+  private openNewWindowForContext(windowId: string | undefined, appId: ShellAppId | undefined): void {
+    const sourceWindow = this.windows.find((candidate) => candidate.windowId === windowId);
+    const definition = appId ? this.getAppDefinition(appId) : sourceWindow?.appDefinition;
+    if (!definition) {
+      return;
+    }
+    const host = sourceWindow?.hostId ? this.hosts.find((candidate) => candidate.id === sourceWindow.hostId) ?? null : null;
+    const title = host ? `${definition.title} - ${host.name}` : undefined;
+    this.createWindow(definition, host, title);
+  }
+
+  private taskbarWindowAppActions(windowItem: ShellWindow): ContextMenuItem[] {
+    const shellOwnedActions = new Set(['tile-left', 'tile-right', 'close-window']);
+    return windowItem.registeredActions
+      .filter((action) => !shellOwnedActions.has(action.id))
+      .map((action) => ({
+        id: `window-action:${action.id}`,
+        label: action.label,
+        detail: action.description,
+      }));
   }
 
   private defaultIconPosition(index: number): DesktopIconPosition {

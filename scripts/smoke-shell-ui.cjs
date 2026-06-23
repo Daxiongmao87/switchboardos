@@ -402,6 +402,19 @@ async function browserSmoke() {
   const windowMenu = menuLabels();
   click(document.body);
 
+  const fileExplorerTaskbarItem = await waitFor(
+    () => [...document.querySelectorAll('.taskbar-window')]
+      .find((button) => textIncludes(button, 'File Explorer')),
+    'File Explorer taskbar item',
+  );
+  rightClick(fileExplorerTaskbarItem);
+  await waitFor(
+    () => document.querySelector('[data-testid="context-menu"][data-context-target="taskbar-window"]'),
+    'taskbar app item context menu',
+  );
+  const taskbarWindowMenu = menuLabels();
+  click(document.body);
+
   rightClick(document.querySelector('[data-testid="taskbar"]'));
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="taskbar"]'), 'taskbar context menu');
   const taskbarMenu = menuLabels();
@@ -556,6 +569,7 @@ async function browserSmoke() {
       desktopMenu,
       iconMenu,
       windowMenu,
+      taskbarWindowMenu,
       taskbarMenu,
       launcherRowMenu,
     },
@@ -687,6 +701,11 @@ async function main() {
     report.menus.windowMenu.some((label) => label.includes('Fullscreen')),
     !report.windows.openWindowTitlebarContainsLegacyControls,
     !report.windows.openWindowTitlebarContainsRuntimeState,
+    report.menus.taskbarWindowMenu.some((label) => label.includes('Show') || label.includes('Restore')),
+    report.menus.taskbarWindowMenu.some((label) => label.includes('New Window')),
+    report.menus.taskbarWindowMenu.some((label) => label.includes('Minimize') || label.includes('Restore Window')),
+    report.menus.taskbarWindowMenu.some((label) => label.includes('Pin to Desktop') || label.includes('Pinned to Desktop')),
+    report.menus.taskbarWindowMenu.some((label) => label.includes('Close Window')),
     report.menus.taskbarMenu.some((label) => label.includes('Show Desktop')),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
     report.windows.fileExplorerOpen,

@@ -704,6 +704,7 @@
         [class.is-focused]="shellWindow.focused"
         [class.is-minimized]="shellWindow.state === 'minimized'"
         (click)="shellWindow.state === 'minimized' ? restoreWindow(shellWindow) : focusWindow(shellWindow)"
+        (contextmenu)="openTaskbarWindowContextMenu($event, shellWindow)"
       >
         <span>{{ shellWindow.appDefinition.icon }}</span>
         <span>{{ shellWindow.title }}</span>
