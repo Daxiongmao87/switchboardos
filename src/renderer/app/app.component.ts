@@ -1606,6 +1606,11 @@ export class AppComponent implements OnInit, OnDestroy {
           this.addShortcut(menu.appId);
         }
         return;
+      case 'unpin-app':
+        if (menu?.appId && !this.defaultShortcutIds.includes(menu.appId)) {
+          this.removeShortcutById(menu.appId);
+        }
+        return;
       case 'remove-shortcut':
         if (menu?.appId) {
           this.removeShortcutById(menu.appId);
@@ -3175,11 +3180,7 @@ export class AppComponent implements OnInit, OnDestroy {
       { id: 'show-taskbar-window', label: windowItem.state === 'minimized' ? 'Restore' : 'Show' },
       { id: 'new-window', label: 'New Window' },
       { id: 'toggle-minimize-window', label: windowItem.state === 'minimized' ? 'Restore Window' : 'Minimize' },
-      {
-        id: 'pin-app',
-        label: this.isShortcutPinned(windowItem.appId) ? 'Pinned to Desktop' : 'Pin to Desktop',
-        disabled: this.isShortcutPinned(windowItem.appId),
-      },
+      this.pinContextItem(windowItem.appId),
       ...(appActions.length > 0 ? [{ id: 'taskbar-app-actions', label: 'App Actions', submenu: appActions }] : []),
       { id: 'close-window', label: 'Close Window', danger: true },
     ];
@@ -3205,7 +3206,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private launcherRowContextItems(appId: ShellAppId): ContextMenuItem[] {
     return [
       { id: 'open-app', label: 'Open' },
-      { id: 'pin-app', label: this.isShortcutPinned(appId) ? 'Pinned to Desktop' : 'Pin to Desktop', disabled: this.isShortcutPinned(appId) },
+      this.pinContextItem(appId),
       { id: 'properties', label: 'Properties' },
     ];
   }
@@ -3237,6 +3238,21 @@ export class AppComponent implements OnInit, OnDestroy {
         label: action.label,
         detail: action.description,
       }));
+  }
+
+  private pinContextItem(appId: ShellAppId): ContextMenuItem {
+    if (!this.isShortcutPinned(appId)) {
+      return { id: 'pin-app', label: 'Pin to Desktop' };
+    }
+    if (this.defaultShortcutIds.includes(appId)) {
+      return {
+        id: 'pinned-default-app',
+        label: 'Pinned to Desktop',
+        disabled: true,
+        detail: 'Shell-owned default desktop icon.',
+      };
+    }
+    return { id: 'unpin-app', label: 'Unpin from Desktop' };
   }
 
   private defaultIconPosition(index: number): DesktopIconPosition {

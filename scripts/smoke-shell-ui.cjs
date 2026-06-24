@@ -180,6 +180,10 @@ async function browserSmoke() {
   };
   const menuLabels = () => [...document.querySelectorAll('[data-testid="context-menu"] button, [data-testid="context-menu"] .context-menu-item')]
     .map((item) => (item.textContent || '').trim());
+  const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
+    .find((button) => textIncludes(button, text)));
+  const desktopIconLabels = () => [...document.querySelectorAll('.desktop-icon-label')]
+    .map((node) => node.textContent.trim());
   const forbiddenWindowStateWords = ['floating', 'tiled', 'maximized', 'fullscreen'];
   const forbiddenWindowControlText = ['-', '[]', 'x', 'L', 'R', 'T', 'B', '1', '2', '3', '4', 'F'];
   const isTransparentBackgroundColor = (color) => {
@@ -305,7 +309,7 @@ async function browserSmoke() {
   const shell = await waitFor(() => document.querySelector('[data-testid="desktop-shell"]'), 'desktop shell');
   await sleep(800);
 
-  const iconLabels = [...document.querySelectorAll('.desktop-icon-label')].map((node) => node.textContent.trim());
+  const iconLabels = desktopIconLabels();
   const desktop = document.querySelector('.desktop-surface');
   const firstRunPanel = document.querySelector('[data-testid="first-run-panel"]');
   const desktopStyles = desktop ? getComputedStyle(desktop) : null;
@@ -424,10 +428,51 @@ async function browserSmoke() {
   const launcher = await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu');
   const launcherText = launcher.textContent || '';
   const launcherVisual = launcherChromeState(launcher);
-  rightClick([...document.querySelectorAll('.launcher-row')].find((row) => textIncludes(row, 'Hosts')));
+  const hostsLauncherRow = [...document.querySelectorAll('.launcher-row')].find((row) => textIncludes(row, 'Hosts'));
+  rightClick(hostsLauncherRow);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="launcher-row"]'), 'launcher row menu');
   const launcherRowMenu = menuLabels();
   click(document.body);
+  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'launcher row menu closed');
+
+  if (!document.querySelector('[data-testid="app-launcher"]')) {
+    click(document.querySelector('[data-testid="app-launcher-button"]'));
+    await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu reopened for Hosts');
+  }
+  const liveHostsLauncherRow = await waitFor(
+    () => [...document.querySelectorAll('.launcher-row')].find((row) => textIncludes(row, 'Hosts')),
+    'live Hosts launcher row',
+  );
+  click(liveHostsLauncherRow.querySelector('.launcher-open-button'));
+  const hostsWindow = await waitFor(
+    () => document.querySelector('.desktop-window[data-app-id="hosts"]'),
+    'Hosts window',
+  );
+  const hostsTaskbarItem = await waitFor(
+    () => [...document.querySelectorAll('.taskbar-window')]
+      .find((button) => textIncludes(button, 'Hosts')),
+    'Hosts taskbar item',
+  );
+  rightClick(hostsTaskbarItem);
+  await waitFor(
+    () => document.querySelector('[data-testid="context-menu"][data-context-target="taskbar-window"]'),
+    'Hosts taskbar pin menu',
+  );
+  const hostsTaskbarPinMenu = menuLabels();
+  clickMenuItem('Pin to Desktop');
+  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'Hosts pin menu closed');
+  await waitFor(() => desktopIconLabels().includes('Hosts'), 'Hosts pinned desktop icon');
+
+  rightClick(hostsTaskbarItem);
+  await waitFor(
+    () => document.querySelector('[data-testid="context-menu"][data-context-target="taskbar-window"]'),
+    'Hosts taskbar unpin menu',
+  );
+  const hostsTaskbarUnpinMenu = menuLabels();
+  clickMenuItem('Unpin from Desktop');
+  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'Hosts unpin menu closed');
+  await waitFor(() => !desktopIconLabels().includes('Hosts'), 'Hosts unpinned desktop icon');
+  const desktopIconLabelsAfterPinCycle = desktopIconLabels();
 
   click(recycleBinIcon.querySelector('.desktop-icon'));
   recycleBinIcon.querySelector('.desktop-icon').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
@@ -572,6 +617,8 @@ async function browserSmoke() {
       taskbarWindowMenu,
       taskbarMenu,
       launcherRowMenu,
+      hostsTaskbarPinMenu,
+      hostsTaskbarUnpinMenu,
     },
     commandPalette: {
       opened: Boolean(commandPalette),
@@ -580,6 +627,7 @@ async function browserSmoke() {
     },
     windows: {
       fileExplorerOpen: Boolean(fileWindow),
+      hostsOpen: Boolean(hostsWindow),
       trashOpen: Boolean(document.querySelector('.desktop-window[data-app-id="trash"]')),
       openWindowTitlebarText,
       openWindowTitlebarContainsLegacyControls: openWindowLegacyControlText.length > 0,
@@ -587,6 +635,7 @@ async function browserSmoke() {
       workspaceFileText,
       workspaceNavigatedPath,
       workspaceBreadcrumbText,
+      desktopIconLabelsAfterPinCycle,
     },
     trash: trashResult,
     launcher: {
@@ -706,6 +755,11 @@ async function main() {
     report.menus.taskbarWindowMenu.some((label) => label.includes('Minimize') || label.includes('Restore Window')),
     report.menus.taskbarWindowMenu.some((label) => label.includes('Pin to Desktop') || label.includes('Pinned to Desktop')),
     report.menus.taskbarWindowMenu.some((label) => label.includes('Close Window')),
+    report.menus.hostsTaskbarPinMenu.some((label) => label.includes('Pin to Desktop')),
+    report.menus.hostsTaskbarPinMenu.every((label) => !label.includes('Unpin from Desktop')),
+    report.menus.hostsTaskbarUnpinMenu.some((label) => label.includes('Unpin from Desktop')),
+    report.windows.hostsOpen,
+    JSON.stringify(report.windows.desktopIconLabelsAfterPinCycle) === JSON.stringify(['File Explorer', 'Recycle Bin']),
     report.menus.taskbarMenu.some((label) => label.includes('Show Desktop')),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
     report.windows.fileExplorerOpen,
