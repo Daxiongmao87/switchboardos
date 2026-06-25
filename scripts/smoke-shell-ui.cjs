@@ -184,6 +184,8 @@ async function browserSmoke() {
     .find((button) => textIncludes(button, text)));
   const desktopIconLabels = () => [...document.querySelectorAll('.desktop-icon-label')]
     .map((node) => node.textContent.trim());
+  const buttonByText = (root, text) => [...root.querySelectorAll('button')]
+    .find((button) => textIncludes(button, text));
   const forbiddenWindowStateWords = ['floating', 'tiled', 'maximized', 'fullscreen'];
   const forbiddenWindowControlText = ['-', '[]', 'x', 'L', 'R', 'T', 'B', '1', '2', '3', '4', 'F'];
   const isTransparentBackgroundColor = (color) => {
@@ -308,6 +310,22 @@ async function browserSmoke() {
 
   const shell = await waitFor(() => document.querySelector('[data-testid="desktop-shell"]'), 'desktop shell');
   await sleep(800);
+  const seededHost = await window.sb.host.create({
+    name: 'Smoke Context Host',
+    address: '127.0.0.1',
+    hostname: '127.0.0.1',
+    port: 22,
+    username: 'smoke',
+    authMode: 'agent',
+    tags: ['smoke'],
+    group: 'Smoke',
+    osHint: 'linux',
+    bootstrapStatus: 'not_started',
+    defaultShell: '/bin/sh',
+    defaultWorkingDirectory: '/tmp',
+    capabilities: ['ssh'],
+    notes: 'Created by the shell UI smoke test to verify host context menus.',
+  });
 
   const iconLabels = desktopIconLabels();
   const desktop = document.querySelector('.desktop-surface');
@@ -361,6 +379,26 @@ async function browserSmoke() {
   const commandPaletteText = commandPalette.textContent || '';
   keydown('Escape');
   await waitFor(() => !document.querySelector('[data-testid="command-palette"]'), 'command palette closed');
+
+  click(document.querySelector('[data-testid="app-launcher-button"]'));
+  const launcherForHostPanel = await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu for host launcher');
+  click(buttonByText(launcherForHostPanel, 'Host launcher'));
+  const hostLauncherPanel = await waitFor(() => document.querySelector('[data-testid="host-launcher"]'), 'host launcher panel');
+  click(buttonByText(hostLauncherPanel, 'Refresh'));
+  const hostContextRow = await waitFor(
+    () => [...document.querySelectorAll('[data-testid="host-launcher"] .host-row')]
+      .find((row) => textIncludes(row, 'Smoke Context Host')),
+    'seeded host launcher row',
+  );
+  rightClick(hostContextRow);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="host"]'), 'host context menu');
+  const hostContextMenu = menuLabels();
+  click(document.body);
+  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'host context menu closed');
+  click(document.querySelector('[data-testid="app-launcher-button"]'));
+  const launcherForHostPanelClose = await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu for host launcher close');
+  click(buttonByText(launcherForHostPanelClose, 'Host launcher'));
+  await waitFor(() => !document.querySelector('[data-testid="host-launcher"]'), 'host launcher closed');
 
   rightClick(desktop);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop"]'), 'desktop context menu');
@@ -619,6 +657,7 @@ async function browserSmoke() {
       launcherRowMenu,
       hostsTaskbarPinMenu,
       hostsTaskbarUnpinMenu,
+      hostContextMenu,
     },
     commandPalette: {
       opened: Boolean(commandPalette),
@@ -636,6 +675,10 @@ async function browserSmoke() {
       workspaceNavigatedPath,
       workspaceBreadcrumbText,
       desktopIconLabelsAfterPinCycle,
+    },
+    hosts: {
+      seededHostId: seededHost.id,
+      hostContextRowFound: Boolean(hostContextRow),
     },
     trash: trashResult,
     launcher: {
@@ -760,6 +803,15 @@ async function main() {
     report.menus.hostsTaskbarUnpinMenu.some((label) => label.includes('Unpin from Desktop')),
     report.windows.hostsOpen,
     JSON.stringify(report.windows.desktopIconLabelsAfterPinCycle) === JSON.stringify(['File Explorer', 'Recycle Bin']),
+    report.hosts.seededHostId,
+    report.hosts.hostContextRowFound,
+    report.menus.hostContextMenu.some((label) => label.includes('Open Dashboard')),
+    report.menus.hostContextMenu.some((label) => label.includes('Open Terminal')),
+    report.menus.hostContextMenu.some((label) => label.includes('Open File Explorer')),
+    report.menus.hostContextMenu.some((label) => label.includes('Run Scriptlet')),
+    report.menus.hostContextMenu.some((label) => label.includes('Edit Host')),
+    report.menus.hostContextMenu.some((label) => label.includes('Test Connection')),
+    report.menus.hostContextMenu.some((label) => label.includes('Properties')),
     report.menus.taskbarMenu.some((label) => label.includes('Show Desktop')),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
     report.windows.fileExplorerOpen,

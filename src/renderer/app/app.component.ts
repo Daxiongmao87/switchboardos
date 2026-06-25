@@ -145,6 +145,7 @@ const SYSTEM_APPLET_DEFAULT_WINDOW_BEHAVIOR: MvpSettings['defaultWindowBehavior'
 type LauncherTarget =
   | 'desktop'
   | 'desktop-icon'
+  | 'host'
   | 'taskbar'
   | 'taskbar-window'
   | 'window'
@@ -335,9 +336,10 @@ interface ContextMenuItem {
 interface ContextMenuState {
   x: number;
   y: number;
-  target: 'desktop' | 'desktop-icon' | 'taskbar' | 'taskbar-window' | 'window' | 'launcher-row' | 'workspace-file';
+  target: 'desktop' | 'desktop-icon' | 'host' | 'taskbar' | 'taskbar-window' | 'window' | 'launcher-row' | 'workspace-file';
   label: string;
   appId?: ShellAppId;
+  hostId?: string;
   windowId?: string;
   workspaceArtifact?: WorkspaceArtifact;
   items: ContextMenuItem[];
@@ -1555,6 +1557,19 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showContextMenu(event, 'launcher-row', definition?.title ?? appId, this.launcherRowContextItems(appId), appId);
   }
 
+  openHostContextMenu(event: MouseEvent, host: HostRecord): void {
+    this.showContextMenu(
+      event,
+      'host',
+      host.name,
+      this.hostContextItems(host),
+      undefined,
+      undefined,
+      undefined,
+      host.id,
+    );
+  }
+
   openWorkspaceArtifactContextMenu(event: MouseEvent, artifact: WorkspaceArtifact): void {
     this.showWorkspaceArtifactProperties(artifact);
     this.showContextMenu(event, 'workspace-file', artifact.name, this.workspaceArtifactContextItems(artifact), undefined, undefined, artifact);
@@ -1567,6 +1582,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const menu = this.contextMenu;
     this.contextMenu = null;
     const workspaceArtifact = menu?.workspaceArtifact;
+    const host = this.contextHost(menu);
     if (item.id.startsWith('window-action:')) {
       const actionId = item.id.slice('window-action:'.length);
       this.runWindowMenuAction(menu?.windowId, (windowItem) => {
@@ -1668,6 +1684,34 @@ export class AppComponent implements OnInit, OnDestroy {
           return;
         }
         this.notify('No target folder selected for paste.');
+        return;
+      case 'open-host-dashboard':
+        if (host) {
+          this.openHostDashboard(host);
+        }
+        return;
+      case 'open-host-terminal':
+        if (host) {
+          this.openHostTerminal(host);
+        }
+        return;
+      case 'open-host-file-explorer':
+        if (host) {
+          this.openHostOperation(host, 'file-browser');
+        }
+        return;
+      case 'edit-host':
+        this.openApp('hosts');
+        return;
+      case 'test-host-connection':
+        if (host) {
+          void this.testHostConnection(host);
+        }
+        return;
+      case 'host-properties':
+        if (host) {
+          this.openHostDashboard(host);
+        }
         return;
       case 'new-folder-in-workspace-folder':
         if (workspaceArtifact) {
@@ -3056,6 +3100,7 @@ export class AppComponent implements OnInit, OnDestroy {
     appId?: ShellAppId,
     windowId?: string,
     workspaceArtifact?: WorkspaceArtifact,
+    hostId?: string,
   ): void {
     event.preventDefault();
     event.stopPropagation();
@@ -3065,10 +3110,18 @@ export class AppComponent implements OnInit, OnDestroy {
       target,
       label,
       appId,
+      hostId,
       windowId,
       workspaceArtifact,
       items,
     };
+  }
+
+  private contextHost(menu: ContextMenuState | null | undefined): HostRecord | null {
+    if (!menu?.hostId) {
+      return null;
+    }
+    return this.hosts.find((candidate) => candidate.id === menu.hostId) ?? null;
   }
 
   private workspaceArtifactContextItems(artifact: WorkspaceArtifact): ContextMenuItem[] {
@@ -3208,6 +3261,23 @@ export class AppComponent implements OnInit, OnDestroy {
       { id: 'open-app', label: 'Open' },
       this.pinContextItem(appId),
       { id: 'properties', label: 'Properties' },
+    ];
+  }
+
+  private hostContextItems(host: HostRecord): ContextMenuItem[] {
+    return [
+      { id: 'open-host-dashboard', label: 'Open Dashboard', detail: host.name },
+      { id: 'open-host-terminal', label: 'Open Terminal', detail: `${host.username || 'user'}@${host.address || host.hostname}` },
+      { id: 'open-host-file-explorer', label: 'Open File Explorer', detail: 'SSH/SFTP-backed host filesystem.' },
+      {
+        id: 'run-host-scriptlet',
+        label: 'Run Scriptlet',
+        disabled: true,
+        detail: 'Select a scriptlet workspace artifact before running it on a host.',
+      },
+      { id: 'edit-host', label: 'Edit Host' },
+      { id: 'test-host-connection', label: 'Test Connection' },
+      { id: 'host-properties', label: 'Properties', detail: host.id },
     ];
   }
 

@@ -88,7 +88,12 @@
       <div *ngIf="!isLoadingHosts && hosts.length === 0" class="launcher-empty">
         No host profiles yet. Open Hosts to add one.
       </div>
-      <article *ngFor="let host of hosts; trackBy: trackHost" class="host-row">
+      <article
+        *ngFor="let host of hosts; trackBy: trackHost"
+        class="host-row"
+        [attr.data-host-id]="host.id"
+        (contextmenu)="openHostContextMenu($event, host)"
+      >
         <div class="host-row-main">
           <strong>{{ host.name }}</strong>
           <span>{{ host.username || 'user' }}&#64;{{ host.address || host.hostname }}:{{ host.port }}</span>
