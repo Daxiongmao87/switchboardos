@@ -148,6 +148,7 @@ type LauncherTarget =
   | 'host'
   | 'taskbar'
   | 'taskbar-window'
+  | 'terminal'
   | 'window'
   | 'launcher-row'
   | 'workspace-file';
@@ -160,9 +161,11 @@ function buildSystemAppletManifest(input: {
   defaultBounds: ShellWindowBounds;
   launcherCategory: LauncherCategory;
   capabilities: string[];
+  contextMenuTargets?: LauncherTarget[];
   packageMetadata?: Record<string, unknown>;
 }): AppManifest {
   const now = new Date().toISOString();
+  const contextMenuTargets = input.contextMenuTargets ?? (['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'window'] as LauncherTarget[]);
   return {
     id: `system-${input.appId}`,
     appId: input.appId,
@@ -186,7 +189,7 @@ function buildSystemAppletManifest(input: {
       supportedWindowModes: ['floating', 'tile-right', 'tile-bottom'],
       presentationModes: input.packageMetadata?.['presentationModes'] ?? ['window'],
       defaultPresentationMode: input.packageMetadata?.['defaultPresentationMode'] ?? 'window',
-      contextMenuTargets: ['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'window'] as LauncherTarget[],
+      contextMenuTargets: [...contextMenuTargets],
       contextMenuContributions: {
         open: true,
         pin: true,
@@ -336,7 +339,7 @@ interface ContextMenuItem {
 interface ContextMenuState {
   x: number;
   y: number;
-  target: 'desktop' | 'desktop-icon' | 'host' | 'taskbar' | 'taskbar-window' | 'window' | 'launcher-row' | 'workspace-file';
+  target: 'desktop' | 'desktop-icon' | 'host' | 'taskbar' | 'taskbar-window' | 'terminal' | 'window' | 'launcher-row' | 'workspace-file';
   label: string;
   appId?: ShellAppId;
   hostId?: string;
@@ -562,6 +565,7 @@ export class AppComponent implements OnInit, OnDestroy {
         defaultBounds: { x: 530, y: 76, width: 780, height: 560 },
         launcherCategory: 'core-launcher-system',
         capabilities: ['host:terminal', 'command:read', 'host:actions'],
+        contextMenuTargets: ['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'terminal', 'window'],
       }),
     },
     {
@@ -876,6 +880,7 @@ export class AppComponent implements OnInit, OnDestroy {
         defaultBounds: { x: 520, y: 92, width: 820, height: 580 },
         launcherCategory: 'contextual-host-file-window',
         capabilities: ['host:read', 'host:terminal', 'command:read'],
+        contextMenuTargets: ['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'terminal', 'window'],
       }),
     },
   ];
@@ -1552,6 +1557,20 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showContextMenu(event, 'window', windowItem.title, this.windowContextItems(windowItem), windowItem.appId, windowItem.windowId);
   }
 
+  openTerminalContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
+    const host = this.hostFor(windowItem);
+    this.showContextMenu(
+      event,
+      'terminal',
+      windowItem.title,
+      this.terminalContextItems(windowItem, host),
+      windowItem.appId,
+      windowItem.windowId,
+      undefined,
+      host?.id ?? windowItem.hostId ?? undefined,
+    );
+  }
+
   openLauncherRowContextMenu(event: MouseEvent, appId: ShellAppId): void {
     const definition = this.getAppDefinition(appId);
     this.showContextMenu(event, 'launcher-row', definition?.title ?? appId, this.launcherRowContextItems(appId), appId);
@@ -1712,6 +1731,17 @@ export class AppComponent implements OnInit, OnDestroy {
         if (host) {
           this.openHostDashboard(host);
         }
+        return;
+      case 'terminal-new-window':
+        this.openNewWindowForContext(menu?.windowId, menu?.appId);
+        return;
+      case 'terminal-open-host-dashboard':
+        if (host) {
+          this.openHostDashboard(host);
+        }
+        return;
+      case 'terminal-properties':
+        this.notify(`${menu?.label ?? 'Terminal'} session properties inspected.`);
         return;
       case 'new-folder-in-workspace-folder':
         if (workspaceArtifact) {
@@ -3253,6 +3283,31 @@ export class AppComponent implements OnInit, OnDestroy {
       { id: 'tile-bottom-right', label: 'Bottom Right' },
       { id: 'toggle-fullscreen', label: 'Fullscreen' },
       { id: 'close-window', label: 'Close Window', danger: true },
+    ];
+  }
+
+  private terminalContextItems(windowItem: ShellWindow, host: HostRecord | null): ContextMenuItem[] {
+    const terminalActionBridgeDetail = 'Requires the terminal applet action bridge.';
+    return [
+      { id: 'terminal-copy', label: 'Copy', disabled: true, detail: terminalActionBridgeDetail },
+      { id: 'terminal-paste', label: 'Paste', disabled: true, detail: terminalActionBridgeDetail },
+      { id: 'terminal-clear', label: 'Clear', disabled: true, detail: terminalActionBridgeDetail },
+      {
+        id: 'terminal-new-window',
+        label: 'Split/New Terminal',
+        detail: host ? `Open another terminal for ${host.name}.` : 'Open another terminal workspace.',
+      },
+      {
+        id: 'terminal-open-host-dashboard',
+        label: 'Open Host Dashboard',
+        disabled: !host,
+        detail: host ? host.name : 'Requires a host-scoped terminal.',
+      },
+      {
+        id: 'terminal-properties',
+        label: host ? 'Session Properties' : 'Terminal Properties',
+        detail: host ? `${host.username || 'user'}@${host.address || host.hostname}` : windowItem.windowId,
+      },
     ];
   }
 

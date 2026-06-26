@@ -148,7 +148,11 @@
 
       <div class="window-body">
         <ng-container [ngSwitch]="shellWindow.appId">
-          <section *ngSwitchCase="'terminal'" class="generic-terminal-window">
+          <section
+            *ngSwitchCase="'terminal'"
+            class="generic-terminal-window"
+            (contextmenu)="openTerminalContextMenu($event, shellWindow)"
+          >
             <ng-container *ngComponentOutlet="terminalComponent; inputs: terminalInputs(shellWindow)"></ng-container>
           </section>
 
@@ -450,7 +454,11 @@
             </ng-template>
           </section>
 
-          <section *ngSwitchCase="'host-terminal'" class="host-terminal-window">
+          <section
+            *ngSwitchCase="'host-terminal'"
+            class="host-terminal-window"
+            (contextmenu)="openTerminalContextMenu($event, shellWindow)"
+          >
             <div class="host-terminal-banner" *ngIf="hostFor(shellWindow) as host">
               <strong>{{ host.name }}</strong>
               <span>Shell metadata hostId={{ host.id }} is passed into the terminal runtime. The terminal uses local ssh with no stored secrets.</span>

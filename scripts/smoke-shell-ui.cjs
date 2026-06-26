@@ -393,8 +393,20 @@ async function browserSmoke() {
   rightClick(hostContextRow);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="host"]'), 'host context menu');
   const hostContextMenu = menuLabels();
+  clickMenuItem('Open Terminal');
+  const hostTerminalWindow = await waitFor(
+    () => document.querySelector('.desktop-window[data-app-id="host-terminal"]'),
+    'host terminal window',
+  );
+  const hostTerminalContextTarget = await waitFor(
+    () => hostTerminalWindow.querySelector('.host-terminal-window'),
+    'host terminal content',
+  );
+  rightClick(hostTerminalContextTarget);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="terminal"]'), 'terminal context menu');
+  const terminalContextMenu = menuLabels();
   click(document.body);
-  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'host context menu closed');
+  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'terminal context menu closed');
   click(document.querySelector('[data-testid="app-launcher-button"]'));
   const launcherForHostPanelClose = await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu for host launcher close');
   click(buttonByText(launcherForHostPanelClose, 'Host launcher'));
@@ -658,6 +670,7 @@ async function browserSmoke() {
       hostsTaskbarPinMenu,
       hostsTaskbarUnpinMenu,
       hostContextMenu,
+      terminalContextMenu,
     },
     commandPalette: {
       opened: Boolean(commandPalette),
@@ -667,6 +680,7 @@ async function browserSmoke() {
     windows: {
       fileExplorerOpen: Boolean(fileWindow),
       hostsOpen: Boolean(hostsWindow),
+      hostTerminalOpen: Boolean(hostTerminalWindow),
       trashOpen: Boolean(document.querySelector('.desktop-window[data-app-id="trash"]')),
       openWindowTitlebarText,
       openWindowTitlebarContainsLegacyControls: openWindowLegacyControlText.length > 0,
@@ -812,6 +826,13 @@ async function main() {
     report.menus.hostContextMenu.some((label) => label.includes('Edit Host')),
     report.menus.hostContextMenu.some((label) => label.includes('Test Connection')),
     report.menus.hostContextMenu.some((label) => label.includes('Properties')),
+    report.windows.hostTerminalOpen,
+    report.menus.terminalContextMenu.some((label) => label.includes('Copy')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Paste')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Clear')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Split/New Terminal')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Open Host Dashboard')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Properties')),
     report.menus.taskbarMenu.some((label) => label.includes('Show Desktop')),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
     report.windows.fileExplorerOpen,
