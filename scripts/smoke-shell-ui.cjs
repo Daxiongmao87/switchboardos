@@ -180,6 +180,11 @@ async function browserSmoke() {
   };
   const menuLabels = () => [...document.querySelectorAll('[data-testid="context-menu"] button, [data-testid="context-menu"] .context-menu-item')]
     .map((item) => (item.textContent || '').trim());
+  const menuButtonStates = () => [...document.querySelectorAll('[data-testid="context-menu"] button')]
+    .map((button) => ({
+      text: (button.textContent || '').trim(),
+      disabled: button.disabled,
+    }));
   const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
     .find((button) => textIncludes(button, text)));
   const desktopIconLabels = () => [...document.querySelectorAll('.desktop-icon-label')]
@@ -405,6 +410,7 @@ async function browserSmoke() {
   rightClick(hostTerminalContextTarget);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="terminal"]'), 'terminal context menu');
   const terminalContextMenu = menuLabels();
+  const terminalContextMenuItems = menuButtonStates();
   click(document.body);
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'terminal context menu closed');
   click(document.querySelector('[data-testid="app-launcher-button"]'));
@@ -671,6 +677,7 @@ async function browserSmoke() {
       hostsTaskbarUnpinMenu,
       hostContextMenu,
       terminalContextMenu,
+      terminalContextMenuItems,
     },
     commandPalette: {
       opened: Boolean(commandPalette),
@@ -746,6 +753,12 @@ async function main() {
   const defaultLauncherRowsBackedBySystemApplet = requiredDefaultLauncherRows.every((label) => {
     const row = systemManifestRowMap.get(label);
     return Boolean(row?.isSystemApplet) && Array.isArray(row?.capabilities) && row.capabilities.length > 0;
+  });
+  const terminalActionMenuItem = (label) => report.menus.terminalContextMenuItems
+    .find((item) => item.text.includes(label));
+  const terminalBridgeActionsReady = ['Copy', 'Paste', 'Clear'].every((label) => {
+    const item = terminalActionMenuItem(label);
+    return Boolean(item) && !item.disabled && !item.text.includes('Requires the terminal applet action bridge');
   });
 
   const checks = [
@@ -830,6 +843,7 @@ async function main() {
     report.menus.terminalContextMenu.some((label) => label.includes('Copy')),
     report.menus.terminalContextMenu.some((label) => label.includes('Paste')),
     report.menus.terminalContextMenu.some((label) => label.includes('Clear')),
+    terminalBridgeActionsReady,
     report.menus.terminalContextMenu.some((label) => label.includes('Split/New Terminal')),
     report.menus.terminalContextMenu.some((label) => label.includes('Open Host Dashboard')),
     report.menus.terminalContextMenu.some((label) => label.includes('Properties')),

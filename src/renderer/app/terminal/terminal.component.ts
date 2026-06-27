@@ -29,6 +29,13 @@ type PendingTerminalEvent =
   | { kind: 'status'; event: TerminalStatusEvent }
   | { kind: 'exit'; event: TerminalExitEvent };
 
+type TerminalShellCommand = 'copy' | 'paste' | 'clear';
+
+interface TerminalShellCommandEventDetail {
+  windowId?: string;
+  action?: TerminalShellCommand;
+}
+
 @Component({
   selector: 'app-terminal',
   standalone: false,
@@ -462,6 +469,16 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     this.scheduleTerminalResize();
   }
 
+  @HostListener('window:switchboard-terminal-command', ['$event'])
+  handleShellCommand(event: CustomEvent<TerminalShellCommandEventDetail>): void {
+    const detail = event.detail;
+    if (!detail || detail.windowId !== this.shellWindowId || !this.isTerminalShellCommand(detail.action)) {
+      return;
+    }
+
+    void this.runShellCommand(detail.action);
+  }
+
   get selectedHost(): HostRecord | null {
     return this.hosts.find((host) => host.id === this.selectedHostId) ?? null;
   }
@@ -685,6 +702,75 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
       this.errorMessage = 'Unable to write input to terminal session.';
       this.appendSystemOutput('Unable to write input to terminal session.\n');
     }
+  }
+
+  private async runShellCommand(action: TerminalShellCommand): Promise<void> {
+    switch (action) {
+      case 'copy':
+        await this.copySelectionToClipboard();
+        return;
+      case 'paste':
+        await this.pasteClipboardToSession();
+        return;
+      case 'clear':
+        this.clearTerminalView();
+        return;
+    }
+  }
+
+  private isTerminalShellCommand(action: unknown): action is TerminalShellCommand {
+    return action === 'copy' || action === 'paste' || action === 'clear';
+  }
+
+  private async copySelectionToClipboard(): Promise<void> {
+    const selection = this.xterm?.getSelection() ?? '';
+    if (!selection) {
+      this.appendSystemOutput('No terminal selection to copy.\n');
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      this.appendSystemOutput('Clipboard write is unavailable in this renderer.\n');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(selection);
+      this.appendSystemOutput('Copied terminal selection.\n');
+    } catch {
+      this.appendSystemOutput('Unable to copy terminal selection to clipboard.\n');
+    }
+  }
+
+  private async pasteClipboardToSession(): Promise<void> {
+    if (!this.activeSessionId) {
+      this.appendSystemOutput('Start a session before pasting clipboard text.\n');
+      return;
+    }
+    if (!navigator.clipboard?.readText) {
+      this.appendSystemOutput('Clipboard read is unavailable in this renderer.\n');
+      return;
+    }
+
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        this.appendSystemOutput('Clipboard is empty.\n');
+        return;
+      }
+      await this.writeTerminalData(text);
+      this.xterm?.focus();
+    } catch {
+      this.appendSystemOutput('Unable to paste clipboard text into terminal session.\n');
+    }
+  }
+
+  private clearTerminalView(): void {
+    if (!this.xterm) {
+      return;
+    }
+
+    this.xterm.clear();
+    this.xterm.focus();
   }
 
   private registerTerminalEvents(): void {

@@ -348,6 +348,8 @@ interface ContextMenuState {
   items: ContextMenuItem[];
 }
 
+type TerminalContextAction = 'copy' | 'paste' | 'clear';
+
 interface SystemAppletStateDescriptor {
   appId: ShellAppId;
   storageKey: string;
@@ -1731,6 +1733,15 @@ export class AppComponent implements OnInit, OnDestroy {
         if (host) {
           this.openHostDashboard(host);
         }
+        return;
+      case 'terminal-copy':
+        this.dispatchTerminalContextAction(menu?.windowId, 'copy');
+        return;
+      case 'terminal-paste':
+        this.dispatchTerminalContextAction(menu?.windowId, 'paste');
+        return;
+      case 'terminal-clear':
+        this.dispatchTerminalContextAction(menu?.windowId, 'clear');
         return;
       case 'terminal-new-window':
         this.openNewWindowForContext(menu?.windowId, menu?.appId);
@@ -3287,11 +3298,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private terminalContextItems(windowItem: ShellWindow, host: HostRecord | null): ContextMenuItem[] {
-    const terminalActionBridgeDetail = 'Requires the terminal applet action bridge.';
     return [
-      { id: 'terminal-copy', label: 'Copy', disabled: true, detail: terminalActionBridgeDetail },
-      { id: 'terminal-paste', label: 'Paste', disabled: true, detail: terminalActionBridgeDetail },
-      { id: 'terminal-clear', label: 'Clear', disabled: true, detail: terminalActionBridgeDetail },
+      { id: 'terminal-copy', label: 'Copy', detail: 'Copy selected terminal text.' },
+      { id: 'terminal-paste', label: 'Paste', detail: 'Paste clipboard text into the active terminal session.' },
+      { id: 'terminal-clear', label: 'Clear', detail: 'Clear this terminal view.' },
       {
         id: 'terminal-new-window',
         label: 'Split/New Terminal',
@@ -3309,6 +3319,20 @@ export class AppComponent implements OnInit, OnDestroy {
         detail: host ? `${host.username || 'user'}@${host.address || host.hostname}` : windowItem.windowId,
       },
     ];
+  }
+
+  private dispatchTerminalContextAction(windowId: string | undefined, action: TerminalContextAction): void {
+    if (!windowId) {
+      this.notify('Terminal window is unavailable.');
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent('switchboard-terminal-command', {
+      detail: {
+        windowId,
+        action,
+      },
+    }));
   }
 
   private launcherRowContextItems(appId: ShellAppId): ContextMenuItem[] {
