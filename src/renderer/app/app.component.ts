@@ -339,16 +339,24 @@ interface ContextMenuItem {
 interface ContextMenuState {
   x: number;
   y: number;
-  target: 'desktop' | 'desktop-icon' | 'host' | 'taskbar' | 'taskbar-window' | 'terminal' | 'window' | 'launcher-row' | 'workspace-file';
+  target: 'desktop' | 'desktop-icon' | 'host' | 'notification' | 'taskbar' | 'taskbar-window' | 'terminal' | 'window' | 'launcher-row' | 'workspace-file';
   label: string;
   appId?: ShellAppId;
   hostId?: string;
   windowId?: string;
   workspaceArtifact?: WorkspaceArtifact;
+  notification?: ShellNotificationContext;
   items: ContextMenuItem[];
 }
 
 type TerminalContextAction = 'copy' | 'paste' | 'clear';
+type ShellNotificationKind = 'toast' | 'status' | 'error';
+
+interface ShellNotificationContext {
+  kind: ShellNotificationKind;
+  message: string;
+  toastIndex?: number;
+}
 
 interface SystemAppletStateDescriptor {
   appId: ShellAppId;
@@ -977,7 +985,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.stopDrag();
     this.stopResize();
     this.stopIconDrag();
-    this.toastTimers.forEach((timerId) => window.clearTimeout(timerId));
+    this.clearToastTimers();
     if (this._navHandler) {
       window.removeEventListener('message', this._navHandler);
     }
@@ -1596,6 +1604,20 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showContextMenu(event, 'workspace-file', artifact.name, this.workspaceArtifactContextItems(artifact), undefined, undefined, artifact);
   }
 
+  openNotificationContextMenu(event: MouseEvent, message: string, kind: ShellNotificationKind, toastIndex?: number): void {
+    this.showContextMenu(
+      event,
+      'notification',
+      'Notification',
+      this.notificationContextItems(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { kind, message, toastIndex },
+    );
+  }
+
   runContextMenuAction(item: ContextMenuItem): void {
     if (item.disabled || item.submenu?.length) {
       return;
@@ -1733,6 +1755,15 @@ export class AppComponent implements OnInit, OnDestroy {
         if (host) {
           this.openHostDashboard(host);
         }
+        return;
+      case 'dismiss-notification':
+        this.dismissContextNotification(menu?.notification);
+        return;
+      case 'clear-notifications':
+        this.clearNotifications();
+        return;
+      case 'open-notification-settings':
+        this.openApp('settings');
         return;
       case 'terminal-copy':
         this.dispatchTerminalContextAction(menu?.windowId, 'copy');
@@ -3142,6 +3173,7 @@ export class AppComponent implements OnInit, OnDestroy {
     windowId?: string,
     workspaceArtifact?: WorkspaceArtifact,
     hostId?: string,
+    notification?: ShellNotificationContext,
   ): void {
     event.preventDefault();
     event.stopPropagation();
@@ -3154,6 +3186,7 @@ export class AppComponent implements OnInit, OnDestroy {
       hostId,
       windowId,
       workspaceArtifact,
+      notification,
       items,
     };
   }
@@ -3321,6 +3354,14 @@ export class AppComponent implements OnInit, OnDestroy {
     ];
   }
 
+  private notificationContextItems(): ContextMenuItem[] {
+    return [
+      { id: 'dismiss-notification', label: 'Dismiss Notification' },
+      { id: 'clear-notifications', label: 'Clear All Notifications' },
+      { id: 'open-notification-settings', label: 'Notification Settings' },
+    ];
+  }
+
   private dispatchTerminalContextAction(windowId: string | undefined, action: TerminalContextAction): void {
     if (!windowId) {
       this.notify('Terminal window is unavailable.');
@@ -3333,6 +3374,34 @@ export class AppComponent implements OnInit, OnDestroy {
         action,
       },
     }));
+  }
+
+  private dismissContextNotification(notification: ShellNotificationContext | undefined): void {
+    if (!notification) {
+      return;
+    }
+
+    if (notification.kind === 'error') {
+      this.errorMessage = '';
+      return;
+    }
+    if (notification.kind === 'status') {
+      this.statusMessage = '';
+      return;
+    }
+    if (typeof notification.toastIndex === 'number') {
+      this.toasts = this.toasts.filter((_toast, index) => index !== notification.toastIndex);
+      return;
+    }
+
+    this.toasts = this.toasts.filter((toast) => toast !== notification.message);
+  }
+
+  private clearNotifications(): void {
+    this.errorMessage = '';
+    this.statusMessage = '';
+    this.toasts = [];
+    this.clearToastTimers();
   }
 
   private launcherRowContextItems(appId: ShellAppId): ContextMenuItem[] {
@@ -4334,6 +4403,11 @@ export class AppComponent implements OnInit, OnDestroy {
       this.toastTimers = this.toastTimers.filter((candidate) => candidate !== timerId);
     }, 3500);
     this.toastTimers = [...this.toastTimers, timerId];
+  }
+
+  private clearToastTimers(): void {
+    this.toastTimers.forEach((timerId) => window.clearTimeout(timerId));
+    this.toastTimers = [];
   }
 
   private errorText(error: unknown, fallback: string): string {

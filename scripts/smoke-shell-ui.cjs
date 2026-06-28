@@ -657,7 +657,12 @@ async function browserSmoke() {
     };
   })();
 
-  await waitFor(() => document.querySelector('.toast'), 'toast after opening windows');
+  const toastForContext = await waitFor(() => document.querySelector('.toast:not(.error)') || document.querySelector('.toast'), 'toast after opening windows');
+  rightClick(toastForContext);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="notification"]'), 'notification context menu');
+  const notificationMenu = menuLabels();
+  clickMenuItem('Dismiss Notification');
+  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'notification context menu closed');
   await waitFor(
     () => document.querySelectorAll('.toast:not(.error)').length === 0,
     'ordinary toasts auto-dismiss',
@@ -678,6 +683,7 @@ async function browserSmoke() {
       hostContextMenu,
       terminalContextMenu,
       terminalContextMenuItems,
+      notificationMenu,
     },
     commandPalette: {
       opened: Boolean(commandPalette),
@@ -847,6 +853,9 @@ async function main() {
     report.menus.terminalContextMenu.some((label) => label.includes('Split/New Terminal')),
     report.menus.terminalContextMenu.some((label) => label.includes('Open Host Dashboard')),
     report.menus.terminalContextMenu.some((label) => label.includes('Properties')),
+    report.menus.notificationMenu.some((label) => label.includes('Dismiss Notification')),
+    report.menus.notificationMenu.some((label) => label.includes('Clear All Notifications')),
+    report.menus.notificationMenu.some((label) => label.includes('Notification Settings')),
     report.menus.taskbarMenu.some((label) => label.includes('Show Desktop')),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
     report.windows.fileExplorerOpen,

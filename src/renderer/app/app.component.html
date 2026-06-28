@@ -552,9 +552,27 @@
     </section>
 
     <section class="toast-stack" aria-label="Notifications">
-      <p *ngIf="errorMessage" class="toast error">{{ errorMessage }}</p>
-      <p *ngIf="statusMessage" class="toast">{{ statusMessage }}</p>
-      <p *ngFor="let toast of toasts" class="toast">{{ toast }}</p>
+      <p
+        *ngIf="errorMessage"
+        class="toast error"
+        (contextmenu)="openNotificationContextMenu($event, errorMessage, 'error')"
+      >
+        {{ errorMessage }}
+      </p>
+      <p
+        *ngIf="statusMessage"
+        class="toast"
+        (contextmenu)="openNotificationContextMenu($event, statusMessage, 'status')"
+      >
+        {{ statusMessage }}
+      </p>
+      <p
+        *ngFor="let toast of toasts; let toastIndex = index"
+        class="toast"
+        (contextmenu)="openNotificationContextMenu($event, toast, 'toast', toastIndex)"
+      >
+        {{ toast }}
+      </p>
     </section>
 
     <nav
