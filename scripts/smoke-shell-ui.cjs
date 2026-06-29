@@ -480,6 +480,11 @@ async function browserSmoke() {
   const taskbarMenu = menuLabels();
   click(document.body);
 
+  rightClick(document.querySelector('[data-testid="taskbar-tray"]'));
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="tray-status"]'), 'tray status context menu');
+  const trayStatusMenu = menuLabels();
+  click(document.body);
+
   click(document.querySelector('[data-testid="app-launcher-button"]'));
   const launcher = await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu');
   const launcherText = launcher.textContent || '';
@@ -677,6 +682,7 @@ async function browserSmoke() {
       windowMenu,
       taskbarWindowMenu,
       taskbarMenu,
+      trayStatusMenu,
       launcherRowMenu,
       hostsTaskbarPinMenu,
       hostsTaskbarUnpinMenu,
@@ -857,6 +863,10 @@ async function main() {
     report.menus.notificationMenu.some((label) => label.includes('Clear All Notifications')),
     report.menus.notificationMenu.some((label) => label.includes('Notification Settings')),
     report.menus.taskbarMenu.some((label) => label.includes('Show Desktop')),
+    report.menus.trayStatusMenu.some((label) => label.includes('Status Details')),
+    report.menus.trayStatusMenu.some((label) => label.includes('Notification Settings')),
+    report.menus.trayStatusMenu.some((label) => label.includes('Panel Settings')),
+    report.menus.trayStatusMenu.some((label) => label.includes('Refresh Status')),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
     report.windows.fileExplorerOpen,
     report.windows.trashOpen,

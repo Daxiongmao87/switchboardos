@@ -742,7 +742,12 @@
       </button>
     </div>
 
-    <div class="taskbar-tray" aria-label="Status and tray area">
+    <div
+      class="taskbar-tray"
+      aria-label="Status and tray area"
+      data-testid="taskbar-tray"
+      (contextmenu)="openTrayStatusContextMenu($event)"
+    >
       <span *ngIf="appInfo" class="taskbar-muted">v{{ appInfo.version }}</span>
       <span class="taskbar-status" title="Ready"></span>
     </div>

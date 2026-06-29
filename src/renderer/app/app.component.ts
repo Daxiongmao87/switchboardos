@@ -148,6 +148,7 @@ type LauncherTarget =
   | 'host'
   | 'taskbar'
   | 'taskbar-window'
+  | 'tray-status'
   | 'terminal'
   | 'window'
   | 'launcher-row'
@@ -339,7 +340,7 @@ interface ContextMenuItem {
 interface ContextMenuState {
   x: number;
   y: number;
-  target: 'desktop' | 'desktop-icon' | 'host' | 'notification' | 'taskbar' | 'taskbar-window' | 'terminal' | 'window' | 'launcher-row' | 'workspace-file';
+  target: 'desktop' | 'desktop-icon' | 'host' | 'notification' | 'taskbar' | 'taskbar-window' | 'tray-status' | 'terminal' | 'window' | 'launcher-row' | 'workspace-file';
   label: string;
   appId?: ShellAppId;
   hostId?: string;
@@ -1552,6 +1553,10 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showContextMenu(event, 'taskbar', 'Taskbar', this.taskbarContextItems());
   }
 
+  openTrayStatusContextMenu(event: MouseEvent): void {
+    this.showContextMenu(event, 'tray-status', 'Status Area', this.trayStatusContextItems());
+  }
+
   openTaskbarWindowContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
     this.showContextMenu(
       event,
@@ -1764,6 +1769,17 @@ export class AppComponent implements OnInit, OnDestroy {
         return;
       case 'open-notification-settings':
         this.openApp('settings');
+        return;
+      case 'status-details':
+        this.notify(this.appInfo ? `SwitchboardOS ${this.appInfo.version} status is ready.` : 'SwitchboardOS status is ready.');
+        return;
+      case 'tray-notification-settings':
+      case 'tray-panel-settings':
+        this.openApp('settings');
+        return;
+      case 'refresh-status':
+        void this.loadWorkspaceContext();
+        this.notify('Status area refreshed.');
         return;
       case 'terminal-copy':
         this.dispatchTerminalContextAction(menu?.windowId, 'copy');
@@ -3298,6 +3314,15 @@ export class AppComponent implements OnInit, OnDestroy {
       { id: 'arrange-lock-panel', label: 'Arrange/Lock Panel' },
       { id: 'show-desktop', label: 'Show Desktop' },
       { id: 'task-manager', label: 'Task Manager / Running Windows' },
+    ];
+  }
+
+  private trayStatusContextItems(): ContextMenuItem[] {
+    return [
+      { id: 'status-details', label: 'Status Details', detail: this.appInfo ? `SwitchboardOS ${this.appInfo.version}` : 'SwitchboardOS is ready.' },
+      { id: 'tray-notification-settings', label: 'Notification Settings' },
+      { id: 'tray-panel-settings', label: 'Panel Settings' },
+      { id: 'refresh-status', label: 'Refresh Status' },
     ];
   }
 
