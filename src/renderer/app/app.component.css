@@ -1380,6 +1380,54 @@ dd {
   cursor: pointer;
 }
 
+.context-menu-button.has-separator,
+.context-menu-item.has-separator {
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+  padding-top: 9px;
+}
+
+.context-menu-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-menu-icon {
+  width: 20px;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  flex: 0 0 20px;
+}
+
+.context-menu-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.context-menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-menu-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.context-menu-shortcut {
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 10px;
+}
+
 .context-menu-button:hover:not(:disabled),
 .context-menu-item:hover {
   background: var(--color-surface-hover);

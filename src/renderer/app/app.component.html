@@ -588,19 +588,44 @@
     >
       <div class="context-menu-title">{{ menu.label }}</div>
       <ng-container *ngFor="let item of menu.items">
-        <div *ngIf="item.submenu?.length; else singleMenuItem" class="context-menu-item has-submenu">
-          <span>{{ item.label }}</span>
-          <span class="submenu-arrow">›</span>
+        <div
+          *ngIf="item.submenu?.length; else singleMenuItem"
+          class="context-menu-item has-submenu"
+          [class.has-separator]="item.separatorBefore"
+          [attr.data-menu-icon]="item.icon || null"
+          [attr.data-menu-shortcut]="item.shortcut || null"
+        >
+          <span class="context-menu-main">
+            <span *ngIf="item.icon" class="context-menu-icon" aria-hidden="true">{{ item.icon }}</span>
+            <span class="context-menu-text">
+              <span class="context-menu-label">{{ item.label }}</span>
+              <small *ngIf="item.detail">{{ item.detail }}</small>
+            </span>
+          </span>
+          <span class="context-menu-meta">
+            <kbd *ngIf="item.shortcut" class="context-menu-shortcut">{{ item.shortcut }}</kbd>
+            <span class="submenu-arrow">›</span>
+          </span>
           <div class="context-submenu">
             <button
               *ngFor="let subItem of item.submenu"
               type="button"
               class="context-menu-button"
               [class.is-danger]="subItem.danger"
+              [class.has-separator]="subItem.separatorBefore"
+              [attr.data-menu-icon]="subItem.icon || null"
+              [attr.data-menu-shortcut]="subItem.shortcut || null"
               [disabled]="subItem.disabled"
               (click)="runContextMenuAction(subItem)"
             >
-              {{ subItem.label }}
+              <span class="context-menu-main">
+                <span *ngIf="subItem.icon" class="context-menu-icon" aria-hidden="true">{{ subItem.icon }}</span>
+                <span class="context-menu-text">
+                  <span class="context-menu-label">{{ subItem.label }}</span>
+                  <small *ngIf="subItem.detail">{{ subItem.detail }}</small>
+                </span>
+              </span>
+              <kbd *ngIf="subItem.shortcut" class="context-menu-shortcut">{{ subItem.shortcut }}</kbd>
             </button>
           </div>
         </div>
@@ -609,11 +634,20 @@
             type="button"
             class="context-menu-button"
             [class.is-danger]="item.danger"
+            [class.has-separator]="item.separatorBefore"
+            [attr.data-menu-icon]="item.icon || null"
+            [attr.data-menu-shortcut]="item.shortcut || null"
             [disabled]="item.disabled"
             (click)="runContextMenuAction(item)"
           >
-            {{ item.label }}
-            <small *ngIf="item.detail">{{ item.detail }}</small>
+            <span class="context-menu-main">
+              <span *ngIf="item.icon" class="context-menu-icon" aria-hidden="true">{{ item.icon }}</span>
+              <span class="context-menu-text">
+                <span class="context-menu-label">{{ item.label }}</span>
+                <small *ngIf="item.detail">{{ item.detail }}</small>
+              </span>
+            </span>
+            <kbd *ngIf="item.shortcut" class="context-menu-shortcut">{{ item.shortcut }}</kbd>
           </button>
         </ng-template>
       </ng-container>

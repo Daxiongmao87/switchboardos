@@ -180,6 +180,12 @@ async function browserSmoke() {
   };
   const menuLabels = () => [...document.querySelectorAll('[data-testid="context-menu"] button, [data-testid="context-menu"] .context-menu-item')]
     .map((item) => (item.textContent || '').trim());
+  const menuAffordances = () => ({
+    iconCount: document.querySelectorAll('[data-testid="context-menu"] [data-menu-icon]').length,
+    separatorCount: document.querySelectorAll('[data-testid="context-menu"] .has-separator').length,
+    shortcutLabels: [...document.querySelectorAll('[data-testid="context-menu"] .context-menu-shortcut')]
+      .map((item) => (item.textContent || '').trim()),
+  });
   const menuButtonStates = () => [...document.querySelectorAll('[data-testid="context-menu"] button')]
     .map((button) => ({
       text: (button.textContent || '').trim(),
@@ -411,6 +417,7 @@ async function browserSmoke() {
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="terminal"]'), 'terminal context menu');
   const terminalContextMenu = menuLabels();
   const terminalContextMenuItems = menuButtonStates();
+  const terminalMenuAffordances = menuAffordances();
   click(document.body);
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'terminal context menu closed');
   click(document.querySelector('[data-testid="app-launcher-button"]'));
@@ -421,6 +428,7 @@ async function browserSmoke() {
   rightClick(desktop);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop"]'), 'desktop context menu');
   const desktopMenu = menuLabels();
+  const desktopMenuAffordances = menuAffordances();
   click([...document.querySelectorAll('[data-testid="context-menu"] button')].find((button) => textIncludes(button, 'New Folder')));
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'desktop menu closed after new folder');
 
@@ -460,6 +468,7 @@ async function browserSmoke() {
   rightClick(fileWindow.querySelector('.window-chrome'));
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="window"]'), 'window context menu');
   const windowMenu = menuLabels();
+  const windowMenuAffordances = menuAffordances();
   click(document.body);
 
   const fileExplorerTaskbarItem = await waitFor(
@@ -691,6 +700,11 @@ async function browserSmoke() {
       terminalContextMenuItems,
       notificationMenu,
     },
+    menuAffordances: {
+      desktopMenu: desktopMenuAffordances,
+      windowMenu: windowMenuAffordances,
+      terminalMenu: terminalMenuAffordances,
+    },
     commandPalette: {
       opened: Boolean(commandPalette),
       rowLabels: commandPaletteLabels,
@@ -825,11 +839,23 @@ async function main() {
     report.commandPalette.text.includes('Agent endpoint and approvals') === false,
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
+    report.menuAffordances.desktopMenu.iconCount >= 6,
+    report.menuAffordances.desktopMenu.separatorCount >= 2,
+    report.menuAffordances.desktopMenu.shortcutLabels.includes('Ctrl+Shift+N'),
+    report.menuAffordances.desktopMenu.shortcutLabels.includes('Ctrl+V'),
+    report.menuAffordances.desktopMenu.shortcutLabels.includes('Meta+E'),
+    report.menuAffordances.desktopMenu.shortcutLabels.includes('F5'),
     report.menus.iconMenu.some((label) => label.includes('Open')),
     report.menus.iconMenu.some((label) => label.includes('Properties')),
     report.menus.windowMenu.some((label) => label.includes('Close Window')),
     report.menus.windowMenu.some((label) => label.includes('Tile Left')),
     report.menus.windowMenu.some((label) => label.includes('Fullscreen')),
+    report.menuAffordances.windowMenu.iconCount >= 10,
+    report.menuAffordances.windowMenu.separatorCount >= 3,
+    report.menuAffordances.windowMenu.shortcutLabels.includes('Meta+M'),
+    report.menuAffordances.windowMenu.shortcutLabels.includes('Meta+Up'),
+    report.menuAffordances.windowMenu.shortcutLabels.includes('F11'),
+    report.menuAffordances.windowMenu.shortcutLabels.includes('Alt+F4'),
     !report.windows.openWindowTitlebarContainsLegacyControls,
     !report.windows.openWindowTitlebarContainsRuntimeState,
     report.menus.taskbarWindowMenu.some((label) => label.includes('Show') || label.includes('Restore')),
@@ -856,6 +882,11 @@ async function main() {
     report.menus.terminalContextMenu.some((label) => label.includes('Paste')),
     report.menus.terminalContextMenu.some((label) => label.includes('Clear')),
     terminalBridgeActionsReady,
+    report.menuAffordances.terminalMenu.iconCount >= 3,
+    report.menuAffordances.terminalMenu.separatorCount >= 1,
+    report.menuAffordances.terminalMenu.shortcutLabels.includes('Ctrl+Shift+C'),
+    report.menuAffordances.terminalMenu.shortcutLabels.includes('Ctrl+Shift+V'),
+    report.menuAffordances.terminalMenu.shortcutLabels.includes('Ctrl+L'),
     report.menus.terminalContextMenu.some((label) => label.includes('Split/New Terminal')),
     report.menus.terminalContextMenu.some((label) => label.includes('Open Host Dashboard')),
     report.menus.terminalContextMenu.some((label) => label.includes('Properties')),

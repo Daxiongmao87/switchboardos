@@ -331,9 +331,12 @@ interface IconDragState {
 interface ContextMenuItem {
   id: string;
   label: string;
+  icon?: string;
+  shortcut?: string;
   detail?: string;
   disabled?: boolean;
   danger?: boolean;
+  separatorBefore?: boolean;
   submenu?: ContextMenuItem[];
 }
 
@@ -3266,28 +3269,32 @@ export class AppComponent implements OnInit, OnDestroy {
     const canPaste = Boolean(this.workspaceClipboard);
     const clipboardAction = this.workspaceClipboard?.mode === 'copy' ? 'Copy' : 'Move';
     return [
-      { id: 'new-folder', label: 'New Folder' },
+      { id: 'new-folder', label: 'New Folder', icon: '+', shortcut: 'Ctrl+Shift+N' },
       {
         id: 'new-workspace-artifact',
         label: 'New',
+        icon: 'N',
         submenu: [
-          { id: 'new-applet', label: 'Applet' },
-          { id: 'new-scriptlet', label: 'Scriptlet' },
+          { id: 'new-applet', label: 'Applet', icon: 'A' },
+          { id: 'new-scriptlet', label: 'Scriptlet', icon: 'SH' },
         ],
       },
       {
         id: 'paste',
         label: 'Paste',
+        icon: 'P',
+        shortcut: 'Ctrl+V',
         disabled: !canPaste,
+        separatorBefore: true,
         detail: canPaste
           ? `${clipboardAction} "${this.workspaceClipboard?.name}" into workspace root.`
           : 'Clipboard is empty.',
       },
-      { id: 'arrange-icons', label: 'Arrange Icons' },
-      { id: 'change-wallpaper', label: 'Change Wallpaper' },
-      { id: 'display-settings', label: 'Display / Theme Settings' },
-      { id: 'open-workspace-files', label: 'Open File Explorer' },
-      { id: 'refresh-context', label: 'Refresh' },
+      { id: 'arrange-icons', label: 'Arrange Icons', icon: 'G', separatorBefore: true },
+      { id: 'change-wallpaper', label: 'Change Wallpaper', icon: 'W' },
+      { id: 'display-settings', label: 'Display / Theme Settings', icon: 'S' },
+      { id: 'open-workspace-files', label: 'Open File Explorer', icon: 'FE', shortcut: 'Meta+E', separatorBefore: true },
+      { id: 'refresh-context', label: 'Refresh', icon: 'R', shortcut: 'F5' },
     ];
   }
 
@@ -3340,40 +3347,45 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private windowContextItems(windowItem: ShellWindow): ContextMenuItem[] {
     return [
-      { id: 'minimize-window', label: 'Minimize' },
-      { id: 'maximize-window', label: windowItem.state === 'maximized' ? 'Restore' : 'Maximize' },
-      { id: 'tile-left', label: 'Tile Left' },
-      { id: 'tile-right', label: 'Tile Right' },
-      { id: 'tile-top', label: 'Tile Top' },
-      { id: 'tile-bottom', label: 'Tile Bottom' },
-      { id: 'tile-top-left', label: 'Top Left' },
-      { id: 'tile-top-right', label: 'Top Right' },
-      { id: 'tile-bottom-left', label: 'Bottom Left' },
-      { id: 'tile-bottom-right', label: 'Bottom Right' },
-      { id: 'toggle-fullscreen', label: 'Fullscreen' },
-      { id: 'close-window', label: 'Close Window', danger: true },
+      { id: 'minimize-window', label: 'Minimize', icon: '-', shortcut: 'Meta+M' },
+      { id: 'maximize-window', label: windowItem.state === 'maximized' ? 'Restore' : 'Maximize', icon: '[]', shortcut: 'Meta+Up' },
+      { id: 'tile-left', label: 'Tile Left', icon: 'L', separatorBefore: true },
+      { id: 'tile-right', label: 'Tile Right', icon: 'R' },
+      { id: 'tile-top', label: 'Tile Top', icon: 'T' },
+      { id: 'tile-bottom', label: 'Tile Bottom', icon: 'B' },
+      { id: 'tile-top-left', label: 'Top Left', icon: '1' },
+      { id: 'tile-top-right', label: 'Top Right', icon: '2' },
+      { id: 'tile-bottom-left', label: 'Bottom Left', icon: '3' },
+      { id: 'tile-bottom-right', label: 'Bottom Right', icon: '4' },
+      { id: 'toggle-fullscreen', label: 'Fullscreen', icon: 'F', shortcut: 'F11', separatorBefore: true },
+      { id: 'close-window', label: 'Close Window', icon: 'X', shortcut: 'Alt+F4', danger: true, separatorBefore: true },
     ];
   }
 
   private terminalContextItems(windowItem: ShellWindow, host: HostRecord | null): ContextMenuItem[] {
     return [
-      { id: 'terminal-copy', label: 'Copy', detail: 'Copy selected terminal text.' },
-      { id: 'terminal-paste', label: 'Paste', detail: 'Paste clipboard text into the active terminal session.' },
-      { id: 'terminal-clear', label: 'Clear', detail: 'Clear this terminal view.' },
+      { id: 'terminal-copy', label: 'Copy', icon: 'C', shortcut: 'Ctrl+Shift+C', detail: 'Copy selected terminal text.' },
+      { id: 'terminal-paste', label: 'Paste', icon: 'P', shortcut: 'Ctrl+Shift+V', detail: 'Paste clipboard text into the active terminal session.' },
+      { id: 'terminal-clear', label: 'Clear', icon: 'CL', shortcut: 'Ctrl+L', detail: 'Clear this terminal view.' },
       {
         id: 'terminal-new-window',
         label: 'Split/New Terminal',
+        icon: 'T',
+        separatorBefore: true,
         detail: host ? `Open another terminal for ${host.name}.` : 'Open another terminal workspace.',
       },
       {
         id: 'terminal-open-host-dashboard',
         label: 'Open Host Dashboard',
+        icon: 'HD',
         disabled: !host,
         detail: host ? host.name : 'Requires a host-scoped terminal.',
       },
       {
         id: 'terminal-properties',
         label: host ? 'Session Properties' : 'Terminal Properties',
+        icon: 'I',
+        separatorBefore: true,
         detail: host ? `${host.username || 'user'}@${host.address || host.hostname}` : windowItem.windowId,
       },
     ];
