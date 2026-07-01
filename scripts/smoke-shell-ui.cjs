@@ -455,6 +455,12 @@ async function browserSmoke() {
       .find((row) => textIncludes(row, 'New Folder')),
     'created New Folder row in File Explorer',
   );
+  rightClick(newFolderRow);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="workspace-file"]'), 'workspace file context menu');
+  const workspaceFileMenu = menuLabels();
+  const workspaceFileMenuAffordances = menuAffordances();
+  click(document.body);
+  await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'workspace file context menu closed');
   newFolderRow.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
   const workspaceNavigatedPath = await waitFor(
     () => {
@@ -688,6 +694,7 @@ async function browserSmoke() {
     menus: {
       desktopMenu,
       iconMenu,
+      workspaceFileMenu,
       windowMenu,
       taskbarWindowMenu,
       taskbarMenu,
@@ -704,6 +711,7 @@ async function browserSmoke() {
       desktopMenu: desktopMenuAffordances,
       windowMenu: windowMenuAffordances,
       terminalMenu: terminalMenuAffordances,
+      workspaceFileMenu: workspaceFileMenuAffordances,
     },
     commandPalette: {
       opened: Boolean(commandPalette),
@@ -845,6 +853,27 @@ async function main() {
     report.menuAffordances.desktopMenu.shortcutLabels.includes('Ctrl+V'),
     report.menuAffordances.desktopMenu.shortcutLabels.includes('Meta+E'),
     report.menuAffordances.desktopMenu.shortcutLabels.includes('F5'),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Open')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('New Folder')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Open With')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Rename')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Copy')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Cut')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Paste')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Duplicate')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Move to Recycle Bin')),
+    report.menus.workspaceFileMenu.some((label) => label.includes('Properties')),
+    report.menuAffordances.workspaceFileMenu.iconCount >= 8,
+    report.menuAffordances.workspaceFileMenu.separatorCount === 3,
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Enter'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Ctrl+Shift+N'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('F2'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Ctrl+C'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Ctrl+X'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Ctrl+V'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Ctrl+D'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Delete'),
+    report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Alt+Enter'),
     report.menus.iconMenu.some((label) => label.includes('Open')),
     report.menus.iconMenu.some((label) => label.includes('Properties')),
     report.menus.windowMenu.some((label) => label.includes('Close Window')),
