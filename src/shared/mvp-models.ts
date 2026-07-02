@@ -255,7 +255,11 @@ export interface ShellWindowSnapshot {
 }
 
 export interface WorkspaceLayoutSnapshot {
-  desktopShortcutIds: string[];
+  desktopShortcutIds: Array<{
+    id: string;
+    appId: string;
+    shellOwned?: boolean;
+  }>;
   windows: Array<Omit<ShellWindowSnapshot, 'focused' | 'semanticState' | 'registeredActions'>>;
 }
 

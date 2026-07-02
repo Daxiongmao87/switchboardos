@@ -321,11 +321,24 @@ interface DesktopIconPosition {
 }
 
 interface IconDragState {
-  appId: ShellAppId;
+  shortcutId: string;
   offsetX: number;
   offsetY: number;
   move: (event: MouseEvent) => void;
   end: () => void;
+}
+
+interface DesktopShortcut {
+  id: string;
+  appId: ShellAppId;
+  shellOwned: boolean;
+}
+
+interface DesktopShortcutItem {
+  id: string;
+  appId: ShellAppId;
+  shellOwned: boolean;
+  definition: ShellAppDefinition;
 }
 
 interface ContextMenuItem {
@@ -346,6 +359,7 @@ interface ContextMenuState {
   target: 'desktop' | 'desktop-icon' | 'host' | 'notification' | 'taskbar' | 'taskbar-window' | 'tray-status' | 'terminal' | 'window' | 'launcher-row' | 'workspace-file';
   label: string;
   appId?: ShellAppId;
+  shortcutId?: string;
   hostId?: string;
   windowId?: string;
   workspaceArtifact?: WorkspaceArtifact;
@@ -418,9 +432,9 @@ export class AppComponent implements OnInit, OnDestroy {
   hosts: HostRecord[] = [];
   auditEvents: AuditEvent[] = [];
   windows: ShellWindow[] = [];
-  desktopShortcutIds: ShellAppId[] = [];
+  desktopShortcuts: DesktopShortcut[] = [];
   desktopIconPositions: Record<string, DesktopIconPosition> = {};
-  selectedShortcutId: ShellAppId | null = null;
+  selectedShortcutId: string | null = null;
   launcherOpen = false;
   hostLauncherOpen = false;
   profilePanelOpen = false;
@@ -503,6 +517,24 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly defaultShortcutIds: ShellAppId[] = [
     ...DEFAULT_DESKTOP_SHORTCUT_IDS,
   ];
+
+  private defaultShortcutId(appId: ShellAppId): string {
+    return `shortcut-${appId}`;
+  }
+
+  private legacyShortcutId(appId: ShellAppId): string {
+    return `shortcut-legacy-${appId}`;
+  }
+
+  private defaultDesktopShortcuts(): DesktopShortcut[] {
+    return this.defaultShortcutIds
+      .filter((appId): appId is ShellAppId => this.getAppDefinition(appId) !== null)
+      .map((appId) => ({ id: this.defaultShortcutId(appId), appId, shellOwned: true }));
+  }
+
+  private makeShortcutId(appId: ShellAppId): string {
+    return `shortcut-${appId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
 
   readonly appDefinitions: ShellAppDefinition[] = [
     {
@@ -911,7 +943,8 @@ export class AppComponent implements OnInit, OnDestroy {
   constructor() {
     // Profiles are loaded asynchronously from SQLite in ngOnInit.
     // Initialize with empty defaults to avoid localStorage sync coupling.
-    this.desktopShortcutIds = this.loadDesktopShortcuts();
+    this.syncFirstRunState();
+    this.desktopShortcuts = this.loadDesktopShortcuts();
     this.desktopIconPositions = this.loadDesktopIconPositions();
     this.workspaceArtifacts = this.loadWorkspaceArtifacts();
   }
@@ -1104,10 +1137,21 @@ export class AppComponent implements OnInit, OnDestroy {
     return [...coreApps, ...installedApps];
   }
 
-  get desktopShortcutApps(): ShellAppDefinition[] {
-    return this.desktopShortcutIds
-      .map((appId) => this.getAppDefinition(appId))
-      .filter((app): app is ShellAppDefinition => Boolean(app));
+  get desktopShortcutApps(): DesktopShortcutItem[] {
+    return this.desktopShortcuts
+      .map((shortcut) => {
+        const definition = this.getAppDefinition(shortcut.appId);
+        if (!definition) {
+          return null;
+        }
+        return {
+          id: shortcut.id,
+          appId: shortcut.appId,
+          definition,
+          shellOwned: shortcut.shellOwned,
+        };
+      })
+      .filter((shortcut): shortcut is DesktopShortcutItem => Boolean(shortcut));
   }
 
   get allAppDefinitions(): ShellAppDefinition[] {
@@ -1487,20 +1531,20 @@ export class AppComponent implements OnInit, OnDestroy {
     };
   }
 
-  selectShortcut(appId: ShellAppId): void {
-    this.selectedShortcutId = appId;
+  selectShortcut(shortcutId: string): void {
+    this.selectedShortcutId = shortcutId;
     this.launcherOpen = false;
   }
 
-  desktopIconStyle(appId: ShellAppId, index: number): Record<string, string> {
-    const position = this.desktopIconPositions[appId] ?? this.defaultIconPosition(index);
+  desktopIconStyle(shortcutId: string, index: number): Record<string, string> {
+    const position = this.desktopIconPositions[shortcutId] ?? this.defaultIconPosition(index);
     return {
       left: `${position.x}px`,
       top: `${position.y}px`,
     };
   }
 
-  startDesktopIconDrag(event: MouseEvent, appId: ShellAppId, index: number): void {
+  startDesktopIconDrag(event: MouseEvent, shortcutId: string, index: number): void {
     if (event.button !== 0) {
       return;
     }
@@ -1514,10 +1558,10 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
     const surfaceRect = surface.getBoundingClientRect();
-    const current = this.desktopIconPositions[appId] ?? this.defaultIconPosition(index);
+    const current = this.desktopIconPositions[shortcutId] ?? this.defaultIconPosition(index);
     this.stopIconDrag();
     const iconDragState: IconDragState = {
-      appId,
+      shortcutId,
       offsetX: event.clientX - surfaceRect.left - current.x,
       offsetY: event.clientY - surfaceRect.top - current.y,
       move: (moveEvent: MouseEvent) => {
@@ -1525,11 +1569,11 @@ export class AppComponent implements OnInit, OnDestroy {
         const y = clamp(moveEvent.clientY - surfaceRect.top - iconDragState.offsetY, 8, Math.max(8, surfaceRect.height - 112));
         this.desktopIconPositions = {
           ...this.desktopIconPositions,
-          [appId]: { x, y },
+          [shortcutId]: { x, y },
         };
       },
       end: () => {
-        this.snapDesktopIcon(appId);
+        this.snapDesktopIcon(shortcutId);
         this.saveDesktopIconPositions();
         this.stopIconDrag();
       },
@@ -1547,9 +1591,15 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showContextMenu(event, 'desktop', 'Desktop', this.desktopContextItems());
   }
 
-  openDesktopIconContextMenu(event: MouseEvent, appId: ShellAppId): void {
-    const definition = this.getAppDefinition(appId);
-    this.showContextMenu(event, 'desktop-icon', definition?.title ?? appId, this.desktopIconContextItems(appId), appId);
+  openDesktopIconContextMenu(event: MouseEvent, shortcut: DesktopShortcutItem): void {
+    this.showContextMenu(
+      event,
+      'desktop-icon',
+      shortcut.definition.title,
+      this.desktopIconContextItems(shortcut),
+      shortcut.appId,
+      shortcut.id,
+    );
   }
 
   openTaskbarContextMenu(event: MouseEvent): void {
@@ -1567,12 +1617,21 @@ export class AppComponent implements OnInit, OnDestroy {
       windowItem.title,
       this.taskbarWindowContextItems(windowItem),
       windowItem.appId,
+      undefined,
       windowItem.windowId,
     );
   }
 
   openWindowContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
-    this.showContextMenu(event, 'window', windowItem.title, this.windowContextItems(windowItem), windowItem.appId, windowItem.windowId);
+    this.showContextMenu(
+      event,
+      'window',
+      windowItem.title,
+      this.windowContextItems(windowItem),
+      windowItem.appId,
+      undefined,
+      windowItem.windowId,
+    );
   }
 
   openTerminalContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
@@ -1583,6 +1642,7 @@ export class AppComponent implements OnInit, OnDestroy {
       windowItem.title,
       this.terminalContextItems(windowItem, host),
       windowItem.appId,
+      undefined,
       windowItem.windowId,
       undefined,
       host?.id ?? windowItem.hostId ?? undefined,
@@ -1603,13 +1663,23 @@ export class AppComponent implements OnInit, OnDestroy {
       undefined,
       undefined,
       undefined,
+      undefined,
       host.id,
     );
   }
 
   openWorkspaceArtifactContextMenu(event: MouseEvent, artifact: WorkspaceArtifact): void {
     this.showWorkspaceArtifactProperties(artifact);
-    this.showContextMenu(event, 'workspace-file', artifact.name, this.workspaceArtifactContextItems(artifact), undefined, undefined, artifact);
+    this.showContextMenu(
+      event,
+      'workspace-file',
+      artifact.name,
+      this.workspaceArtifactContextItems(artifact),
+      undefined,
+      undefined,
+      undefined,
+      artifact,
+    );
   }
 
   openNotificationContextMenu(event: MouseEvent, message: string, kind: ShellNotificationKind, toastIndex?: number): void {
@@ -1618,6 +1688,7 @@ export class AppComponent implements OnInit, OnDestroy {
       'notification',
       'Notification',
       this.notificationContextItems(),
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -1653,6 +1724,11 @@ export class AppComponent implements OnInit, OnDestroy {
           this.openApp(menu.appId);
         }
         return;
+      case 'duplicate-shortcut':
+        if (menu?.appId) {
+          this.addShortcut(menu.appId);
+        }
+        return;
       case 'show-taskbar-window':
         this.runWindowMenuAction(menu?.windowId, (windowItem) => this.restoreWindow(windowItem));
         return;
@@ -1674,13 +1750,13 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         return;
       case 'unpin-app':
-        if (menu?.appId && !this.defaultShortcutIds.includes(menu.appId)) {
-          this.removeShortcutById(menu.appId);
+        if (menu?.appId) {
+          this.removeShortcutByAppId(menu.appId);
         }
         return;
       case 'remove-shortcut':
-        if (menu?.appId) {
-          this.removeShortcutById(menu.appId);
+        if (menu?.shortcutId) {
+          this.removeShortcutById(menu.shortcutId);
         }
         return;
       case 'rename-shortcut':
@@ -1900,35 +1976,84 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
-  removeShortcut(event: MouseEvent, appId: ShellAppId): void {
+  removeShortcut(event: MouseEvent, shortcutId: string): void {
     event.stopPropagation();
-    this.removeShortcutById(appId);
+    this.removeShortcutById(shortcutId);
   }
 
-  removeShortcutById(appId: ShellAppId): void {
-    this.desktopShortcutIds = this.desktopShortcutIds.filter((candidate) => candidate !== appId);
-    if (this.selectedShortcutId === appId) {
+  removeShortcutById(shortcutId: string): void {
+    const removed = this.desktopShortcuts.find((candidate) => candidate.id === shortcutId);
+    if (!removed || removed.shellOwned) {
+      return;
+    }
+    this.desktopShortcuts = this.desktopShortcuts.filter((candidate) => candidate.id !== shortcutId);
+    if (this.selectedShortcutId === shortcutId) {
+      this.selectedShortcutId = null;
+    }
+    const nextPositions = { ...this.desktopIconPositions };
+    delete nextPositions[shortcutId];
+    this.desktopIconPositions = nextPositions;
+    this.saveDesktopShortcuts();
+    this.saveDesktopIconPositions();
+    void this.persistActiveProfileLayout(false);
+  }
+
+  removeShortcutByAppId(appId: ShellAppId): void {
+    const before = this.desktopShortcuts.length;
+    this.desktopShortcuts = this.desktopShortcuts.filter((shortcut) => {
+      if (shortcut.appId !== appId) {
+        return true;
+      }
+      return shortcut.shellOwned;
+    });
+    if (this.desktopShortcuts.length === before) {
+      return;
+    }
+
+    const protectedIds = new Set(this.desktopShortcuts
+      .filter((shortcut) => shortcut.appId === appId && shortcut.shellOwned)
+      .map((shortcut) => shortcut.id));
+    this.desktopIconPositions = Object.fromEntries(
+      Object.entries(this.desktopIconPositions)
+        .filter(([shortcutId]) => this.desktopShortcuts.some((shortcut) => shortcut.id === shortcutId)
+          || protectedIds.has(shortcutId)),
+    );
+    if (this.selectedShortcutId && !this.desktopShortcuts.some((shortcut) => shortcut.id === this.selectedShortcutId)) {
       this.selectedShortcutId = null;
     }
     this.saveDesktopShortcuts();
+    this.saveDesktopIconPositions();
     void this.persistActiveProfileLayout(false);
   }
 
   addShortcut(appId: ShellAppId): void {
-    if (!this.desktopShortcutIds.includes(appId)) {
-      this.desktopShortcutIds = [...this.desktopShortcutIds, appId];
-      this.desktopIconPositions = {
-        ...this.desktopIconPositions,
-        [appId]: this.defaultIconPosition(this.desktopShortcutIds.length - 1),
-      };
-      this.saveDesktopShortcuts();
-      this.saveDesktopIconPositions();
-      void this.persistActiveProfileLayout(false);
+    if (!this.isShellAppId(appId)) {
+      return;
     }
+    const definition = this.getAppDefinition(appId);
+    if (!definition?.searchable) {
+      return;
+    }
+
+    const shortcutId = this.makeShortcutId(appId);
+    const index = this.desktopShortcuts.length;
+    const shortcut: DesktopShortcut = {
+      id: shortcutId,
+      appId,
+      shellOwned: false,
+    };
+    this.desktopShortcuts = [...this.desktopShortcuts, shortcut];
+    this.desktopIconPositions = {
+      ...this.desktopIconPositions,
+      [shortcutId]: this.defaultIconPosition(index),
+    };
+    this.saveDesktopShortcuts();
+    this.saveDesktopIconPositions();
+    void this.persistActiveProfileLayout(false);
   }
 
   isShortcutPinned(appId: ShellAppId): boolean {
-    return this.desktopShortcutIds.includes(appId);
+    return this.desktopShortcuts.some((shortcut) => shortcut.appId === appId);
   }
 
   toggleLauncher(): void {
@@ -2753,7 +2878,8 @@ export class AppComponent implements OnInit, OnDestroy {
       });
       this.workspaceProfiles = [...this.workspaceProfiles, profile];
       this.activeProfileId = profile.profileId;
-      this.desktopShortcutIds = [...this.defaultShortcutIds];
+      this.desktopShortcuts = this.defaultDesktopShortcuts();
+      this.ensureDefaultIconPositions();
       this.windows = [];
       this.newProfileName = '';
       this.renameProfileName = profile.name;
@@ -3012,6 +3138,10 @@ export class AppComponent implements OnInit, OnDestroy {
     return windowItem.windowId;
   }
 
+  trackShortcut(_index: number, shortcut: DesktopShortcutItem): string {
+    return shortcut.id;
+  }
+
   trackHost(_index: number, host: HostRecord): string {
     return host.id;
   }
@@ -3115,7 +3245,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private currentWorkspaceLayoutSnapshot(): WorkspaceLayoutSnapshot {
     return {
-      desktopShortcutIds: this.desktopShortcutIds,
+      desktopShortcutIds: this.desktopShortcuts,
       windows: this.windows.map((windowItem) => ({
         windowId: windowItem.windowId,
         appId: windowItem.appId,
@@ -3156,10 +3286,23 @@ export class AppComponent implements OnInit, OnDestroy {
   private restoreProfileLayout(profile: WorkspaceProfile): void {
     const definitionFor = (appId: string): ShellAppDefinition | null => this.getAppDefinition(appId as ShellAppId);
     const layout = this.normalizeWorkspaceLayout(profile.layout ?? this.emptyWorkspaceLayout());
-    this.desktopShortcutIds = layout.desktopShortcutIds.filter((appId): appId is ShellAppId => Boolean(definitionFor(appId)));
-    if (this.desktopShortcutIds.length === 0) {
-      this.desktopShortcutIds = [...this.defaultShortcutIds];
+    this.desktopShortcuts = layout.desktopShortcutIds
+      .map((shortcut) => {
+        const definition = definitionFor(shortcut.appId);
+        if (!definition) {
+          return null;
+        }
+        return {
+          id: shortcut.id,
+          appId: definition.appId,
+          shellOwned: Boolean(shortcut.shellOwned),
+        };
+      })
+      .filter((shortcut): shortcut is DesktopShortcut => shortcut !== null);
+    if (this.desktopShortcuts.length === 0) {
+      this.desktopShortcuts = this.defaultDesktopShortcuts();
     }
+    this.desktopIconPositions = this.restoreShortcutPositionTargets(this.desktopIconPositions);
     this.ensureDefaultIconPositions();
     this.saveDesktopShortcuts();
     this.windows = layout.windows
@@ -3178,7 +3321,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private emptyWorkspaceLayout(): WorkspaceLayoutSnapshot {
     return {
-      desktopShortcutIds: [...this.defaultShortcutIds],
+      desktopShortcutIds: this.defaultDesktopShortcuts(),
       windows: [],
     };
   }
@@ -3189,6 +3332,7 @@ export class AppComponent implements OnInit, OnDestroy {
     label: string,
     items: ContextMenuItem[],
     appId?: ShellAppId,
+    shortcutId?: string,
     windowId?: string,
     workspaceArtifact?: WorkspaceArtifact,
     hostId?: string,
@@ -3202,6 +3346,7 @@ export class AppComponent implements OnInit, OnDestroy {
       target,
       label,
       appId,
+      shortcutId,
       hostId,
       windowId,
       workspaceArtifact,
@@ -3336,18 +3481,36 @@ export class AppComponent implements OnInit, OnDestroy {
     ];
   }
 
-  private desktopIconContextItems(appId: ShellAppId): ContextMenuItem[] {
+  private desktopIconContextItems(shortcut: DesktopShortcutItem): ContextMenuItem[] {
     return [
-      { id: 'open-app', label: 'Open' },
+      { id: 'open-app', label: 'Open', icon: 'O', shortcut: 'Enter' },
       {
         id: 'duplicate-shortcut',
         label: 'Duplicate Shortcut',
-        disabled: true,
-        detail: 'Duplicate Shortcut is unavailable: shortcut IDs are unique.',
+        icon: 'D',
+        shortcut: 'Ctrl+D',
       },
-      { id: 'rename-shortcut', label: 'Rename' },
-      { id: 'remove-shortcut', label: 'Remove Shortcut', disabled: this.defaultShortcutIds.includes(appId) },
-      { id: 'properties', label: 'Properties' },
+      {
+        id: 'rename-shortcut',
+        label: 'Rename',
+        icon: 'R',
+        shortcut: 'F2',
+      },
+      {
+        id: 'remove-shortcut',
+        label: 'Remove Shortcut',
+        icon: 'TR',
+        shortcut: 'Delete',
+        separatorBefore: true,
+        disabled: shortcut.shellOwned,
+      },
+      {
+        id: 'properties',
+        label: 'Properties',
+        icon: 'I',
+        shortcut: 'Alt+Enter',
+        separatorBefore: true,
+      },
     ];
   }
 
@@ -3555,8 +3718,8 @@ export class AppComponent implements OnInit, OnDestroy {
     };
   }
 
-  private snapDesktopIcon(appId: ShellAppId): void {
-    const position = this.desktopIconPositions[appId];
+  private snapDesktopIcon(shortcutId: string): void {
+    const position = this.desktopIconPositions[shortcutId];
     if (!position) {
       return;
     }
@@ -3564,7 +3727,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const gridY = 18 + Math.round((position.y - 18) / 96) * 96;
     this.desktopIconPositions = {
       ...this.desktopIconPositions,
-      [appId]: {
+      [shortcutId]: {
         x: Math.max(8, gridX),
         y: Math.max(8, gridY),
       },
@@ -3573,8 +3736,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private arrangeDesktopIcons(): void {
     const positions: Record<string, DesktopIconPosition> = {};
-    this.desktopShortcutIds.forEach((appId, index) => {
-      positions[appId] = this.defaultIconPosition(index);
+    this.desktopShortcuts.forEach((shortcut, index) => {
+      positions[shortcut.id] = this.defaultIconPosition(index);
     });
     this.desktopIconPositions = positions;
     this.saveDesktopIconPositions();
@@ -3583,8 +3746,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private ensureDefaultIconPositions(): void {
     const positions = { ...this.desktopIconPositions };
-    this.desktopShortcutIds.forEach((appId, index) => {
-      positions[appId] ??= this.defaultIconPosition(index);
+    this.desktopShortcuts.forEach((shortcut, index) => {
+      positions[shortcut.id] ??= this.defaultIconPosition(index);
     });
     this.desktopIconPositions = positions;
   }
@@ -4116,18 +4279,18 @@ export class AppComponent implements OnInit, OnDestroy {
     this.resizeState = null;
   }
 
-  private loadDesktopShortcuts(): ShellAppId[] {
+  private loadDesktopShortcuts(): DesktopShortcut[] {
     try {
       const stored = window.localStorage.getItem(DESKTOP_SHORTCUTS_STORAGE_KEY);
       const parsed = stored ? JSON.parse(stored) as unknown : null;
       if (Array.isArray(parsed)) {
-        const shortcuts = parsed.filter((value): value is ShellAppId => this.isShellAppId(value));
-        return this.normalizeDesktopShortcutIds(shortcuts);
+        const shortcuts = this.normalizeDesktopShortcuts(parsed);
+        return shortcuts.length > 0 ? shortcuts : this.defaultDesktopShortcuts();
       }
     } catch {
-      return [...this.defaultShortcutIds];
+      return this.defaultDesktopShortcuts();
     }
-    return [...this.defaultShortcutIds];
+    return this.defaultDesktopShortcuts();
   }
 
   private async loadWorkspaceProfilesFromStore(): Promise<void> {
@@ -4255,8 +4418,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
     const record = value as Partial<WorkspaceLayoutSnapshot>;
     const desktopShortcutIds = Array.isArray(record.desktopShortcutIds)
-      ? this.normalizeDesktopShortcutIds(record.desktopShortcutIds)
-      : [...this.defaultShortcutIds];
+      ? this.normalizeDesktopShortcuts(record.desktopShortcutIds)
+      : this.emptyWorkspaceLayout().desktopShortcutIds;
     const windows = Array.isArray(record.windows)
       ? record.windows.filter((windowItem): windowItem is WorkspaceLayoutSnapshot['windows'][number] => {
         return Boolean(
@@ -4280,17 +4443,79 @@ export class AppComponent implements OnInit, OnDestroy {
     };
   }
 
-  private normalizeDesktopShortcutIds(value: unknown[]): ShellAppId[] {
+  private normalizeDesktopShortcuts(value: unknown[]): DesktopShortcut[] {
+    type NormalizedRawShortcut = {
+      appId: ShellAppId;
+      id?: string;
+      shellOwned: boolean;
+    };
+
+    const raw = value
+      .map((item) => {
+        if (typeof item === 'string' && this.isShellAppId(item)) {
+          return { appId: item, shellOwned: true } as NormalizedRawShortcut;
+        }
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          return null;
+        }
+        const record = item as Partial<DesktopShortcut>;
+        if (!record.appId || !this.isShellAppId(record.appId)) {
+          return null;
+        }
+        return {
+          appId: record.appId,
+          id: typeof record.id === 'string' && record.id.trim() ? record.id.trim() : undefined,
+          shellOwned: Boolean(record.shellOwned),
+        };
+      })
+      .filter((entry): entry is NormalizedRawShortcut => Boolean(entry));
+
+    const stringEntries = raw
+      .filter((entry) => !entry.id)
+      .map((entry) => entry.appId);
+    const normalizedLegacy = this.normalizeLegacyShortcutIds(stringEntries);
+    const defaultShortcutSet = new Set<ShellAppId>(this.defaultShortcutIds);
+    const normalized: DesktopShortcut[] = [];
+    const usedIds = new Set<string>();
+
+    for (const appId of normalizedLegacy) {
+      const shortcutId = defaultShortcutSet.has(appId) ? this.defaultShortcutId(appId) : this.legacyShortcutId(appId);
+      if (usedIds.has(shortcutId)) {
+        continue;
+      }
+      usedIds.add(shortcutId);
+      normalized.push({ id: shortcutId, appId, shellOwned: true });
+    }
+
+    for (const entry of raw) {
+      if (!entry.id) {
+        continue;
+      }
+      if (usedIds.has(entry.id)) {
+        continue;
+      }
+      usedIds.add(entry.id);
+      normalized.push({
+        id: entry.id,
+        appId: entry.appId,
+        shellOwned: entry.shellOwned || defaultShortcutSet.has(entry.appId),
+      });
+    }
+
+    return normalized.length > 0 ? normalized : this.defaultDesktopShortcuts();
+  }
+
+  private normalizeLegacyShortcutIds(value: ShellAppId[]): ShellAppId[] {
     const shortcutIds = [...new Set(value)]
-      .filter((appId): appId is ShellAppId => this.isShellAppId(appId) && Boolean(this.getAppDefinition(appId)?.searchable));
+      .filter((appId) => this.getAppDefinition(appId)?.searchable);
     if (shortcutIds.length === 0) {
-      return [...this.defaultShortcutIds];
+      return [];
     }
     if (this.isLegacyDefaultShortcutSet(shortcutIds)) {
       const legacyDefaultSet = new Set<ShellAppId>(LEGACY_DEFAULT_DESKTOP_SHORTCUT_IDS);
       const currentDefaultSet = new Set<ShellAppId>(DEFAULT_DESKTOP_SHORTCUT_IDS);
       const customIds = shortcutIds.filter((appId) => !legacyDefaultSet.has(appId) && !currentDefaultSet.has(appId));
-      return [...this.defaultShortcutIds, ...new Set(customIds)];
+      return [...DEFAULT_DESKTOP_SHORTCUT_IDS, ...new Set(customIds)];
     }
     return shortcutIds;
   }
@@ -4328,7 +4553,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private saveDesktopShortcuts(): void {
     try {
-      window.localStorage.setItem(DESKTOP_SHORTCUTS_STORAGE_KEY, JSON.stringify(this.desktopShortcutIds));
+      window.localStorage.setItem(DESKTOP_SHORTCUTS_STORAGE_KEY, JSON.stringify(this.desktopShortcuts));
     } catch {
       this.errorMessage = 'Unable to persist desktop shortcuts.';
     }
@@ -4340,13 +4565,16 @@ export class AppComponent implements OnInit, OnDestroy {
       const parsed = stored ? JSON.parse(stored) as unknown : null;
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const positions: Record<string, DesktopIconPosition> = {};
-        for (const [appId, value] of Object.entries(parsed as Record<string, unknown>)) {
-          if (!this.isShellAppId(appId) || !value || typeof value !== 'object') {
+        for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+          if (!value || typeof value !== 'object') {
             continue;
           }
           const candidate = value as Partial<DesktopIconPosition>;
           if (Number.isFinite(candidate.x) && Number.isFinite(candidate.y)) {
-            positions[appId] = { x: Number(candidate.x), y: Number(candidate.y) };
+            const shortcutId = this.defaultShortcutIds.includes(key as ShellAppId)
+              ? this.defaultShortcutId(key as ShellAppId)
+              : key;
+            positions[shortcutId] = { x: Number(candidate.x), y: Number(candidate.y) };
           }
         }
         return positions;
@@ -4355,6 +4583,34 @@ export class AppComponent implements OnInit, OnDestroy {
       // Fall through to defaults.
     }
     return {};
+  }
+
+  private restoreShortcutPositionTargets(positions: Record<string, DesktopIconPosition>): Record<string, DesktopIconPosition> {
+    const restored: Record<string, DesktopIconPosition> = {};
+    const reusablePositions = { ...positions };
+
+    for (const shortcut of this.desktopShortcuts) {
+      const direct = reusablePositions[shortcut.id];
+      if (direct) {
+        delete reusablePositions[shortcut.id];
+        restored[shortcut.id] = direct;
+        continue;
+      }
+
+      const legacyDefaultKey = this.legacyShortcutId(shortcut.appId);
+      const appKey = this.defaultShortcutIds.includes(shortcut.appId) ? this.defaultShortcutId(shortcut.appId) : undefined;
+      const fallbackKeys = [legacyDefaultKey, appKey, shortcut.appId].filter((key): key is string => Boolean(key));
+
+      const fallbackKey = fallbackKeys.find((key) => reusablePositions[key]);
+      if (!fallbackKey) {
+        continue;
+      }
+
+      const fallbackPosition = reusablePositions[fallbackKey];
+      delete reusablePositions[fallbackKey];
+      restored[shortcut.id] = fallbackPosition;
+    }
+    return restored;
   }
 
   private saveDesktopIconPositions(): void {

@@ -1861,9 +1861,50 @@ export class MvpSqliteStore {
     }
 
     const record = value as Record<string, unknown>;
-    const desktopShortcutIds = Array.isArray(record.desktopShortcutIds)
-      ? record.desktopShortcutIds.filter((item): item is string => typeof item === 'string')
-      : [];
+    const desktopShortcutIds: WorkspaceLayoutSnapshot['desktopShortcutIds'] = [];
+    const rawShortcutEntries = Array.isArray(record.desktopShortcutIds) ? record.desktopShortcutIds : [];
+    const usedShortcutIds = new Set<string>();
+
+    for (const item of rawShortcutEntries) {
+      if (typeof item === 'string') {
+        const appId = item.trim();
+        if (!appId) {
+          continue;
+        }
+        const fallbackId = `shortcut-${appId}`;
+        if (usedShortcutIds.has(fallbackId)) {
+          continue;
+        }
+        usedShortcutIds.add(fallbackId);
+        desktopShortcutIds.push({ id: fallbackId, appId, shellOwned: true });
+        continue;
+      }
+
+      if (!isRecord(item)) {
+        continue;
+      }
+      const appId = stringValue(item.appId, '').trim();
+      if (!appId) {
+        continue;
+      }
+      const candidateId = stringValue(item.id, '').trim();
+      const id = candidateId || `shortcut-${appId}`;
+      if (usedShortcutIds.has(id)) {
+        continue;
+      }
+      usedShortcutIds.add(id);
+      const shellOwned = typeof item.shellOwned === 'boolean' ? item.shellOwned : false;
+      desktopShortcutIds.push({
+        id,
+        appId,
+        shellOwned,
+      });
+    }
+
+    if (desktopShortcutIds.length === 0) {
+      return empty;
+    }
+
     const windows = Array.isArray(record.windows)
       ? record.windows.filter((win): win is WorkspaceLayoutSnapshot['windows'][number] => {
         return (

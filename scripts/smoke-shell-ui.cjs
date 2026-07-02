@@ -15,6 +15,7 @@ if (typeof WebSocket !== 'function') {
 const repoRoot = join(__dirname, '..');
 const electronBin = join(repoRoot, 'node_modules', '.bin', 'electron');
 const port = 9400 + Math.floor(Math.random() * 400);
+const cdpCommandTimeoutMs = 60000;
 const configDir = mkdtempSync(join(tmpdir(), 'switchboardos-shell-ui-'));
 const screenshotPath = join(tmpdir(), 'switchboardos-shell-ui-smoke.png');
 const electron = spawn(electronBin, ['.', '--no-sandbox', `--remote-debugging-port=${port}`], {
@@ -129,7 +130,7 @@ class CdpClient {
           this.pending.delete(id);
           reject(new Error(`${method} timed out`));
         }
-      }, 10000);
+      }, cdpCommandTimeoutMs);
     });
   }
 
@@ -193,6 +194,55 @@ async function browserSmoke() {
     }));
   const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
     .find((button) => textIncludes(button, text)));
+  const waitForEnabledButtonByText = (root, text, label) => waitFor(() => {
+    const button = [...(root?.querySelectorAll('button') || [])].find((candidate) => textIncludes(candidate, text));
+    if (!button || button.disabled) {
+      return null;
+    }
+    return button;
+  }, label);
+  const waitForSeededHostRow = async (hostLauncherPanel, hostName, timeout = 20000) => {
+    const started = Date.now();
+    let snapshot = { hostLauncherText: '', visibleRows: [] };
+    while (Date.now() - started < timeout) {
+      const rows = [...hostLauncherPanel.querySelectorAll('.host-row')];
+      const visibleRows = rows.map((row) => (row.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+      snapshot = {
+        hostLauncherText: (hostLauncherPanel.textContent || '').replace(/\s+/g, ' ').trim(),
+        visibleRows,
+      };
+      const found = rows.find((row) => textIncludes(row, hostName));
+      if (found) {
+        return found;
+      }
+      await sleep(100);
+    }
+    throw new Error(`Timed out waiting for seeded host launcher row "${hostName}". ` +
+      `Visible rows: ${JSON.stringify(snapshot.visibleRows)}. ` +
+      `Host launcher text: ${snapshot.hostLauncherText}.`);
+  };
+  const desktopIconFrames = (label) => [...document.querySelectorAll('.desktop-icon-frame')]
+    .filter((frame) => textIncludes(frame, label));
+  const waitForRequiredDesktopIcons = async () => {
+    const started = Date.now();
+    let snapshot = null;
+    while (Date.now() - started < 15000) {
+      const fileExplorerIcons = desktopIconFrames('File Explorer');
+      const recycleBinIcons = desktopIconFrames('Recycle Bin');
+      const allIcons = [...document.querySelectorAll('.desktop-icon-label')].map((node) => node.textContent?.trim()).filter(Boolean);
+      snapshot = {
+        allIconCount: document.querySelectorAll('.desktop-icon-frame').length,
+        labels: allIcons,
+        fileExplorerIconsLength: fileExplorerIcons.length,
+        recycleBinIconsLength: recycleBinIcons.length,
+      };
+      if (fileExplorerIcons.length > 0 && recycleBinIcons.length > 0) {
+        return { fileExplorerIcons, recycleBinIcons };
+      }
+      await sleep(100);
+    }
+    throw new Error(`Timed out waiting for default File Explorer and Recycle Bin desktop icons: ${JSON.stringify(snapshot)}`);
+  };
   const desktopIconLabels = () => [...document.querySelectorAll('.desktop-icon-label')]
     .map((node) => node.textContent.trim());
   const buttonByText = (root, text) => [...root.querySelectorAll('button')]
@@ -380,6 +430,7 @@ async function browserSmoke() {
     iconLabels,
     fileExplorerIconChrome,
     fileExplorerIconChromeIsQuiet: iconChromeIsQuiet(fileExplorerIconChrome),
+    hasDuplicateShortcutUnavailableText: (document.body.textContent || '').includes('Duplicate Shortcut is unavailable: shortcut IDs are unique.'),
     removeButtons: document.querySelectorAll('.desktop-shortcut-remove').length,
   };
 
@@ -395,12 +446,9 @@ async function browserSmoke() {
   const launcherForHostPanel = await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu for host launcher');
   click(buttonByText(launcherForHostPanel, 'Host launcher'));
   const hostLauncherPanel = await waitFor(() => document.querySelector('[data-testid="host-launcher"]'), 'host launcher panel');
-  click(buttonByText(hostLauncherPanel, 'Refresh'));
-  const hostContextRow = await waitFor(
-    () => [...document.querySelectorAll('[data-testid="host-launcher"] .host-row')]
-      .find((row) => textIncludes(row, 'Smoke Context Host')),
-    'seeded host launcher row',
-  );
+  const hostLauncherRefreshButton = await waitForEnabledButtonByText(hostLauncherPanel, 'Refresh', 'enabled Host launcher Refresh button');
+  click(hostLauncherRefreshButton);
+  const hostContextRow = await waitForSeededHostRow(hostLauncherPanel, 'Smoke Context Host', 20000);
   rightClick(hostContextRow);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="host"]'), 'host context menu');
   const hostContextMenu = menuLabels();
@@ -432,14 +480,55 @@ async function browserSmoke() {
   click([...document.querySelectorAll('[data-testid="context-menu"] button')].find((button) => textIncludes(button, 'New Folder')));
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'desktop menu closed after new folder');
 
-  const fileExplorerIcon = [...document.querySelectorAll('.desktop-icon-frame')]
-    .find((frame) => textIncludes(frame, 'File Explorer'));
-  const recycleBinIcon = [...document.querySelectorAll('.desktop-icon-frame')]
-    .find((frame) => textIncludes(frame, 'Recycle Bin'));
-  rightClick(fileExplorerIcon);
+  const { fileExplorerIcons, recycleBinIcons } = await waitForRequiredDesktopIcons();
+  const fileExplorerIconsBefore = fileExplorerIcons;
+  if (fileExplorerIconsBefore.length === 0) {
+    throw new Error('No File Explorer icon found for duplicate shortcut smoke path.');
+  }
+  const recycleBinIcon = recycleBinIcons[0];
+  const duplicateTargetSet = new Set(fileExplorerIconsBefore);
+  rightClick(fileExplorerIconsBefore[0]);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'icon context menu');
   const iconMenu = menuLabels();
-  click([...document.querySelectorAll('[data-testid="context-menu"] button')].find((button) => textIncludes(button, 'Open')));
+  const iconMenuAffordances = menuAffordances();
+  const iconMenuButtonStates = menuButtonStates();
+  clickMenuItem('Duplicate Shortcut');
+  const fileExplorerIconsAfterDuplicate = await waitFor(
+    () => {
+      const labels = desktopIconFrames('File Explorer');
+      return labels.length >= 2 ? labels : null;
+    },
+    'icon duplication through context menu',
+  );
+  const duplicateShortcutIcon = fileExplorerIconsAfterDuplicate.find((icon) => !duplicateTargetSet.has(icon));
+  if (!duplicateShortcutIcon) {
+    throw new Error('Duplicate Shortcut did not create a distinct desktop icon entry.');
+  }
+
+  rightClick(duplicateShortcutIcon);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'duplicate shortcut context menu');
+  const duplicateShortcutContextButtonStates = menuButtonStates();
+  clickMenuItem('Remove Shortcut');
+  await waitFor(
+    () => {
+      const labels = desktopIconLabels().sort();
+      const expected = ['File Explorer', 'Recycle Bin'].sort();
+      return labels.length === expected.length && labels[0] === expected[0] && labels[1] === expected[1]
+        ? labels
+        : null;
+    },
+    'icon list after removing duplicate',
+  );
+  const desktopIconLabelsAfterDuplicateRemoval = desktopIconLabels();
+
+  const remainingFileExplorerIcon = desktopIconFrames('File Explorer')[0];
+  if (!remainingFileExplorerIcon) {
+    throw new Error('Missing File Explorer icon after duplicate removal path.');
+  }
+  rightClick(remainingFileExplorerIcon);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'icon context menu after cleanup');
+  const iconMenuAfterCleanup = menuLabels();
+  clickMenuItem('Open');
   const fileWindow = await waitFor(
     () => document.querySelector('.desktop-window[data-app-id="workspace-files"]'),
     'workspace file explorer window',
@@ -694,6 +783,9 @@ async function browserSmoke() {
     menus: {
       desktopMenu,
       iconMenu,
+      iconMenuAfterCleanup,
+      iconMenuButtonStates,
+      duplicateShortcutContextButtonStates,
       workspaceFileMenu,
       windowMenu,
       taskbarWindowMenu,
@@ -709,6 +801,7 @@ async function browserSmoke() {
     },
     menuAffordances: {
       desktopMenu: desktopMenuAffordances,
+      iconMenu: iconMenuAffordances,
       windowMenu: windowMenuAffordances,
       terminalMenu: terminalMenuAffordances,
       workspaceFileMenu: workspaceFileMenuAffordances,
@@ -729,6 +822,8 @@ async function browserSmoke() {
       workspaceFileText,
       workspaceNavigatedPath,
       workspaceBreadcrumbText,
+      fileExplorerIconsAfterDuplicateCount: fileExplorerIconsAfterDuplicate.length,
+      desktopIconLabelsAfterDuplicateRemoval,
       desktopIconLabelsAfterPinCycle,
     },
     hosts: {
@@ -790,10 +885,15 @@ async function main() {
   });
   const terminalActionMenuItem = (label) => report.menus.terminalContextMenuItems
     .find((item) => item.text.includes(label));
+  const iconMenuActionItem = (label, items) => items
+    .find((item) => item.text.includes(label));
   const terminalBridgeActionsReady = ['Copy', 'Paste', 'Clear'].every((label) => {
     const item = terminalActionMenuItem(label);
     return Boolean(item) && !item.disabled && !item.text.includes('Requires the terminal applet action bridge');
   });
+  const iconMenuDuplicateActionAvailable = iconMenuActionItem('Duplicate Shortcut', report.menus.iconMenuButtonStates);
+  const duplicateShortcutMenuActionRemovable = iconMenuActionItem('Remove Shortcut', report.menus.duplicateShortcutContextButtonStates);
+  const initialDesktopIconSetFromReport = [...report.initial.iconLabels].sort();
 
   const checks = [
     report.initial.desktopShell,
@@ -834,6 +934,7 @@ async function main() {
     report.initial.wallpaperComputed.backgroundSize.includes('cover'),
     report.initial.wallpaperComputed.backgroundRepeat.includes('no-repeat'),
     JSON.stringify(report.initial.iconLabels) === JSON.stringify(['File Explorer', 'Recycle Bin']),
+    !report.initial.hasDuplicateShortcutUnavailableText,
     report.initial.fileExplorerIconChromeIsQuiet,
     report.initial.removeButtons === 0,
     report.commandPalette.opened,
@@ -853,6 +954,22 @@ async function main() {
     report.menuAffordances.desktopMenu.shortcutLabels.includes('Ctrl+V'),
     report.menuAffordances.desktopMenu.shortcutLabels.includes('Meta+E'),
     report.menuAffordances.desktopMenu.shortcutLabels.includes('F5'),
+    report.menus.iconMenu.some((label) => label.includes('Open')),
+    report.menus.iconMenu.some((label) => label.includes('Rename')),
+    report.menus.iconMenu.some((label) => label.includes('Duplicate Shortcut')),
+    report.menus.iconMenu.some((label) => label.includes('Remove Shortcut')),
+    report.menus.iconMenu.some((label) => label.includes('Properties')),
+    report.menuAffordances.iconMenu.iconCount >= 5,
+    report.menuAffordances.iconMenu.separatorCount >= 2,
+    report.menuAffordances.iconMenu.shortcutLabels.includes('Enter'),
+    report.menuAffordances.iconMenu.shortcutLabels.includes('F2'),
+    report.menuAffordances.iconMenu.shortcutLabels.includes('Ctrl+D'),
+    report.menuAffordances.iconMenu.shortcutLabels.includes('Delete'),
+    report.menuAffordances.iconMenu.shortcutLabels.includes('Alt+Enter'),
+    Boolean(iconMenuDuplicateActionAvailable && !iconMenuDuplicateActionAvailable.disabled),
+    report.windows.fileExplorerIconsAfterDuplicateCount === 2,
+    report.windows.desktopIconLabelsAfterDuplicateRemoval.sort().join() === initialDesktopIconSetFromReport.join(),
+    Boolean(duplicateShortcutMenuActionRemovable && !duplicateShortcutMenuActionRemovable.disabled),
     report.menus.workspaceFileMenu.some((label) => label.includes('Open')),
     report.menus.workspaceFileMenu.some((label) => label.includes('New Folder')),
     report.menus.workspaceFileMenu.some((label) => label.includes('Open With')),
@@ -874,8 +991,6 @@ async function main() {
     report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Ctrl+D'),
     report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Delete'),
     report.menuAffordances.workspaceFileMenu.shortcutLabels.includes('Alt+Enter'),
-    report.menus.iconMenu.some((label) => label.includes('Open')),
-    report.menus.iconMenu.some((label) => label.includes('Properties')),
     report.menus.windowMenu.some((label) => label.includes('Close Window')),
     report.menus.windowMenu.some((label) => label.includes('Tile Left')),
     report.menus.windowMenu.some((label) => label.includes('Fullscreen')),

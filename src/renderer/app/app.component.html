@@ -14,28 +14,28 @@
   >
     <section class="desktop-icons" aria-label="Editable desktop icons" data-testid="desktop-icons">
       <div
-        *ngFor="let app of desktopShortcutApps; let shortcutIndex = index; trackBy: trackApp"
+        *ngFor="let app of desktopShortcutApps; let shortcutIndex = index; trackBy: trackShortcut"
         class="desktop-icon-frame"
-        [class.is-selected]="selectedShortcutId === app.appId"
-        [ngStyle]="desktopIconStyle(app.appId, shortcutIndex)"
-        (mousedown)="startDesktopIconDrag($event, app.appId, shortcutIndex)"
-        (contextmenu)="openDesktopIconContextMenu($event, app.appId)"
+        [class.is-selected]="selectedShortcutId === app.id"
+        [ngStyle]="desktopIconStyle(app.id, shortcutIndex)"
+        (mousedown)="startDesktopIconDrag($event, app.id, shortcutIndex)"
+        (contextmenu)="openDesktopIconContextMenu($event, app)"
       >
         <button
           class="desktop-icon"
           type="button"
-          (click)="selectShortcut(app.appId)"
+          (click)="selectShortcut(app.id)"
           (dblclick)="openApp(app.appId)"
           (keydown.enter)="openApp(app.appId)"
-          [title]="app.title + ': ' + app.detail"
+          [title]="app.definition.title + ': ' + app.definition.detail"
         >
-          <span class="desktop-icon-glyph">{{ app.icon }}</span>
-          <span class="desktop-icon-label">{{ app.title }}</span>
+          <span class="desktop-icon-glyph">{{ app.definition.icon }}</span>
+          <span class="desktop-icon-label">{{ app.definition.title }}</span>
         </button>
       </div>
     </section>
 
-    <section *ngIf="desktopShortcutIds.length === 0" class="desktop-empty" aria-label="Empty desktop">
+    <section *ngIf="desktopShortcutApps.length === 0" class="desktop-empty" aria-label="Empty desktop">
       <span>No desktop shortcuts</span>
       <button type="button" (click)="toggleLauncher()">Open launcher</button>
     </section>
