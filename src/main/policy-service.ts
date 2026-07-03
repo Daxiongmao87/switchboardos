@@ -3,6 +3,14 @@ import type { CreateAuditEventInput, MvpSettings } from '../shared/mvp-models';
 export type PolicyCapability =
   | 'ssh:exec'
   | 'host-operation:run'
+  | 'host:create'
+  | 'host:update'
+  | 'host:delete'
+  | 'host:test-connection'
+  | 'host:updateGroup'
+  | 'host:setFavorite'
+  | 'host:duplicate'
+  | 'host:import'
   | 'terminal:start'
   | 'terminal:write'
   | 'terminal:resize'
@@ -38,6 +46,14 @@ type AuditLogger = (event: CreateAuditEventInput) => unknown;
 const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'ssh:exec',
   'host-operation:run',
+  'host:create',
+  'host:update',
+  'host:delete',
+  'host:test-connection',
+  'host:updateGroup',
+  'host:setFavorite',
+  'host:duplicate',
+  'host:import',
   'terminal:start',
   'terminal:write',
   'terminal:resize',

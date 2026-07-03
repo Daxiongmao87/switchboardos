@@ -29,8 +29,18 @@ import { SshService } from './ssh-service';
 import { PolicyService } from './policy-service';
 import { AgentOperatorService } from './agent-operator-service';
 import {
+  getHostRouteContract,
+  runHostRouteContract,
+} from './route-access-contracts';
+import {
   validateBootstrapGenerateInput,
+  validateHostCreateInput,
+  validateHostFavoriteInput,
+  validateHostGroupNameInput,
+  validateHostIdInput,
+  validateHostImportInput,
   validateHostOperationInput,
+  validateHostUpdateInput,
   validateOperatorProposeInput,
   validateSecretKeyInput,
   validateSecretStoreInput,
@@ -1079,28 +1089,96 @@ ipcMain.handle(
 ipcMain.handle(
   'host:create',
   async (_event, hostData: CreateHostInput) => {
-    return mvpStore.createHost(hostData);
+    const contract = getHostRouteContract('ipc:host:create');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:create');
+    }
+    const validatedHostData = validateHostCreateInput(hostData);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:create',
+        action: 'host:create',
+      },
+      input: validatedHostData,
+      execute: () => mvpStore.createHost(validatedHostData),
+    });
   }
 );
 
 ipcMain.handle(
   'host:update',
   async (_event, hostId: string, hostData: UpdateHostInput) => {
-    return mvpStore.updateHost(hostId, hostData);
+    const contract = getHostRouteContract('ipc:host:update');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:update');
+    }
+    const validatedHostId = validateHostIdInput(hostId);
+    const validatedInput = validateHostUpdateInput(hostData);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:update',
+        action: 'host:update',
+        hostId: validatedHostId,
+      },
+      input: validatedInput,
+      execute: () => mvpStore.updateHost(validatedHostId, validatedInput),
+    });
   }
 );
 
 ipcMain.handle(
   'host:delete',
   async (_event, hostId: string) => {
-    return mvpStore.deleteHost(hostId);
+    const contract = getHostRouteContract('ipc:host:delete');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:delete');
+    }
+    const validatedHostId = validateHostIdInput(hostId);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:delete',
+        action: 'host:delete',
+        hostId: validatedHostId,
+      },
+      input: validatedHostId,
+      execute: () => mvpStore.deleteHost(validatedHostId),
+    });
   }
 );
 
 ipcMain.handle(
   'host:test-connection',
   async (_event, hostId: string) => {
-    return mvpStore.testConnection(hostId);
+    const contract = getHostRouteContract('ipc:host:test-connection');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:test-connection');
+    }
+    const validatedHostId = validateHostIdInput(hostId);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:test-connection',
+        action: 'host:test-connection',
+        hostId: validatedHostId,
+      },
+      input: validatedHostId,
+      execute: () => mvpStore.testConnection(validatedHostId),
+    });
   }
 );
 
@@ -1108,28 +1186,97 @@ ipcMain.handle(
 ipcMain.handle(
   'host:updateGroup',
   async (_event, hostId: string, groupName: string) => {
-    return mvpStore.assignHostToGroup(hostId, groupName);
+    const contract = getHostRouteContract('ipc:host:updateGroup');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:updateGroup');
+    }
+    const validatedHostId = validateHostIdInput(hostId);
+    const validatedGroupName = validateHostGroupNameInput(groupName);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:updateGroup',
+        action: 'host:updateGroup',
+        hostId: validatedHostId,
+      },
+      input: validatedGroupName,
+      execute: () => mvpStore.assignHostToGroup(validatedHostId, validatedGroupName),
+    });
   }
 );
 
 ipcMain.handle(
   'host:setFavorite',
   async (_event, hostId: string, favorite: boolean) => {
-    return mvpStore.setHostFavorite(hostId, favorite);
+    const contract = getHostRouteContract('ipc:host:setFavorite');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:setFavorite');
+    }
+    const validatedHostId = validateHostIdInput(hostId);
+    const validatedFavorite = validateHostFavoriteInput(favorite);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:setFavorite',
+        action: 'host:setFavorite',
+        hostId: validatedHostId,
+      },
+      input: validatedFavorite,
+      execute: () => mvpStore.setHostFavorite(validatedHostId, validatedFavorite),
+    });
   }
 );
 
 ipcMain.handle(
   'host:duplicate',
   async (_event, hostId: string) => {
-    return mvpStore.duplicateHost(hostId);
+    const contract = getHostRouteContract('ipc:host:duplicate');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:duplicate');
+    }
+    const validatedHostId = validateHostIdInput(hostId);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:duplicate',
+        action: 'host:duplicate',
+        hostId: validatedHostId,
+      },
+      input: validatedHostId,
+      execute: () => mvpStore.duplicateHost(validatedHostId),
+    });
   }
 );
 
 ipcMain.handle(
   'host:import',
   async (_event, hosts: HostRecord[]) => {
-    return mvpStore.importHosts(hosts);
+    const contract = getHostRouteContract('ipc:host:import');
+    if (!contract) {
+      throw new Error('Missing host route contract: ipc:host:import');
+    }
+    const validatedHosts = validateHostImportInput(hosts);
+    return runHostRouteContract({
+      contract,
+      policyService,
+      logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+      context: {
+        caller: 'ipc',
+        route: 'host:import',
+        action: 'host:import',
+      },
+      input: validatedHosts,
+      execute: () => mvpStore.importHosts(validatedHosts),
+    });
   }
 );
 
@@ -1595,13 +1742,24 @@ ipcMain.handle('command-history:delete', async (_event, entryId: string) => mvpS
 
 // Read-only Host Operations
 ipcMain.handle('host-operation:run', async (_event, input: HostOperationInput) => {
+  const contract = getHostRouteContract('ipc:host-operation:run');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-operation:run');
+  }
   const validatedInput = validateHostOperationInput(input);
-  policyService.assertAllowed('host-operation:run', {
-    caller: 'ipc',
-    action: 'host-operation:run',
-    hostId: validatedInput.hostId,
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-operation:run',
+      action: 'host-operation:run',
+      hostId: validatedInput.hostId,
+    },
+    input: validatedInput,
+    execute: () => hostOperations.run(validatedInput),
   });
-  return hostOperations.run(validatedInput);
 });
 
 // Structured SSH command execution

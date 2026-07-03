@@ -1,8 +1,12 @@
 import type {
   BootstrapGenerateInput,
   BootstrapPresetId,
+  CreateHostInput,
   HostOperationInput,
   HostOperationKind,
+  HostAuthMode,
+  HostBootstrapStatus,
+  HostRecord,
   MvpSettings,
   MvpSettingsUpdate,
   OperatorProposeInput,
@@ -10,6 +14,7 @@ import type {
   SshFileStatInput,
   SshFileTransferInput,
   SshExecInput,
+  UpdateHostInput,
 } from '../shared/mvp-models';
 
 export class RuntimeValidationError extends Error {
@@ -42,6 +47,8 @@ const WALLPAPER_LAYOUT_MODES: readonly MvpSettings['desktopWallpaperLayout'][] =
   'center',
 ];
 const AUTH_MODES: readonly MvpSettings['sshDefaults']['authMode'][] = ['placeholder', 'password', 'key', 'agent'];
+const HOST_AUTH_MODES: readonly HostAuthMode[] = ['placeholder', 'password', 'key', 'agent'];
+const HOST_BOOTSTRAP_STATUSES: readonly HostBootstrapStatus[] = ['unknown', 'not_started', 'pending', 'ready', 'failed'];
 const OPERATOR_POLICIES: readonly MvpSettings['operator']['policy'][] = ['manual-approval', 'disabled'];
 
 export function validateSshExecInput(value: unknown): SshExecInput {
@@ -125,6 +132,105 @@ export function validateHostOperationInput(value: unknown): HostOperationInput {
     input.limit = requireInteger(record.limit, 'limit', 1, 250);
   }
   return input;
+}
+
+export function validateHostCreateInput(value: unknown): CreateHostInput {
+  const record = requireRecord(value, 'host create input');
+  const input: CreateHostInput = {};
+
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.address !== undefined) {
+    input.address = sanitizeOptionalString(record.address, 'address');
+  }
+  if (record.hostname !== undefined) {
+    input.hostname = sanitizeOptionalString(record.hostname, 'hostname');
+  }
+  if (record.port !== undefined) {
+    input.port = requireInteger(record.port, 'port', 1, 65535);
+  }
+  if (record.username !== undefined) {
+    input.username = sanitizeOptionalString(record.username, 'username');
+  }
+  if (record.authMode !== undefined) {
+    input.authMode = requireEnum(
+      record.authMode,
+      HOST_AUTH_MODES,
+      'authMode',
+    );
+  }
+  if (record.keyPath !== undefined) {
+    input.keyPath = sanitizeOptionalString(record.keyPath, 'keyPath');
+  }
+  if (record.credentialRefId !== undefined) {
+    input.credentialRefId = record.credentialRefId === null
+      ? null
+      : sanitizeOptionalString(record.credentialRefId, 'credentialRefId');
+  }
+  if (record.tags !== undefined) {
+    input.tags = requireStringList(record.tags, 'tags');
+  }
+  if (record.group !== undefined) {
+    input.group = sanitizeOptionalString(record.group, 'group');
+  }
+  if (record.favorite !== undefined) {
+    input.favorite = requireBoolean(record.favorite, 'favorite');
+  }
+  if (record.osHint !== undefined) {
+    input.osHint = sanitizeOptionalString(record.osHint, 'osHint');
+  }
+  if (record.bootstrapStatus !== undefined) {
+    input.bootstrapStatus = requireEnum(
+      record.bootstrapStatus,
+      HOST_BOOTSTRAP_STATUSES,
+      'bootstrapStatus',
+    );
+  }
+  if (record.defaultShell !== undefined) {
+    input.defaultShell = sanitizeOptionalString(record.defaultShell, 'defaultShell');
+  }
+  if (record.defaultWorkingDirectory !== undefined) {
+    input.defaultWorkingDirectory = sanitizeOptionalString(
+      record.defaultWorkingDirectory,
+      'defaultWorkingDirectory',
+    );
+  }
+  if (record.capabilities !== undefined) {
+    input.capabilities = requireStringList(record.capabilities, 'capabilities');
+  }
+  if (record.notes !== undefined) {
+    input.notes = sanitizeOptionalString(record.notes, 'notes');
+  }
+
+  return input;
+}
+
+export function validateHostUpdateInput(value: unknown): UpdateHostInput {
+  return validateHostCreateInput(value);
+}
+
+export function validateHostIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'hostId');
+}
+
+export function validateHostImportInput(value: unknown): HostRecord[] {
+  const records = requireRecordArray(value, 'host import payload');
+  return records.map((record, index) => {
+    const hostId = requireNonEmptyString(record.id, `hostRecords[${index}].id`);
+    return {
+      ...record,
+      id: hostId,
+    } as unknown as HostRecord;
+  });
+}
+
+export function validateHostGroupNameInput(value: unknown): string {
+  return requireString(value, 'groupName');
+}
+
+export function validateHostFavoriteInput(value: unknown): boolean {
+  return requireBoolean(value, 'favorite');
 }
 
 export function validateBootstrapGenerateInput(value: unknown): BootstrapGenerateInput {
@@ -257,6 +363,35 @@ function requireBoolean(value: unknown, label: string): boolean {
     throw new RuntimeValidationError(`${label} must be a boolean.`);
   }
   return value;
+}
+
+function requireStringList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new RuntimeValidationError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== 'string') {
+      throw new RuntimeValidationError(`${label}[${index}] must be a string.`);
+    }
+    return entry;
+  });
+}
+
+function sanitizeOptionalString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+  return text.trim();
+}
+
+function requireRecordArray(value: unknown, label: string): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    throw new RuntimeValidationError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new RuntimeValidationError(`${label}[${index}] must be an object.`);
+    }
+    return entry as Record<string, unknown>;
+  });
 }
 
 function requireInteger(value: unknown, label: string, min: number, max: number): number {

@@ -10,6 +10,9 @@ import { PolicyDeniedError, type PolicyCapability, type PolicyService } from './
 import {
   RuntimeValidationError,
   validateBootstrapGenerateInput,
+  validateHostCreateInput,
+  validateHostIdInput,
+  validateHostUpdateInput,
   validateHostOperationInput,
   validateOperatorProposeInput,
   validateSettingsUpdate,
@@ -22,6 +25,7 @@ import {
   validateTerminalStopInput,
   validateTerminalWriteInput,
 } from './runtime-validation';
+import { getHostRouteContract, runHostRouteContract } from './route-access-contracts';
 import type { SshService } from './ssh-service';
 import type { TerminalSessionManager } from './terminal-session-manager';
 import type {
@@ -31,14 +35,12 @@ import type {
   CreateAppPermissionInput,
   CreateCommandHistoryInput,
   CreateAuditEventInput,
-  CreateHostInput,
   CreateWorkspaceProfileInput,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
   UpdateAgentEndpointInput,
   UpdateAppManifestInput,
-  UpdateHostInput,
   UpdateWorkspaceProfileInput,
 } from '../shared/mvp-models';
 
@@ -498,19 +500,91 @@ export class HostedServer {
         return this.options.store.listHosts();
       }
       if (segments.length === 1 && method === 'POST') {
-        return this.options.store.createHost(asRecord(body) as CreateHostInput);
+        const contract = getHostRouteContract('hosted:POST:/api/hosts');
+        if (!contract) {
+          throw new HttpError(500, 'Missing hosted host create route contract.');
+        }
+        const validatedInput = validateHostCreateInput(asRecord(body));
+        return runHostRouteContract({
+          contract,
+          policyService: this.options.policyService,
+          logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+          context: {
+            caller: 'hosted',
+            route: '/api/hosts',
+            action: 'POST /api/hosts',
+            sessionId: session?.id ?? null,
+          },
+          input: validatedInput,
+          execute: () => this.options.store.createHost(validatedInput),
+        });
       }
       if (actionOrId && subAction === undefined && method === 'GET') {
         return this.options.store.getHost(decodeURIComponent(actionOrId));
       }
       if (actionOrId && subAction === undefined && method === 'PATCH') {
-        return this.options.store.updateHost(decodeURIComponent(actionOrId), asRecord(body) as UpdateHostInput);
+        const contract = getHostRouteContract('hosted:PATCH:/api/hosts/:id');
+        if (!contract) {
+          throw new HttpError(500, 'Missing hosted host update route contract.');
+        }
+        const hostId = validateHostIdInput(decodeURIComponent(actionOrId));
+        const validatedInput = validateHostUpdateInput(asRecord(body));
+        return runHostRouteContract({
+          contract,
+          policyService: this.options.policyService,
+          logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+          context: {
+            caller: 'hosted',
+            route: `/api/hosts/${hostId}`,
+            action: 'PATCH /api/hosts/:id',
+            hostId,
+            sessionId: session?.id ?? null,
+          },
+          input: validatedInput,
+          execute: () => this.options.store.updateHost(hostId, validatedInput),
+        });
       }
       if (actionOrId && subAction === undefined && method === 'DELETE') {
-        return this.options.store.deleteHost(decodeURIComponent(actionOrId));
+        const contract = getHostRouteContract('hosted:DELETE:/api/hosts/:id');
+        if (!contract) {
+          throw new HttpError(500, 'Missing hosted host delete route contract.');
+        }
+        const hostId = validateHostIdInput(decodeURIComponent(actionOrId));
+        return runHostRouteContract({
+          contract,
+          policyService: this.options.policyService,
+          logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+          context: {
+            caller: 'hosted',
+            route: `/api/hosts/${hostId}`,
+            action: 'DELETE /api/hosts/:id',
+            hostId,
+            sessionId: session?.id ?? null,
+          },
+          input: hostId,
+          execute: () => this.options.store.deleteHost(hostId),
+        });
       }
       if (actionOrId && subAction === 'test' && method === 'POST') {
-        return this.options.store.testConnection(decodeURIComponent(actionOrId));
+        const contract = getHostRouteContract('hosted:POST:/api/hosts/:id/test');
+        if (!contract) {
+          throw new HttpError(500, 'Missing hosted host test-connection route contract.');
+        }
+        const hostId = validateHostIdInput(decodeURIComponent(actionOrId));
+        return runHostRouteContract({
+          contract,
+          policyService: this.options.policyService,
+          logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+          context: {
+            caller: 'hosted',
+            route: `/api/hosts/${hostId}/test`,
+            action: 'POST /api/hosts/:id/test',
+            hostId,
+            sessionId: session?.id ?? null,
+          },
+          input: hostId,
+          execute: () => this.options.store.testConnection(hostId),
+        });
       }
     }
 
@@ -571,8 +645,29 @@ export class HostedServer {
     }
 
     if (resource === 'host-operations') {
-      this.requireHostedCapability(request, session, 'host-operation:run', url.pathname, bodyHostId(body));
-      return this.routeHostOperationsApi(method, actionOrId, body);
+      if (method !== 'POST' || actionOrId !== 'run') {
+        throw new HttpError(404, `No hosted host operation route for ${method}.`);
+      }
+
+      const contract = getHostRouteContract('hosted:POST:/api/host-operations/run');
+      if (!contract) {
+        throw new HttpError(500, 'Missing hosted host operation route contract.');
+      }
+      const validatedInput = validateHostOperationInput(body);
+      return runHostRouteContract({
+        contract,
+        policyService: this.options.policyService,
+        logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+        context: {
+          caller: 'hosted',
+          route: '/api/host-operations/run',
+          action: 'POST /api/host-operations/run',
+          hostId: validatedInput.hostId,
+          sessionId: session?.id ?? null,
+        },
+        input: validatedInput,
+        execute: () => this.options.hostOperations.run(validatedInput),
+      });
     }
 
     if (resource === 'ssh') {
@@ -828,14 +923,6 @@ export class HostedServer {
     }
 
     throw new HttpError(404, `No hosted agent route for ${method}.`);
-  }
-
-  private routeHostOperationsApi(method: string, action: string | undefined, body: unknown): Promise<unknown> {
-    if (action === 'run' && method === 'POST') {
-      return this.options.hostOperations.run(validateHostOperationInput(body));
-    }
-
-    throw new HttpError(404, `No hosted host operation route for ${method}.`);
   }
 
   private routeSshApi(method: string, action: string | undefined, body: unknown): Promise<unknown> {
