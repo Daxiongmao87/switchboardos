@@ -1894,10 +1894,13 @@ export class MvpSqliteStore {
       }
       usedShortcutIds.add(id);
       const shellOwned = typeof item.shellOwned === 'boolean' ? item.shellOwned : false;
+      const label = stringValue(item.label, '').trim();
+      const normalizedLabel = label || '';
       desktopShortcutIds.push({
         id,
         appId,
         shellOwned,
+        ...(normalizedLabel ? { label: normalizedLabel } : {}),
       });
     }
 

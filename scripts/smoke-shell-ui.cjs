@@ -194,6 +194,23 @@ async function browserSmoke() {
     }));
   const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
     .find((button) => textIncludes(button, text)));
+  const withPrompt = (value, action) => {
+    const originalPrompt = window.prompt;
+    Object.defineProperty(window, 'prompt', {
+      configurable: true,
+      writable: true,
+      value: () => value,
+    });
+    try {
+      action();
+    } finally {
+      Object.defineProperty(window, 'prompt', {
+        configurable: true,
+        writable: true,
+        value: originalPrompt,
+      });
+    }
+  };
   const waitForEnabledButtonByText = (root, text, label) => waitFor(() => {
     const button = [...(root?.querySelectorAll('button') || [])].find((candidate) => textIncludes(candidate, text));
     if (!button || button.disabled) {
@@ -528,6 +545,37 @@ async function browserSmoke() {
   rightClick(remainingFileExplorerIcon);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'icon context menu after cleanup');
   const iconMenuAfterCleanup = menuLabels();
+  const renameTarget = 'File Explorer (Personal)';
+  withPrompt(renameTarget, () => clickMenuItem('Rename'));
+  await waitFor(() => desktopIconLabels().includes(renameTarget), 'desktop icon label updated after rename');
+  const desktopIconLabelsAfterRename = desktopIconLabels();
+
+  const renamedFileExplorerIcon = desktopIconFrames(renameTarget)[0];
+  if (!renamedFileExplorerIcon) {
+    throw new Error('Missing renamed File Explorer desktop icon for rename revert path.');
+  }
+
+  rightClick(renamedFileExplorerIcon);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'icon context menu after rename');
+  withPrompt('File Explorer', () => clickMenuItem('Rename'));
+  await waitFor(
+    () => {
+      const labels = desktopIconLabels();
+      const expected = ['File Explorer', 'Recycle Bin'].sort();
+      return labels.length === expected.length && labels[0] === expected[0] && labels[1] === expected[1]
+        ? labels
+        : null;
+    },
+    'desktop icon label restored after rename round-trip',
+  );
+  const desktopIconLabelsAfterRenameRollback = desktopIconLabels();
+  const stableFileExplorerIcon = [...desktopIconFrames('File Explorer')].find(Boolean);
+  if (!stableFileExplorerIcon) {
+    throw new Error('Missing File Explorer icon after rename rollback.');
+  }
+
+  rightClick(stableFileExplorerIcon);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'icon context menu for File Explorer open');
   clickMenuItem('Open');
   const fileWindow = await waitFor(
     () => document.querySelector('.desktop-window[data-app-id="workspace-files"]'),
@@ -824,6 +872,8 @@ async function browserSmoke() {
       workspaceBreadcrumbText,
       fileExplorerIconsAfterDuplicateCount: fileExplorerIconsAfterDuplicate.length,
       desktopIconLabelsAfterDuplicateRemoval,
+      desktopIconLabelsAfterRename,
+      desktopIconLabelsAfterRenameRollback,
       desktopIconLabelsAfterPinCycle,
     },
     hosts: {
@@ -959,6 +1009,8 @@ async function main() {
     report.menus.iconMenu.some((label) => label.includes('Duplicate Shortcut')),
     report.menus.iconMenu.some((label) => label.includes('Remove Shortcut')),
     report.menus.iconMenu.some((label) => label.includes('Properties')),
+    report.windows.desktopIconLabelsAfterRename.includes('File Explorer (Personal)'),
+    JSON.stringify(report.windows.desktopIconLabelsAfterRenameRollback.sort()) === JSON.stringify(['File Explorer', 'Recycle Bin']),
     report.menuAffordances.iconMenu.iconCount >= 5,
     report.menuAffordances.iconMenu.separatorCount >= 2,
     report.menuAffordances.iconMenu.shortcutLabels.includes('Enter'),

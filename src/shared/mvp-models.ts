@@ -259,6 +259,7 @@ export interface WorkspaceLayoutSnapshot {
     id: string;
     appId: string;
     shellOwned?: boolean;
+    label?: string;
   }>;
   windows: Array<Omit<ShellWindowSnapshot, 'focused' | 'semanticState' | 'registeredActions'>>;
 }

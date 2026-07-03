@@ -332,6 +332,7 @@ interface DesktopShortcut {
   id: string;
   appId: ShellAppId;
   shellOwned: boolean;
+  label?: string;
 }
 
 interface DesktopShortcutItem {
@@ -339,6 +340,7 @@ interface DesktopShortcutItem {
   appId: ShellAppId;
   shellOwned: boolean;
   definition: ShellAppDefinition;
+  label?: string;
 }
 
 interface ContextMenuItem {
@@ -1144,12 +1146,14 @@ export class AppComponent implements OnInit, OnDestroy {
         if (!definition) {
           return null;
         }
+        const label = this.visibleShortcutLabel(shortcut, definition);
         return {
           id: shortcut.id,
           appId: shortcut.appId,
           definition,
           shellOwned: shortcut.shellOwned,
-        };
+          label,
+        } as DesktopShortcutItem;
       })
       .filter((shortcut): shortcut is DesktopShortcutItem => Boolean(shortcut));
   }
@@ -1595,11 +1599,47 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showContextMenu(
       event,
       'desktop-icon',
-      shortcut.definition.title,
+      shortcut.label ?? shortcut.definition.title,
       this.desktopIconContextItems(shortcut),
       shortcut.appId,
       shortcut.id,
     );
+  }
+
+  private visibleShortcutLabel(shortcut: DesktopShortcut, definition: ShellAppDefinition): string {
+    const label = typeof shortcut.label === 'string' ? shortcut.label.trim() : '';
+    return label || definition.title;
+  }
+
+  private renameDesktopShortcut(shortcutId: string): void {
+    const shortcut = this.desktopShortcuts.find((candidate) => candidate.id === shortcutId);
+    if (!shortcut) {
+      return;
+    }
+
+    const definition = this.getAppDefinition(shortcut.appId);
+    if (!definition) {
+      this.errorMessage = `Unable to rename shortcut "${shortcut.appId}".`;
+      return;
+    }
+
+    const requestedName = window.prompt(`Rename "${definition.title}"`, this.visibleShortcutLabel(shortcut, definition));
+    if (requestedName === null) {
+      return;
+    }
+    const trimmedName = requestedName.trim();
+    if (!trimmedName) {
+      this.errorMessage = 'Shortcut label is required.';
+      return;
+    }
+
+    const nextLabel = trimmedName === definition.title ? undefined : trimmedName;
+    this.desktopShortcuts = this.desktopShortcuts.map((candidate) =>
+      candidate.id === shortcutId ? { ...candidate, label: nextLabel } : candidate,
+    );
+    this.saveDesktopShortcuts();
+    void this.persistActiveProfileLayout(false);
+    this.notify(`Shortcut renamed to "${trimmedName}".`);
   }
 
   openTaskbarContextMenu(event: MouseEvent): void {
@@ -1760,7 +1800,9 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         return;
       case 'rename-shortcut':
-        this.notify('Shortcut rename is available from Properties in this MVP shell.');
+        if (menu?.shortcutId) {
+          this.renameDesktopShortcut(menu.shortcutId);
+        }
         return;
       case 'properties':
         this.notify(`${menu?.label ?? 'Item'} properties inspected.`);
@@ -3296,7 +3338,8 @@ export class AppComponent implements OnInit, OnDestroy {
           id: shortcut.id,
           appId: definition.appId,
           shellOwned: Boolean(shortcut.shellOwned),
-        };
+          label: shortcut.label,
+        } as DesktopShortcut;
       })
       .filter((shortcut): shortcut is DesktopShortcut => shortcut !== null);
     if (this.desktopShortcuts.length === 0) {
@@ -4448,6 +4491,7 @@ export class AppComponent implements OnInit, OnDestroy {
       appId: ShellAppId;
       id?: string;
       shellOwned: boolean;
+      label?: string;
     };
 
     const raw = value
@@ -4462,10 +4506,14 @@ export class AppComponent implements OnInit, OnDestroy {
         if (!record.appId || !this.isShellAppId(record.appId)) {
           return null;
         }
+        const label = typeof record.label === 'string'
+          ? record.label.trim()
+          : '';
         return {
           appId: record.appId,
           id: typeof record.id === 'string' && record.id.trim() ? record.id.trim() : undefined,
           shellOwned: Boolean(record.shellOwned),
+          ...(label ? { label } : {}),
         };
       })
       .filter((entry): entry is NormalizedRawShortcut => Boolean(entry));
@@ -4499,6 +4547,7 @@ export class AppComponent implements OnInit, OnDestroy {
         id: entry.id,
         appId: entry.appId,
         shellOwned: entry.shellOwned || defaultShortcutSet.has(entry.appId),
+        ...(entry.label ? { label: entry.label } : {}),
       });
     }
 

@@ -27,10 +27,10 @@
           (click)="selectShortcut(app.id)"
           (dblclick)="openApp(app.appId)"
           (keydown.enter)="openApp(app.appId)"
-          [title]="app.definition.title + ': ' + app.definition.detail"
+          [title]="(app.label ?? app.definition.title) + ': ' + app.definition.detail"
         >
           <span class="desktop-icon-glyph">{{ app.definition.icon }}</span>
-          <span class="desktop-icon-label">{{ app.definition.title }}</span>
+          <span class="desktop-icon-label">{{ app.label ?? app.definition.title }}</span>
         </button>
       </div>
     </section>

@@ -44,6 +44,7 @@ coverage/
 .codex/
 .gemini/
 .kimi/
+.opencode/
 
 # Scratch test package
 test-project/
