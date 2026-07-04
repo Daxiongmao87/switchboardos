@@ -166,7 +166,14 @@ function buildSystemAppletManifest(input: {
   packageMetadata?: Record<string, unknown>;
 }): AppManifest {
   const now = new Date().toISOString();
-  const contextMenuTargets = input.contextMenuTargets ?? (['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'window'] as LauncherTarget[]);
+  const contextMenuTargets = input.contextMenuTargets ?? ([
+    'desktop',
+    'desktop-icon',
+    'launcher-row',
+    'taskbar',
+    'taskbar-window',
+    'window',
+  ] as LauncherTarget[]);
   return {
     id: `system-${input.appId}`,
     appId: input.appId,
@@ -192,10 +199,25 @@ function buildSystemAppletManifest(input: {
       defaultPresentationMode: input.packageMetadata?.['defaultPresentationMode'] ?? 'window',
       contextMenuTargets: [...contextMenuTargets],
       contextMenuContributions: {
-        open: true,
-        pin: true,
-        properties: true,
-        refresh: false,
+        open: {
+          enabled: true,
+          targets: ['desktop-icon', 'launcher-row'],
+          actionId: 'open-app',
+        },
+        pin: {
+          enabled: true,
+          targets: ['launcher-row', 'taskbar-window'],
+          actionId: 'pin-app',
+        },
+        properties: {
+          enabled: true,
+          targets: ['desktop-icon', 'launcher-row'],
+          actionId: 'properties',
+        },
+        windowActions: {
+          enabled: true,
+          targets: ['taskbar-window', 'window'],
+        },
       },
       semanticStateProvider: {
         mode: 'shell-semantic-state',
@@ -360,6 +382,11 @@ interface ContextMenuItem {
   danger?: boolean;
   separatorBefore?: boolean;
   submenu?: ContextMenuItem[];
+  source?: 'shell' | 'app-manifest' | 'window-object';
+  sourceAppId?: ShellAppId;
+  targetScope?: ContextMenuState['target'];
+  requiredCapabilities?: string[];
+  actionId?: string;
 }
 
 interface ContextMenuState {
@@ -3537,9 +3564,70 @@ export class AppComponent implements OnInit, OnDestroy {
     ];
   }
 
+  private appManifestContextMenuItem(
+    definition: ShellAppDefinition,
+    target: ContextMenuState['target'],
+    contributionId: string,
+    fallbackTargets: LauncherTarget[],
+    item: ContextMenuItem,
+  ): ContextMenuItem | null {
+    const requiredCapabilities = this.requiredCapabilitiesForContextContribution(definition, contributionId);
+    if (!this.appManifestContextContributionAllowed(definition, target, contributionId, fallbackTargets, requiredCapabilities)) {
+      return null;
+    }
+
+    return {
+      ...item,
+      source: 'app-manifest',
+      sourceAppId: definition.appId,
+      targetScope: target,
+      requiredCapabilities,
+      actionId: item.actionId ?? item.id,
+    };
+  }
+
+  private appOpenContextItem(definition: ShellAppDefinition, target: ContextMenuState['target']): ContextMenuItem | null {
+    return this.appManifestContextMenuItem(
+      definition,
+      target,
+      'open',
+      ['desktop-icon', 'launcher-row'],
+      { id: 'open-app', label: 'Open', icon: 'O', shortcut: target === 'desktop-icon' ? 'Enter' : undefined },
+    );
+  }
+
+  private appPinContextItem(definition: ShellAppDefinition, target: ContextMenuState['target']): ContextMenuItem | null {
+    return this.appManifestContextMenuItem(
+      definition,
+      target,
+      'pin',
+      ['launcher-row', 'taskbar-window'],
+      this.pinContextItem(definition.appId),
+    );
+  }
+
+  private appPropertiesContextItem(definition: ShellAppDefinition, target: ContextMenuState['target']): ContextMenuItem | null {
+    return this.appManifestContextMenuItem(
+      definition,
+      target,
+      'properties',
+      ['desktop-icon', 'launcher-row'],
+      {
+        id: 'properties',
+        label: 'Properties',
+        icon: 'I',
+        shortcut: target === 'desktop-icon' ? 'Alt+Enter' : undefined,
+      },
+    );
+  }
+
   private desktopIconContextItems(shortcut: DesktopShortcutItem): ContextMenuItem[] {
+    const openItem = this.appOpenContextItem(shortcut.definition, 'desktop-icon')
+      ?? { id: 'open-app', label: 'Open', icon: 'O', shortcut: 'Enter', source: 'shell' as const };
+    const propertiesItem = this.appPropertiesContextItem(shortcut.definition, 'desktop-icon')
+      ?? { id: 'properties', label: 'Properties', icon: 'I', shortcut: 'Alt+Enter', source: 'shell' as const };
     return [
-      { id: 'open-app', label: 'Open', icon: 'O', shortcut: 'Enter' },
+      openItem,
       {
         id: 'duplicate-shortcut',
         label: 'Duplicate Shortcut',
@@ -3561,10 +3649,7 @@ export class AppComponent implements OnInit, OnDestroy {
         disabled: shortcut.shellOwned,
       },
       {
-        id: 'properties',
-        label: 'Properties',
-        icon: 'I',
-        shortcut: 'Alt+Enter',
+        ...propertiesItem,
         separatorBefore: true,
       },
     ];
@@ -3591,18 +3676,20 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private taskbarWindowContextItems(windowItem: ShellWindow): ContextMenuItem[] {
-    const appActions = this.taskbarWindowAppActions(windowItem);
+    const appActions = this.windowAppActionContextItems(windowItem, 'taskbar-window');
+    const pinItem = this.appPinContextItem(windowItem.appDefinition, 'taskbar-window') ?? this.pinContextItem(windowItem.appId);
     return [
       { id: 'show-taskbar-window', label: windowItem.state === 'minimized' ? 'Restore' : 'Show' },
       { id: 'new-window', label: 'New Window' },
       { id: 'toggle-minimize-window', label: windowItem.state === 'minimized' ? 'Restore Window' : 'Minimize' },
-      this.pinContextItem(windowItem.appId),
+      pinItem,
       ...(appActions.length > 0 ? [{ id: 'taskbar-app-actions', label: 'App Actions', submenu: appActions }] : []),
       { id: 'close-window', label: 'Close Window', danger: true },
     ];
   }
 
   private windowContextItems(windowItem: ShellWindow): ContextMenuItem[] {
+    const appActions = this.windowAppActionContextItems(windowItem, 'window');
     return [
       { id: 'minimize-window', label: 'Minimize', icon: '-', shortcut: 'Meta+M' },
       { id: 'maximize-window', label: windowItem.state === 'maximized' ? 'Restore' : 'Maximize', icon: '[]', shortcut: 'Meta+Up' },
@@ -3615,6 +3702,7 @@ export class AppComponent implements OnInit, OnDestroy {
       { id: 'tile-bottom-left', label: 'Bottom Left', icon: '3' },
       { id: 'tile-bottom-right', label: 'Bottom Right', icon: '4' },
       { id: 'toggle-fullscreen', label: 'Fullscreen', icon: 'F', shortcut: 'F11', separatorBefore: true },
+      ...(appActions.length > 0 ? [{ id: 'window-app-actions', label: 'App Actions', submenu: appActions, separatorBefore: true }] : []),
       { id: 'close-window', label: 'Close Window', icon: 'X', shortcut: 'Alt+F4', danger: true, separatorBefore: true },
     ];
   }
@@ -3699,10 +3787,19 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private launcherRowContextItems(appId: ShellAppId): ContextMenuItem[] {
+    const definition = this.getAppDefinition(appId);
+    if (!definition) {
+      return [
+        { id: 'open-app', label: 'Open', source: 'shell' },
+        this.pinContextItem(appId),
+        { id: 'properties', label: 'Properties', source: 'shell' },
+      ];
+    }
+
     return [
-      { id: 'open-app', label: 'Open' },
-      this.pinContextItem(appId),
-      { id: 'properties', label: 'Properties' },
+      this.appOpenContextItem(definition, 'launcher-row') ?? { id: 'open-app', label: 'Open', source: 'shell' },
+      this.appPinContextItem(definition, 'launcher-row') ?? this.pinContextItem(appId),
+      this.appPropertiesContextItem(definition, 'launcher-row') ?? { id: 'properties', label: 'Properties', source: 'shell' },
     ];
   }
 
@@ -3741,15 +3838,142 @@ export class AppComponent implements OnInit, OnDestroy {
     this.createWindow(definition, host, title);
   }
 
-  private taskbarWindowAppActions(windowItem: ShellWindow): ContextMenuItem[] {
+  private windowAppActionContextItems(windowItem: ShellWindow, target: ContextMenuState['target']): ContextMenuItem[] {
+    const definition = windowItem.appDefinition;
+    const fallbackTargets: LauncherTarget[] = ['taskbar-window', 'window'];
+    const contributionId = 'windowActions';
+    const contributionCapabilities = this.requiredCapabilitiesForContextContribution(definition, contributionId);
+    if (!this.appManifestContextContributionAllowed(definition, target, contributionId, fallbackTargets, contributionCapabilities)) {
+      return [];
+    }
+
     const shellOwnedActions = new Set(['tile-left', 'tile-right', 'close-window']);
     return windowItem.registeredActions
       .filter((action) => !shellOwnedActions.has(action.id))
+      .filter((action) => this.contextMenuActionCapabilitiesAllowed(definition, [
+        ...contributionCapabilities,
+        ...(action.capability ? [action.capability] : []),
+      ]))
       .map((action) => ({
         id: `window-action:${action.id}`,
         label: action.label,
         detail: action.description,
+        source: 'window-object' as const,
+        sourceAppId: definition.appId,
+        targetScope: target,
+        requiredCapabilities: [
+          ...contributionCapabilities,
+          ...(action.capability ? [action.capability] : []),
+        ],
+        actionId: action.id,
       }));
+  }
+
+  private appManifestContextContributionAllowed(
+    definition: ShellAppDefinition,
+    target: ContextMenuState['target'],
+    contributionId: string,
+    fallbackTargets: LauncherTarget[],
+    requiredCapabilities: string[],
+  ): boolean {
+    const manifest = definition.manifest;
+    if (!manifest) {
+      return false;
+    }
+
+    const manifestTargets = this.contextMenuTargetsForManifest(manifest);
+    if (!manifestTargets.includes(target as LauncherTarget)) {
+      return false;
+    }
+
+    const contribution = this.contextMenuContributionValue(manifest, contributionId);
+    if (contribution === false) {
+      return false;
+    }
+
+    if (contribution && typeof contribution === 'object' && !Array.isArray(contribution)) {
+      const contributionRecord = contribution as Record<string, unknown>;
+      const enabled = contributionRecord['enabled'];
+      if (enabled === false) {
+        return false;
+      }
+
+      const targetOverride = this.stringArrayFromUnknown(contributionRecord['targets'])
+        .filter((item): item is LauncherTarget => this.isContextMenuTarget(item));
+      const allowedTargets = targetOverride.length > 0 ? targetOverride : fallbackTargets;
+      if (!allowedTargets.includes(target as LauncherTarget)) {
+        return false;
+      }
+    } else if (contribution !== true && contribution !== undefined) {
+      return false;
+    } else if (!fallbackTargets.includes(target as LauncherTarget)) {
+      return false;
+    }
+
+    return this.contextMenuActionCapabilitiesAllowed(definition, requiredCapabilities);
+  }
+
+  private requiredCapabilitiesForContextContribution(definition: ShellAppDefinition, contributionId: string): string[] {
+    const contribution = definition.manifest
+      ? this.contextMenuContributionValue(definition.manifest, contributionId)
+      : undefined;
+    if (!contribution || typeof contribution !== 'object' || Array.isArray(contribution)) {
+      return [];
+    }
+
+    const contributionRecord = contribution as Record<string, unknown>;
+    const requiredCapabilities = this.stringArrayFromUnknown(contributionRecord['requiredCapabilities']);
+    const capability = typeof contributionRecord['capability'] === 'string' && contributionRecord['capability'].trim()
+      ? contributionRecord['capability'].trim()
+      : null;
+    return [...new Set([
+      ...requiredCapabilities,
+      ...(capability ? [capability] : []),
+    ])];
+  }
+
+  private contextMenuActionCapabilitiesAllowed(definition: ShellAppDefinition, requiredCapabilities: string[]): boolean {
+    if (requiredCapabilities.length === 0) {
+      return true;
+    }
+
+    const granted = new Set(definition.manifest?.capabilities ?? []);
+    return requiredCapabilities.every((capability) => granted.has(capability));
+  }
+
+  private contextMenuContributionValue(manifest: AppManifest, contributionId: string): unknown {
+    const contributions = manifest.packageMetadata['contextMenuContributions'];
+    if (!contributions || typeof contributions !== 'object' || Array.isArray(contributions)) {
+      return undefined;
+    }
+    return (contributions as Record<string, unknown>)[contributionId];
+  }
+
+  private contextMenuTargetsForManifest(manifest: AppManifest): LauncherTarget[] {
+    const targets = this.stringArrayFromUnknown(manifest.packageMetadata['contextMenuTargets'])
+      .filter((item): item is LauncherTarget => this.isContextMenuTarget(item));
+    return targets.length > 0 ? targets : ['desktop', 'desktop-icon', 'launcher-row', 'taskbar', 'taskbar-window', 'window'];
+  }
+
+  private stringArrayFromUnknown(value: unknown): string[] {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
+      : [];
+  }
+
+  private isContextMenuTarget(value: string): value is LauncherTarget {
+    return [
+      'desktop',
+      'desktop-icon',
+      'host',
+      'taskbar',
+      'taskbar-window',
+      'tray-status',
+      'terminal',
+      'window',
+      'launcher-row',
+      'workspace-file',
+    ].includes(value);
   }
 
   private pinContextItem(appId: ShellAppId): ContextMenuItem {
@@ -4386,7 +4610,7 @@ export class AppComponent implements OnInit, OnDestroy {
         if (profiles.length === 0) {
           const defaultProfile = await api.workspace.createProfile({
             name: 'Default workspace',
-            layout: this.loadLegacyWorkspaceLayout() ?? this.emptyWorkspaceLayout(),
+            layout: this.loadLegacyWorkspaceLayout() ?? this.currentWorkspaceLayoutSnapshot(),
           });
           profiles = await api.workspace.listProfiles();
           if (profiles.length === 0) {
@@ -4439,7 +4663,7 @@ export class AppComponent implements OnInit, OnDestroy {
       profileId: DEFAULT_WORKSPACE_PROFILE_ID,
       name: 'Default workspace',
       updatedAt: new Date().toISOString(),
-      layout: legacyLayout ?? this.emptyWorkspaceLayout(),
+      layout: legacyLayout ?? this.currentWorkspaceLayoutSnapshot(),
     };
   }
 
@@ -4810,13 +5034,21 @@ function actionRegistryFromManifest(manifest: AppManifest): ShellWindowAction[] 
     return [];
   }
 
+  const grantedCapabilities = new Set(manifest.capabilities);
   return registry
     .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
-    .map((item) => ({
-      id: typeof item['id'] === 'string' && item['id'].trim() ? item['id'].trim() : 'generated-action',
-      label: typeof item['label'] === 'string' && item['label'].trim() ? item['label'].trim() : 'Generated action',
-      description: typeof item['description'] === 'string' && item['description'].trim()
-        ? item['description'].trim()
-        : 'Generated app registered this action through its manifest.',
-    }));
+    .map((item) => {
+      const capability = typeof item['capability'] === 'string' && item['capability'].trim()
+        ? item['capability'].trim()
+        : undefined;
+      return {
+        id: typeof item['id'] === 'string' && item['id'].trim() ? item['id'].trim() : 'generated-action',
+        label: typeof item['label'] === 'string' && item['label'].trim() ? item['label'].trim() : 'Generated action',
+        description: typeof item['description'] === 'string' && item['description'].trim()
+          ? item['description'].trim()
+          : 'Generated app registered this action through its manifest.',
+        ...(capability ? { capability } : {}),
+      };
+    })
+    .filter((action) => !action.capability || grantedCapabilities.has(action.capability));
 }

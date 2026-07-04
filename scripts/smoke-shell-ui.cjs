@@ -196,12 +196,19 @@ async function runLegacyDefaultDesktopMigrationSmoke(cdp) {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const waitFor = async (predicate, label, timeout = 10000) => {
       const deadline = Date.now() + timeout;
+      let latestValue = null;
       while (Date.now() < deadline) {
         const value = predicate();
+        latestValue = value;
         if (value) return value;
         await sleep(100);
       }
-      throw new Error('Timed out waiting for ' + label);
+      throw new Error('Timed out waiting for ' + label + ': ' + JSON.stringify({
+        latestValue,
+        labels: labels(),
+        bodyText: (document.body.textContent || '').slice(0, 500),
+        storedShortcuts: localStorage.getItem(${JSON.stringify(desktopShortcutsKey)}),
+      }));
     };
     const labels = () => [...document.querySelectorAll('.desktop-icon-label')]
       .map((node) => node.textContent.trim())
@@ -260,9 +267,25 @@ async function runLegacyDefaultDesktopMigrationSmoke(cdp) {
     };
   })()`);
 
-  await cdp.evaluate(`(() => {
-    localStorage.removeItem(${JSON.stringify(desktopShortcutsKey)});
+  await cdp.evaluate(`(async () => {
+    const defaultDesktopShortcuts = [
+      { id: 'shortcut-workspace-files', appId: 'workspace-files', shellOwned: true },
+      { id: 'shortcut-trash', appId: 'trash', shellOwned: true },
+    ];
+    localStorage.setItem(${JSON.stringify(desktopShortcutsKey)}, JSON.stringify(defaultDesktopShortcuts));
     localStorage.removeItem(${JSON.stringify(desktopIconPositionsKey)});
+    const workspaceApi = window.sb && window.sb.workspace;
+    const activeProfileId = workspaceApi && workspaceApi.getActiveProfileId
+      ? await workspaceApi.getActiveProfileId()
+      : null;
+    if (activeProfileId && workspaceApi && workspaceApi.updateProfile) {
+      await workspaceApi.updateProfile(activeProfileId, {
+        layout: {
+          desktopShortcutIds: defaultDesktopShortcuts,
+          windows: [],
+        },
+      });
+    }
     return true;
   })()`);
   await reloadRendererPage(cdp);
@@ -292,8 +315,9 @@ async function reloadRendererPage(cdp) {
       throw error;
     }
   }
-  await sleep(750);
+  await sleep(1500);
   await waitForRendererContext(cdp);
+  await sleep(500);
 }
 
 function isNavigationTransientError(error) {
@@ -365,6 +389,19 @@ async function browserSmoke() {
     .map((button) => ({
       text: (button.textContent || '').trim(),
       disabled: button.disabled,
+    }));
+  const menuContributionMetadata = () => [...document.querySelectorAll('[data-testid="context-menu"] button, [data-testid="context-menu"] .context-menu-item')]
+    .map((item) => ({
+      text: (item.textContent || '').trim(),
+      source: item.getAttribute('data-menu-source') || '',
+      sourceAppId: item.getAttribute('data-menu-source-app-id') || '',
+      targetScope: item.getAttribute('data-menu-target-scope') || '',
+      actionId: item.getAttribute('data-menu-action-id') || '',
+      requiredCapabilities: (item.getAttribute('data-menu-required-capabilities') || '')
+        .split(',')
+        .map((capability) => capability.trim())
+        .filter(Boolean),
+      disabled: item instanceof HTMLButtonElement ? item.disabled : false,
     }));
   const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
     .find((button) => textIncludes(button, text)));
@@ -683,6 +720,7 @@ async function browserSmoke() {
   rightClick(fileExplorerIconsBefore[0]);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'icon context menu');
   const iconMenu = menuLabels();
+  const iconMenuContributionMetadata = menuContributionMetadata();
   const iconMenuAffordances = menuAffordances();
   const iconMenuButtonStates = menuButtonStates();
   clickMenuItem('Duplicate Shortcut');
@@ -787,6 +825,7 @@ async function browserSmoke() {
   rightClick(fileWindow.querySelector('.window-chrome'));
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="window"]'), 'window context menu');
   const windowMenu = menuLabels();
+  const windowMenuContributionMetadata = menuContributionMetadata();
   const windowMenuAffordances = menuAffordances();
   click(document.body);
 
@@ -801,6 +840,7 @@ async function browserSmoke() {
     'taskbar app item context menu',
   );
   const taskbarWindowMenu = menuLabels();
+  const taskbarWindowContributionMetadata = menuContributionMetadata();
   click(document.body);
 
   rightClick(document.querySelector('[data-testid="taskbar"]'));
@@ -821,6 +861,7 @@ async function browserSmoke() {
   rightClick(hostsLauncherRow);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="launcher-row"]'), 'launcher row menu');
   const launcherRowMenu = menuLabels();
+  const launcherRowContributionMetadata = menuContributionMetadata();
   click(document.body);
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'launcher row menu closed');
 
@@ -848,6 +889,7 @@ async function browserSmoke() {
     'Hosts taskbar pin menu',
   );
   const hostsTaskbarPinMenu = menuLabels();
+  const hostsTaskbarPinContributionMetadata = menuContributionMetadata();
   clickMenuItem('Pin to Desktop');
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'Hosts pin menu closed');
   await waitFor(() => desktopIconLabels().includes('Hosts'), 'Hosts pinned desktop icon');
@@ -858,6 +900,7 @@ async function browserSmoke() {
     'Hosts taskbar unpin menu',
   );
   const hostsTaskbarUnpinMenu = menuLabels();
+  const hostsTaskbarUnpinContributionMetadata = menuContributionMetadata();
   clickMenuItem('Unpin from Desktop');
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'Hosts unpin menu closed');
   await waitFor(() => !desktopIconLabels().includes('Hosts'), 'Hosts unpinned desktop icon');
@@ -1030,6 +1073,14 @@ async function browserSmoke() {
       terminalMenu: terminalMenuAffordances,
       workspaceFileMenu: workspaceFileMenuAffordances,
     },
+    menuContributions: {
+      iconMenu: iconMenuContributionMetadata,
+      windowMenu: windowMenuContributionMetadata,
+      taskbarWindowMenu: taskbarWindowContributionMetadata,
+      launcherRowMenu: launcherRowContributionMetadata,
+      hostsTaskbarPinMenu: hostsTaskbarPinContributionMetadata,
+      hostsTaskbarUnpinMenu: hostsTaskbarUnpinContributionMetadata,
+    },
     commandPalette: {
       opened: Boolean(commandPalette),
       rowLabels: commandPaletteLabels,
@@ -1118,6 +1169,11 @@ async function main() {
     .find((item) => item.text.includes(label));
   const iconMenuActionItem = (label, items) => items
     .find((item) => item.text.includes(label));
+  const contributionMatches = (items, label, expected) => {
+    return items
+      .filter((item) => item.text.includes(label))
+      .some((item) => Object.entries(expected).every(([key, value]) => item[key] === value));
+  };
   const terminalBridgeActionsReady = ['Copy', 'Paste', 'Clear'].every((label) => {
     const item = terminalActionMenuItem(label);
     return Boolean(item) && !item.disabled && !item.text.includes('Requires the terminal applet action bridge');
@@ -1196,6 +1252,19 @@ async function main() {
     report.menus.iconMenu.some((label) => label.includes('Duplicate Shortcut')),
     report.menus.iconMenu.some((label) => label.includes('Remove Shortcut')),
     report.menus.iconMenu.some((label) => label.includes('Properties')),
+    contributionMatches(report.menuContributions.iconMenu, 'Open', {
+      source: 'app-manifest',
+      sourceAppId: 'workspace-files',
+      targetScope: 'desktop-icon',
+      actionId: 'open-app',
+    }),
+    contributionMatches(report.menuContributions.iconMenu, 'Properties', {
+      source: 'app-manifest',
+      sourceAppId: 'workspace-files',
+      targetScope: 'desktop-icon',
+      actionId: 'properties',
+    }),
+    !report.menus.iconMenu.some((label) => label.includes('Pin to Desktop')),
     report.windows.desktopIconLabelsAfterRename.includes('File Explorer (Personal)'),
     JSON.stringify(report.windows.desktopIconLabelsAfterRenameRollback.sort()) === JSON.stringify(['File Explorer', 'Recycle Bin']),
     report.menuAffordances.iconMenu.iconCount >= 5,
@@ -1233,6 +1302,13 @@ async function main() {
     report.menus.windowMenu.some((label) => label.includes('Close Window')),
     report.menus.windowMenu.some((label) => label.includes('Tile Left')),
     report.menus.windowMenu.some((label) => label.includes('Fullscreen')),
+    report.menus.windowMenu.some((label) => label.includes('App Actions')),
+    contributionMatches(report.menuContributions.windowMenu, 'Refresh workspace context', {
+      source: 'window-object',
+      sourceAppId: 'workspace-files',
+      targetScope: 'window',
+      actionId: 'refresh-hosts',
+    }),
     report.menuAffordances.windowMenu.iconCount >= 10,
     report.menuAffordances.windowMenu.separatorCount >= 3,
     report.menuAffordances.windowMenu.shortcutLabels.includes('Meta+M'),
@@ -1246,9 +1322,33 @@ async function main() {
     report.menus.taskbarWindowMenu.some((label) => label.includes('Minimize') || label.includes('Restore Window')),
     report.menus.taskbarWindowMenu.some((label) => label.includes('Pin to Desktop') || label.includes('Pinned to Desktop')),
     report.menus.taskbarWindowMenu.some((label) => label.includes('Close Window')),
+    contributionMatches(report.menuContributions.taskbarWindowMenu, 'Pinned to Desktop', {
+      source: 'app-manifest',
+      sourceAppId: 'workspace-files',
+      targetScope: 'taskbar-window',
+      actionId: 'pinned-default-app',
+    }),
+    contributionMatches(report.menuContributions.taskbarWindowMenu, 'Refresh workspace context', {
+      source: 'window-object',
+      sourceAppId: 'workspace-files',
+      targetScope: 'taskbar-window',
+      actionId: 'refresh-hosts',
+    }),
     report.menus.hostsTaskbarPinMenu.some((label) => label.includes('Pin to Desktop')),
     report.menus.hostsTaskbarPinMenu.every((label) => !label.includes('Unpin from Desktop')),
+    contributionMatches(report.menuContributions.hostsTaskbarPinMenu, 'Pin to Desktop', {
+      source: 'app-manifest',
+      sourceAppId: 'hosts',
+      targetScope: 'taskbar-window',
+      actionId: 'pin-app',
+    }),
     report.menus.hostsTaskbarUnpinMenu.some((label) => label.includes('Unpin from Desktop')),
+    contributionMatches(report.menuContributions.hostsTaskbarUnpinMenu, 'Unpin from Desktop', {
+      source: 'app-manifest',
+      sourceAppId: 'hosts',
+      targetScope: 'taskbar-window',
+      actionId: 'unpin-app',
+    }),
     report.windows.hostsOpen,
     JSON.stringify(report.windows.desktopIconLabelsAfterPinCycle) === JSON.stringify(['File Explorer', 'Recycle Bin']),
     report.hosts.seededHostId,
@@ -1282,6 +1382,25 @@ async function main() {
     report.menus.trayStatusMenu.some((label) => label.includes('Panel Settings')),
     report.menus.trayStatusMenu.some((label) => label.includes('Refresh Status')),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
+    contributionMatches(report.menuContributions.launcherRowMenu, 'Open', {
+      source: 'app-manifest',
+      sourceAppId: 'hosts',
+      targetScope: 'launcher-row',
+      actionId: 'open-app',
+    }),
+    contributionMatches(report.menuContributions.launcherRowMenu, 'Pin to Desktop', {
+      source: 'app-manifest',
+      sourceAppId: 'hosts',
+      targetScope: 'launcher-row',
+      actionId: 'pin-app',
+    }),
+    contributionMatches(report.menuContributions.launcherRowMenu, 'Properties', {
+      source: 'app-manifest',
+      sourceAppId: 'hosts',
+      targetScope: 'launcher-row',
+      actionId: 'properties',
+    }),
+    !report.menus.launcherRowMenu.some((label) => label.includes('Refresh workspace context')),
     report.windows.fileExplorerOpen,
     report.windows.trashOpen,
     report.windows.workspaceFileText.includes('SwitchboardOS Workspace'),
@@ -1329,8 +1448,12 @@ async function main() {
     report.trash?.folderRestored,
   ];
 
-  if (checks.some((check) => !check)) {
-    console.log(JSON.stringify({ legacyDefaultDesktopMigration, report, screenshotPath }, null, 2));
+  const failedCheckIndexes = checks
+    .map((check, index) => (check ? null : index))
+    .filter((index) => index !== null);
+
+  if (failedCheckIndexes.length > 0) {
+    console.log(JSON.stringify({ legacyDefaultDesktopMigration, report, screenshotPath, failedCheckIndexes }, null, 2));
     throw new Error('Desktop shell UI smoke assertions failed.');
   }
 

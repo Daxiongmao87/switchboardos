@@ -231,6 +231,7 @@ export interface ShellWindowAction {
   id: string;
   label: string;
   description: string;
+  capability?: string;
 }
 
 export interface ShellWindowSemanticState {

@@ -594,6 +594,11 @@
           [class.has-separator]="item.separatorBefore"
           [attr.data-menu-icon]="item.icon || null"
           [attr.data-menu-shortcut]="item.shortcut || null"
+          [attr.data-menu-source]="item.source || null"
+          [attr.data-menu-source-app-id]="item.sourceAppId || null"
+          [attr.data-menu-target-scope]="item.targetScope || null"
+          [attr.data-menu-required-capabilities]="(item.requiredCapabilities || []).join(',') || null"
+          [attr.data-menu-action-id]="item.actionId || null"
         >
           <span class="context-menu-main">
             <span *ngIf="item.icon" class="context-menu-icon" aria-hidden="true">{{ item.icon }}</span>
@@ -615,6 +620,11 @@
               [class.has-separator]="subItem.separatorBefore"
               [attr.data-menu-icon]="subItem.icon || null"
               [attr.data-menu-shortcut]="subItem.shortcut || null"
+              [attr.data-menu-source]="subItem.source || null"
+              [attr.data-menu-source-app-id]="subItem.sourceAppId || null"
+              [attr.data-menu-target-scope]="subItem.targetScope || null"
+              [attr.data-menu-required-capabilities]="(subItem.requiredCapabilities || []).join(',') || null"
+              [attr.data-menu-action-id]="subItem.actionId || null"
               [disabled]="subItem.disabled"
               (click)="runContextMenuAction(subItem)"
             >
@@ -637,6 +647,11 @@
             [class.has-separator]="item.separatorBefore"
             [attr.data-menu-icon]="item.icon || null"
             [attr.data-menu-shortcut]="item.shortcut || null"
+            [attr.data-menu-source]="item.source || null"
+            [attr.data-menu-source-app-id]="item.sourceAppId || null"
+            [attr.data-menu-target-scope]="item.targetScope || null"
+            [attr.data-menu-required-capabilities]="(item.requiredCapabilities || []).join(',') || null"
+            [attr.data-menu-action-id]="item.actionId || null"
             [disabled]="item.disabled"
             (click)="runContextMenuAction(item)"
           >
