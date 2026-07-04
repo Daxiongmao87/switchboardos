@@ -2,6 +2,8 @@ import type {
   AgentEndpoint,
   BootstrapGenerateInput,
   BootstrapPresetId,
+  CreateAppManifestInput,
+  CreateAppPermissionInput,
   CreateAgentEndpointInput,
   CreateAuditEventInput,
   CreateHostGroupInput,
@@ -22,6 +24,7 @@ import type {
   SshFileTransferInput,
   SshExecInput,
   UpdateAgentEndpointInput,
+  UpdateAppManifestInput,
   UpdateHostGroupInput,
   UpdateHostInput,
   UpdateHostTagInput,
@@ -232,6 +235,122 @@ export function validateAgentEndpointUpdateInput(value: unknown): UpdateAgentEnd
   }
 
   return input;
+}
+
+export function validateAppManifestIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'manifestId');
+}
+
+export function validateAppManifestCreateInput(value: unknown): CreateAppManifestInput {
+  const record = requireRecord(value, 'app manifest create input');
+  const input: CreateAppManifestInput = {
+    appId: requireNonEmptyString(record.appId, 'appId'),
+    name: requireNonEmptyString(record.name, 'name'),
+    version: requireNonEmptyString(record.version, 'version'),
+    entrypoint: requireNonEmptyString(record.entrypoint, 'entrypoint'),
+  };
+
+  if (record.description !== undefined) {
+    input.description = requireString(record.description, 'description');
+  }
+  if (record.author !== undefined) {
+    input.author = sanitizeOptionalString(record.author, 'author');
+  }
+  if (record.icon !== undefined) {
+    input.icon = sanitizeOptionalString(record.icon, 'icon');
+  }
+  if (record.category !== undefined) {
+    input.category = sanitizeOptionalString(record.category, 'category');
+  }
+  if (record.capabilities !== undefined) {
+    input.capabilities = requireStringList(record.capabilities, 'capabilities');
+  }
+  if (record.sourceCode !== undefined) {
+    input.sourceCode = requireString(record.sourceCode, 'sourceCode');
+  }
+  if (record.packageMetadata !== undefined) {
+    input.packageMetadata = validateMetadataRecord(record.packageMetadata, 'packageMetadata');
+  }
+  if (record.enabled !== undefined) {
+    input.enabled = requireBoolean(record.enabled, 'enabled');
+  }
+  if (record.installedAt !== undefined) {
+    input.installedAt = record.installedAt === null
+      ? null
+      : requireString(record.installedAt, 'installedAt');
+  }
+
+  return input;
+}
+
+export function validateAppManifestUpdateInput(value: unknown): UpdateAppManifestInput {
+  const record = requireRecord(value, 'app manifest update input');
+  const input: UpdateAppManifestInput = {};
+
+  if (record.appId !== undefined) {
+    input.appId = requireNonEmptyString(record.appId, 'appId');
+  }
+  if (record.name !== undefined) {
+    input.name = requireNonEmptyString(record.name, 'name');
+  }
+  if (record.version !== undefined) {
+    input.version = requireNonEmptyString(record.version, 'version');
+  }
+  if (record.entrypoint !== undefined) {
+    input.entrypoint = requireNonEmptyString(record.entrypoint, 'entrypoint');
+  }
+  if (record.description !== undefined) {
+    input.description = requireString(record.description, 'description');
+  }
+  if (record.author !== undefined) {
+    input.author = sanitizeOptionalString(record.author, 'author');
+  }
+  if (record.icon !== undefined) {
+    input.icon = sanitizeOptionalString(record.icon, 'icon');
+  }
+  if (record.category !== undefined) {
+    input.category = sanitizeOptionalString(record.category, 'category');
+  }
+  if (record.capabilities !== undefined) {
+    input.capabilities = requireStringList(record.capabilities, 'capabilities');
+  }
+  if (record.sourceCode !== undefined) {
+    input.sourceCode = requireString(record.sourceCode, 'sourceCode');
+  }
+  if (record.packageMetadata !== undefined) {
+    input.packageMetadata = validateMetadataRecord(record.packageMetadata, 'packageMetadata');
+  }
+  if (record.enabled !== undefined) {
+    input.enabled = requireBoolean(record.enabled, 'enabled');
+  }
+  if (record.installedAt !== undefined) {
+    input.installedAt = record.installedAt === null
+      ? null
+      : requireString(record.installedAt, 'installedAt');
+  }
+
+  return input;
+}
+
+export function validateAppPermissionListInput(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const appId = requireString(value, 'appId').trim();
+  return appId ? appId : undefined;
+}
+
+export function validateAppPermissionCreateInput(value: unknown): CreateAppPermissionInput {
+  const record = requireRecord(value, 'app permission create input');
+  return {
+    appId: requireNonEmptyString(record.appId, 'appId'),
+    capability: requireNonEmptyString(record.capability, 'capability'),
+    granted: requireBoolean(record.granted, 'granted'),
+  };
+}
+
+export function validateAppPermissionIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'permissionId');
 }
 
 export function validateHostOperationInput(value: unknown): HostOperationInput {

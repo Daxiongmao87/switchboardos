@@ -12,6 +12,12 @@ import {
   validateAgentEndpointCreateInput,
   validateAgentEndpointIdInput,
   validateAgentEndpointUpdateInput,
+  validateAppManifestCreateInput,
+  validateAppManifestIdInput,
+  validateAppManifestUpdateInput,
+  validateAppPermissionCreateInput,
+  validateAppPermissionIdInput,
+  validateAppPermissionListInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateHostCreateInput,
@@ -46,9 +52,9 @@ import type { SshService } from './ssh-service';
 import type { TerminalSessionManager } from './terminal-session-manager';
 import type {
   AgentEndpoint,
+  AppManifest,
+  AppPermission,
   BootstrapGenerateInput,
-  CreateAppManifestInput,
-  CreateAppPermissionInput,
   CreateCommandHistoryInput,
   OperatorProposeResult,
   SshExecResult,
@@ -59,7 +65,6 @@ import type {
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
-  UpdateAppManifestInput,
 } from '../shared/mvp-models';
 
 type TerminalChannel = 'terminal:output' | 'terminal:status' | 'terminal:exit';
@@ -672,17 +677,11 @@ export class HostedServer {
     }
 
     if (resource === 'app-manifests') {
-      if (method !== 'GET') {
-        this.requireHostedCapability(request, session, 'settings:update', url.pathname);
-      }
-      return this.routeAppManifestApi(method, actionOrId, body);
+      return this.routeAppManifestApi(method, actionOrId, body, session);
     }
 
     if (resource === 'app-permissions') {
-      if (method !== 'GET') {
-        this.requireHostedCapability(request, session, 'settings:update', url.pathname);
-      }
-      return this.routeAppPermissionApi(method, actionOrId, body, url);
+      return this.routeAppPermissionApi(method, actionOrId, body, url, session);
     }
 
     if (resource === 'agent-endpoints') {
@@ -992,6 +991,39 @@ export class HostedServer {
         action: params.action,
         entityId: params.entityId ?? null,
         entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private runHostedAppRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      entityType: string;
+      appId?: string | null;
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        appId: params.appId ?? null,
         sessionId: params.session?.id ?? null,
       },
       input: params.input,
@@ -1312,35 +1344,136 @@ export class HostedServer {
     throw new HttpError(404, `No hosted command history route for ${method}.`);
   }
 
-  private routeAppManifestApi(method: string, action: string | undefined, body: unknown): unknown {
+  private routeAppManifestApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
     if (!action && method === 'GET') {
-      return this.options.store.listAppManifests();
+      validateHostedNoRequestBody(body);
+      return this.runHostedAppRoute({
+        contractId: 'hosted:GET:/api/app-manifests',
+        session,
+        route: '/api/app-manifests',
+        action: 'GET /api/app-manifests',
+        entityType: 'app_manifest',
+        input: null,
+        execute: () => this.options.store.listAppManifests(),
+      });
     }
     if (!action && method === 'POST') {
-      return this.options.store.createAppManifest(asRecord(body) as CreateAppManifestInput);
+      const input = validateAppManifestCreateInput(asRecord(body));
+      return this.runHostedAppRoute({
+        contractId: 'hosted:POST:/api/app-manifests',
+        session,
+        route: '/api/app-manifests',
+        action: 'POST /api/app-manifests',
+        entityType: 'app_manifest',
+        appId: input.appId,
+        input,
+        execute: () => this.options.store.createAppManifest(input),
+        successAuditMetadata: appManifestRouteSuccessMetadata,
+      });
     }
     if (action && method === 'GET') {
-      return this.options.store.getAppManifest(decodeURIComponent(action));
+      validateHostedNoRequestBody(body);
+      const manifestId = validateAppManifestIdInput(decodeURIComponent(action));
+      return this.runHostedAppRoute({
+        contractId: 'hosted:GET:/api/app-manifests/:id',
+        session,
+        route: `/api/app-manifests/${manifestId}`,
+        action: 'GET /api/app-manifests/:id',
+        entityId: manifestId,
+        entityType: 'app_manifest',
+        input: manifestId,
+        execute: () => this.options.store.getAppManifest(manifestId),
+      });
     }
     if (action && method === 'PATCH') {
-      return this.options.store.updateAppManifest(decodeURIComponent(action), asRecord(body) as UpdateAppManifestInput);
+      const manifestId = validateAppManifestIdInput(decodeURIComponent(action));
+      const input = validateAppManifestUpdateInput(asRecord(body));
+      return this.runHostedAppRoute({
+        contractId: 'hosted:PATCH:/api/app-manifests/:id',
+        session,
+        route: `/api/app-manifests/${manifestId}`,
+        action: 'PATCH /api/app-manifests/:id',
+        entityId: manifestId,
+        entityType: 'app_manifest',
+        appId: input.appId ?? null,
+        input,
+        execute: () => this.options.store.updateAppManifest(manifestId, input),
+        successAuditMetadata: appManifestRouteSuccessMetadata,
+      });
     }
     if (action && method === 'DELETE') {
-      return this.options.store.deleteAppManifest(decodeURIComponent(action));
+      validateHostedNoRequestBody(body);
+      const manifestId = validateAppManifestIdInput(decodeURIComponent(action));
+      return this.runHostedAppRoute({
+        contractId: 'hosted:DELETE:/api/app-manifests/:id',
+        session,
+        route: `/api/app-manifests/${manifestId}`,
+        action: 'DELETE /api/app-manifests/:id',
+        entityId: manifestId,
+        entityType: 'app_manifest',
+        input: manifestId,
+        execute: () => this.options.store.deleteAppManifest(manifestId),
+        successAuditMetadata: appManifestRouteSuccessMetadata,
+      });
     }
 
     throw new HttpError(404, `No hosted app manifest route for ${method}.`);
   }
 
-  private routeAppPermissionApi(method: string, action: string | undefined, body: unknown, url: URL): unknown {
+  private routeAppPermissionApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    url: URL,
+    session: HostedSession | null,
+  ): unknown {
     if (!action && method === 'GET') {
-      return this.options.store.listAppPermissions(url.searchParams.get('appId') ?? undefined);
+      validateHostedNoRequestBody(body);
+      const appId = validateAppPermissionListInput(url.searchParams.get('appId'));
+      return this.runHostedAppRoute({
+        contractId: 'hosted:GET:/api/app-permissions',
+        session,
+        route: '/api/app-permissions',
+        action: 'GET /api/app-permissions',
+        entityType: 'app_permission',
+        appId: appId ?? null,
+        input: appId ?? null,
+        execute: () => this.options.store.listAppPermissions(appId),
+      });
     }
     if (!action && method === 'POST') {
-      return this.options.store.createAppPermission(asRecord(body) as CreateAppPermissionInput);
+      const input = validateAppPermissionCreateInput(asRecord(body));
+      return this.runHostedAppRoute({
+        contractId: 'hosted:POST:/api/app-permissions',
+        session,
+        route: '/api/app-permissions',
+        action: 'POST /api/app-permissions',
+        entityType: 'app_permission',
+        appId: input.appId,
+        input,
+        execute: () => this.options.store.createAppPermission(input),
+        successAuditMetadata: appPermissionRouteSuccessMetadata,
+      });
     }
     if (action && method === 'DELETE') {
-      return this.options.store.deleteAppPermission(decodeURIComponent(action));
+      validateHostedNoRequestBody(body);
+      const permissionId = validateAppPermissionIdInput(decodeURIComponent(action));
+      return this.runHostedAppRoute({
+        contractId: 'hosted:DELETE:/api/app-permissions/:id',
+        session,
+        route: `/api/app-permissions/${permissionId}`,
+        action: 'DELETE /api/app-permissions/:id',
+        entityId: permissionId,
+        entityType: 'app_permission',
+        input: permissionId,
+        execute: () => this.options.store.deleteAppPermission(permissionId),
+        successAuditMetadata: appPermissionRouteSuccessMetadata,
+      });
     }
 
     throw new HttpError(404, `No hosted app permission route for ${method}.`);
@@ -1931,6 +2064,42 @@ function agentEndpointRouteSuccessMetadata(result: AgentEndpoint | boolean | nul
     credentialRefIdLogged: false,
     storesSecretMaterial: false,
     apiKeyLogged: false,
+  };
+}
+
+function appManifestRouteSuccessMetadata(result: AppManifest | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      manifestFound: Boolean(result),
+      sourceCodeLogged: false,
+      packageMetadataLogged: false,
+    };
+  }
+
+  return {
+    manifestId: result.id,
+    appId: result.appId,
+    appVersion: result.version,
+    appCategory: result.category,
+    appEnabled: result.enabled,
+    requestedCapabilityCount: result.capabilities.length,
+    sourceCodeLogged: false,
+    packageMetadataLogged: false,
+  };
+}
+
+function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      permissionFound: Boolean(result),
+    };
+  }
+
+  return {
+    permissionId: result.id,
+    appId: result.appId,
+    capability: result.capability,
+    granted: result.granted,
   };
 }
 

@@ -166,6 +166,46 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:app-manifest:list',
+    routeMarker: "'app-manifest:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-manifest:get',
+    routeMarker: "'app-manifest:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-manifest:create',
+    routeMarker: "'app-manifest:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-manifest:update',
+    routeMarker: "'app-manifest:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-manifest:delete',
+    routeMarker: "'app-manifest:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-permission:list',
+    routeMarker: "'app-permission:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-permission:create',
+    routeMarker: "'app-permission:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-permission:delete',
+    routeMarker: "'app-permission:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:list',
     routeMarker: "'workspace-file:list'",
     contextFile: 'src/main/main.ts',
@@ -393,6 +433,38 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/app-manifests',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-manifests',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/app-manifests/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/app-manifests/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/app-manifests/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/app-permissions',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-permissions',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/app-permissions/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/workspace-files',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -508,6 +580,13 @@ const REQUIRED_HOST_CAPABILITIES = [
   'agent-endpoint:update',
   'agent-endpoint:delete',
   'agent:propose',
+  'app-manifest:read',
+  'app-manifest:create',
+  'app-manifest:update',
+  'app-manifest:delete',
+  'app-permission:read',
+  'app-permission:grant',
+  'app-permission:revoke',
   'workspace-file:read',
   'workspace-file:write',
   'workspace-profile:read',
@@ -790,7 +869,8 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runSshIpcRoute(')
               || handlerText.includes('runTerminalIpcRoute(')
               || handlerText.includes('runAgentEndpointIpcRoute(')
-              || handlerText.includes('runAgentOperatorIpcRoute('),
+              || handlerText.includes('runAgentOperatorIpcRoute(')
+              || handlerText.includes('runAppRouteIpc('),
           });
         }
       }
@@ -915,6 +995,18 @@ function validateHostedDispatches() {
     }
   }
 
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/app-manifests') || entry.id.includes('/api/app-permissions'))) {
+    const appHelperIndex = hostedText.indexOf('private runHostedAppRoute');
+    if (appHelperIndex === -1) {
+      fail('Hosted app manifest/permission routes are not using runHostedAppRoute.');
+    } else {
+      const helperBody = hostedText.slice(appHelperIndex, appHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted app helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
   if (hostedText.includes("requireHostedCapability(request, session, 'host-operation:run'")) {
     fail('Hosted route still uses requireHostedCapability for host-operation:run instead of host route contract enforcement.');
   }
@@ -978,6 +1070,32 @@ function validateHostedDispatches() {
 
   if (mainText.includes('agentOperator.propose(validateOperatorProposeInput(input))')) {
     fail('Direct IPC agent operator fallback detected in main.ts.');
+  }
+
+  if (hostedText.includes('return this.options.store.listAppManifests();')
+    || hostedText.includes('return this.options.store.createAppManifest(asRecord(body) as CreateAppManifestInput);')
+    || hostedText.includes('return this.options.store.updateAppManifest(decodeURIComponent(action), asRecord(body) as UpdateAppManifestInput);')
+    || hostedText.includes('return this.options.store.deleteAppManifest(decodeURIComponent(action));')
+    || hostedText.includes('return this.options.store.listAppPermissions(url.searchParams.get')
+    || hostedText.includes('return this.options.store.createAppPermission(asRecord(body) as CreateAppPermissionInput);')
+    || hostedText.includes('return this.options.store.deleteAppPermission(decodeURIComponent(action));')) {
+    fail('Direct hosted app manifest/permission fallback detected in hosted-server.ts.');
+  }
+
+  if (hostedText.includes("if (resource === 'app-manifests') {\n      if (method !== 'GET') {")
+    || hostedText.includes("if (resource === 'app-permissions') {\n      if (method !== 'GET') {")) {
+    fail('Hosted app manifest/permission routes still use direct settings:update gating instead of app route contract enforcement.');
+  }
+
+  if (mainText.includes("ipcMain.handle('app-manifest:list', async () => mvpStore.listAppManifests())")
+    || mainText.includes('mvpStore.getAppManifest(manifestId)')
+    || mainText.includes('return mvpStore.createAppManifest(input);')
+    || mainText.includes('return mvpStore.updateAppManifest(manifestId, input);')
+    || mainText.includes('return mvpStore.deleteAppManifest(manifestId);')
+    || mainText.includes('mvpStore.listAppPermissions(appId)')
+    || mainText.includes('return mvpStore.createAppPermission(input);')
+    || mainText.includes('return mvpStore.deleteAppPermission(permissionId);')) {
+    fail('Direct IPC app manifest/permission fallback detected in main.ts.');
   }
 }
 

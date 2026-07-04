@@ -36,6 +36,12 @@ import {
   validateAgentEndpointCreateInput,
   validateAgentEndpointIdInput,
   validateAgentEndpointUpdateInput,
+  validateAppManifestCreateInput,
+  validateAppManifestIdInput,
+  validateAppManifestUpdateInput,
+  validateAppPermissionCreateInput,
+  validateAppPermissionIdInput,
+  validateAppPermissionListInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateCredentialRefCreateInput,
@@ -80,6 +86,8 @@ import {
 } from './runtime-validation';
 import type {
   AgentEndpoint,
+  AppManifest,
+  AppPermission,
   BootstrapGenerateInput,
   CreateAgentEndpointInput,
   CreateAppManifestInput,
@@ -1118,6 +1126,33 @@ function runAgentEndpointIpcRoute<TResult>(
   });
 }
 
+function runAppRouteIpc<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityId?: string | null;
+    entityType: string;
+    appId?: string | null;
+  },
+  input: unknown,
+  execute: () => TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
 function runAgentOperatorIpcRoute<TResult>(
   contractId: string,
   context: {
@@ -1162,6 +1197,42 @@ function agentEndpointRouteSuccessMetadata(result: AgentEndpoint | boolean | nul
     credentialRefIdLogged: false,
     storesSecretMaterial: false,
     apiKeyLogged: false,
+  };
+}
+
+function appManifestRouteSuccessMetadata(result: AppManifest | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      manifestFound: Boolean(result),
+      sourceCodeLogged: false,
+      packageMetadataLogged: false,
+    };
+  }
+
+  return {
+    manifestId: result.id,
+    appId: result.appId,
+    appVersion: result.version,
+    appCategory: result.category,
+    appEnabled: result.enabled,
+    requestedCapabilityCount: result.capabilities.length,
+    sourceCodeLogged: false,
+    packageMetadataLogged: false,
+  };
+}
+
+function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      permissionFound: Boolean(result),
+    };
+  }
+
+  return {
+    permissionId: result.id,
+    appId: result.appId,
+    capability: result.capability,
+    granted: result.granted,
   };
 }
 
@@ -2525,45 +2596,125 @@ ipcMain.handle('credential-ref:delete', async (_event, refId: string) => {
 });
 
 // App Manifests
-ipcMain.handle('app-manifest:list', async () => mvpStore.listAppManifests());
-ipcMain.handle('app-manifest:get', async (_event, manifestId: string) => mvpStore.getAppManifest(manifestId));
+ipcMain.handle('app-manifest:list', async (_event, input?: unknown) => {
+  validateNoInput(input);
+  return runAppRouteIpc(
+    'ipc:app-manifest:list',
+    {
+      route: 'app-manifest:list',
+      action: 'app-manifest:list',
+      entityType: 'app_manifest',
+    },
+    null,
+    () => mvpStore.listAppManifests(),
+  );
+});
+ipcMain.handle('app-manifest:get', async (_event, manifestId: string) => {
+  const validatedManifestId = validateAppManifestIdInput(manifestId);
+  return runAppRouteIpc(
+    'ipc:app-manifest:get',
+    {
+      route: 'app-manifest:get',
+      action: 'app-manifest:get',
+      entityId: validatedManifestId,
+      entityType: 'app_manifest',
+    },
+    validatedManifestId,
+    () => mvpStore.getAppManifest(validatedManifestId),
+  );
+});
 ipcMain.handle('app-manifest:create', async (_event, input: CreateAppManifestInput) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'app-manifest:create',
-  });
-  return mvpStore.createAppManifest(input);
+  const validatedInput = validateAppManifestCreateInput(input);
+  return runAppRouteIpc(
+    'ipc:app-manifest:create',
+    {
+      route: 'app-manifest:create',
+      action: 'app-manifest:create',
+      entityType: 'app_manifest',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => mvpStore.createAppManifest(validatedInput),
+    appManifestRouteSuccessMetadata,
+  );
 });
 ipcMain.handle('app-manifest:update', async (_event, manifestId: string, input: UpdateAppManifestInput) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'app-manifest:update',
-  });
-  return mvpStore.updateAppManifest(manifestId, input);
+  const validatedManifestId = validateAppManifestIdInput(manifestId);
+  const validatedInput = validateAppManifestUpdateInput(input);
+  return runAppRouteIpc(
+    'ipc:app-manifest:update',
+    {
+      route: 'app-manifest:update',
+      action: 'app-manifest:update',
+      entityId: validatedManifestId,
+      entityType: 'app_manifest',
+      appId: validatedInput.appId ?? null,
+    },
+    validatedInput,
+    () => mvpStore.updateAppManifest(validatedManifestId, validatedInput),
+    appManifestRouteSuccessMetadata,
+  );
 });
 ipcMain.handle('app-manifest:delete', async (_event, manifestId: string) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'app-manifest:delete',
-  });
-  return mvpStore.deleteAppManifest(manifestId);
+  const validatedManifestId = validateAppManifestIdInput(manifestId);
+  return runAppRouteIpc(
+    'ipc:app-manifest:delete',
+    {
+      route: 'app-manifest:delete',
+      action: 'app-manifest:delete',
+      entityId: validatedManifestId,
+      entityType: 'app_manifest',
+    },
+    validatedManifestId,
+    () => mvpStore.deleteAppManifest(validatedManifestId),
+    appManifestRouteSuccessMetadata,
+  );
 });
 
 // App Permissions
-ipcMain.handle('app-permission:list', async (_event, appId?: string) => mvpStore.listAppPermissions(appId));
-ipcMain.handle('app-permission:create', async (_event, input: CreateAppPermissionInput) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'app-permission:create',
-  });
-  return mvpStore.createAppPermission(input);
+ipcMain.handle('app-permission:list', async (_event, appId?: string) => {
+  const validatedAppId = validateAppPermissionListInput(appId);
+  return runAppRouteIpc(
+    'ipc:app-permission:list',
+    {
+      route: 'app-permission:list',
+      action: 'app-permission:list',
+      entityType: 'app_permission',
+      appId: validatedAppId ?? null,
+    },
+    validatedAppId ?? null,
+    () => mvpStore.listAppPermissions(validatedAppId),
+  );
 });
 ipcMain.handle('app-permission:delete', async (_event, permissionId: string) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'app-permission:delete',
-  });
-  return mvpStore.deleteAppPermission(permissionId);
+  const validatedPermissionId = validateAppPermissionIdInput(permissionId);
+  return runAppRouteIpc(
+    'ipc:app-permission:delete',
+    {
+      route: 'app-permission:delete',
+      action: 'app-permission:delete',
+      entityId: validatedPermissionId,
+      entityType: 'app_permission',
+    },
+    validatedPermissionId,
+    () => mvpStore.deleteAppPermission(validatedPermissionId),
+    appPermissionRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-permission:create', async (_event, input: CreateAppPermissionInput) => {
+  const validatedInput = validateAppPermissionCreateInput(input);
+  return runAppRouteIpc(
+    'ipc:app-permission:create',
+    {
+      route: 'app-permission:create',
+      action: 'app-permission:create',
+      entityType: 'app_permission',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => mvpStore.createAppPermission(validatedInput),
+    appPermissionRouteSuccessMetadata,
+  );
 });
 
 // Agent Endpoints

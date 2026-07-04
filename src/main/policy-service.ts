@@ -43,6 +43,13 @@ export type PolicyCapability =
   | 'agent-endpoint:update'
   | 'agent-endpoint:delete'
   | 'agent:propose'
+  | 'app-manifest:read'
+  | 'app-manifest:create'
+  | 'app-manifest:update'
+  | 'app-manifest:delete'
+  | 'app-permission:read'
+  | 'app-permission:grant'
+  | 'app-permission:revoke'
   | 'bootstrap:generate'
   | 'settings:update';
 
@@ -111,6 +118,13 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'agent-endpoint:update',
   'agent-endpoint:delete',
   'agent:propose',
+  'app-manifest:read',
+  'app-manifest:create',
+  'app-manifest:update',
+  'app-manifest:delete',
+  'app-permission:read',
+  'app-permission:grant',
+  'app-permission:revoke',
   'bootstrap:generate',
   'settings:update',
 ];
@@ -118,6 +132,8 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
 const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
   'agent-endpoint:read',
   'agent:propose',
+  'app-manifest:read',
+  'app-permission:read',
   'ssh:file:read',
   'workspace-file:read',
   'workspace-profile:read',
