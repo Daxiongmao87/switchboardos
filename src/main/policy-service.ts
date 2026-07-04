@@ -19,6 +19,8 @@ export type PolicyCapability =
   | 'host-tag:create'
   | 'host-tag:update'
   | 'host-tag:delete'
+  | 'workspace-file:read'
+  | 'workspace-file:write'
   | 'terminal:start'
   | 'terminal:write'
   | 'terminal:resize'
@@ -72,6 +74,8 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'host-tag:create',
   'host-tag:update',
   'host-tag:delete',
+  'workspace-file:read',
+  'workspace-file:write',
   'terminal:start',
   'terminal:write',
   'terminal:resize',
@@ -87,6 +91,7 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
 
 const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
   'ssh:file:read',
+  'workspace-file:read',
   'bootstrap:generate',
   'settings:update',
 ];

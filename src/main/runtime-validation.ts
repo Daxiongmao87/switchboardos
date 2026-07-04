@@ -54,6 +54,24 @@ const AUTH_MODES: readonly MvpSettings['sshDefaults']['authMode'][] = ['placehol
 const HOST_AUTH_MODES: readonly HostAuthMode[] = ['placeholder', 'password', 'key', 'agent'];
 const HOST_BOOTSTRAP_STATUSES: readonly HostBootstrapStatus[] = ['unknown', 'not_started', 'pending', 'ready', 'failed'];
 const OPERATOR_POLICIES: readonly MvpSettings['operator']['policy'][] = ['manual-approval', 'disabled'];
+const WORKSPACE_FILE_KINDS = ['applet', 'scriptlet', 'note'] as const;
+
+export type WorkspaceFileKindInput = typeof WORKSPACE_FILE_KINDS[number];
+
+export interface WorkspaceFileCreateFileInput {
+  kind: WorkspaceFileKindInput;
+  targetPath: string;
+}
+
+export interface WorkspaceFileRenameInput {
+  path: string;
+  newName: string;
+}
+
+export interface WorkspaceFileCopyMoveInput {
+  path: string;
+  targetPath: string;
+}
 
 export function validateSshExecInput(value: unknown): SshExecInput {
   const record = requireRecord(value, 'SSH exec input');
@@ -142,6 +160,50 @@ export function validateNoInput(value: unknown): void {
   if (value !== undefined && value !== null) {
     throw new RuntimeValidationError('Route does not accept a request payload.');
   }
+}
+
+export function validateWorkspaceFileListInput(value: unknown): string {
+  return optionalString(value, 'path');
+}
+
+export function validateWorkspaceFileTargetPathInput(value: unknown): string {
+  return optionalString(value, 'targetPath');
+}
+
+export function validateWorkspaceFileCreateFileInput(value: unknown): WorkspaceFileCreateFileInput {
+  const record = requireRecord(value, 'workspace file create input');
+  return {
+    kind: normalizeWorkspaceFileKind(record.kind),
+    targetPath: optionalString(record.targetPath, 'targetPath'),
+  };
+}
+
+export function validateWorkspaceFilePathInput(value: unknown): string {
+  return requireNonEmptyString(value, 'path');
+}
+
+export function validateWorkspaceFileRenameInput(value: unknown): WorkspaceFileRenameInput {
+  const record = requireRecord(value, 'workspace file rename input');
+  return {
+    path: requireNonEmptyString(record.path, 'path'),
+    newName: requireString(record.newName, 'newName'),
+  };
+}
+
+export function validateWorkspaceFileCopyMoveInput(value: unknown): WorkspaceFileCopyMoveInput {
+  const record = requireRecord(value, 'workspace file copy/move input');
+  return {
+    path: requireNonEmptyString(record.path, 'path'),
+    targetPath: optionalString(record.targetPath, 'targetPath'),
+  };
+}
+
+export function validateWorkspaceTrashIdInput(value: unknown): string {
+  const id = requireNonEmptyString(value, 'id');
+  if (!/^[0-9a-f]{24}$/.test(id)) {
+    throw new RuntimeValidationError('id must be a 24-character lowercase hexadecimal trash id.');
+  }
+  return id;
 }
 
 export function validateHostCreateInput(value: unknown): CreateHostInput {
@@ -416,6 +478,13 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function optionalString(value: unknown, label: string): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return requireString(value, label);
+}
+
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== 'boolean') {
     throw new RuntimeValidationError(`${label} must be a boolean.`);
@@ -438,6 +507,12 @@ function requireStringList(value: unknown, label: string): string[] {
 function sanitizeOptionalString(value: unknown, label: string): string {
   const text = requireString(value, label);
   return text.trim();
+}
+
+function normalizeWorkspaceFileKind(value: unknown): WorkspaceFileKindInput {
+  return WORKSPACE_FILE_KINDS.includes(value as WorkspaceFileKindInput)
+    ? value as WorkspaceFileKindInput
+    : 'note';
 }
 
 function requireRecordArray(value: unknown, label: string): Record<string, unknown>[] {

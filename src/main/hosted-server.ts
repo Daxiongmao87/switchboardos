@@ -24,6 +24,14 @@ import {
   validateTerminalStartInput,
   validateTerminalStopInput,
   validateTerminalWriteInput,
+  validateNoInput,
+  validateWorkspaceFileCopyMoveInput,
+  validateWorkspaceFileCreateFileInput,
+  validateWorkspaceFileListInput,
+  validateWorkspaceFilePathInput,
+  validateWorkspaceFileRenameInput,
+  validateWorkspaceFileTargetPathInput,
+  validateWorkspaceTrashIdInput,
 } from './runtime-validation';
 import { getHostRouteContract, runHostRouteContract } from './route-access-contracts';
 import type { SshService } from './ssh-service';
@@ -612,7 +620,7 @@ export class HostedServer {
     }
 
     if (resource === 'workspace-files') {
-      return this.routeWorkspaceFileApi(method, segments, body, url);
+      return this.routeWorkspaceFileApi(method, segments, body, url, session);
     }
 
     if (resource === 'command-history') {
@@ -740,80 +748,170 @@ export class HostedServer {
     throw new HttpError(404, `No hosted workspace route for ${method} /api/${segments.join('/')}.`);
   }
 
+  private requireRouteAccessContract(contractId: string): NonNullable<ReturnType<typeof getHostRouteContract>> {
+    const contract = getHostRouteContract(contractId);
+    if (!contract) {
+      throw new HttpError(500, `Missing route access contract: ${contractId}`);
+    }
+    return contract;
+  }
+
+  private runHostedWorkspaceFileRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+    });
+  }
+
   private routeWorkspaceFileApi(
     method: string,
     segments: string[],
     body: unknown,
     url: URL,
+    session: HostedSession | null,
   ): unknown {
     const [, action, subAction] = segments;
 
     if (!action && method === 'GET') {
-      return this.options.listWorkspaceFiles(url.searchParams.get('path') ?? '');
+      const path = validateWorkspaceFileListInput(url.searchParams.get('path'));
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:GET:/api/workspace-files',
+        session,
+        route: '/api/workspace-files',
+        action: 'GET /api/workspace-files',
+        entityId: path || null,
+        entityType: 'workspace_file',
+        input: path,
+        execute: () => this.options.listWorkspaceFiles(path),
+      });
     }
 
     if (action === 'folder' && method === 'POST') {
-      const targetRelativePath = optionalStringField(body, 'targetPath');
-      return this.options.createWorkspaceFolder(targetRelativePath);
+      const targetRelativePath = validateWorkspaceFileTargetPathInput(asRecord(body).targetPath);
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:POST:/api/workspace-files/folder',
+        session,
+        route: '/api/workspace-files/folder',
+        action: 'POST /api/workspace-files/folder',
+        entityId: targetRelativePath || null,
+        entityType: 'workspace_file',
+        input: targetRelativePath,
+        execute: () => this.options.createWorkspaceFolder(targetRelativePath),
+      });
     }
 
     if (action === 'file' && method === 'POST') {
-      const record = asRecord(body);
-      const requestedKind = record.kind;
-      const kind = requestedKind === 'applet' || requestedKind === 'scriptlet' || requestedKind === 'note'
-        ? requestedKind
-        : 'note';
-      const targetRelativePath = optionalStringField(record, 'targetPath');
-      return this.options.createWorkspaceFile(kind, targetRelativePath);
+      const input = validateWorkspaceFileCreateFileInput(asRecord(body));
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:POST:/api/workspace-files/file',
+        session,
+        route: '/api/workspace-files/file',
+        action: 'POST /api/workspace-files/file',
+        entityId: input.targetPath || null,
+        entityType: 'workspace_file',
+        input,
+        execute: () => this.options.createWorkspaceFile(input.kind, input.targetPath),
+      });
     }
 
     if (action === 'duplicate' && method === 'POST') {
-      const sourcePath = stringField(asRecord(body), 'path');
-      return this.options.duplicateWorkspaceFile(sourcePath);
+      const sourcePath = validateWorkspaceFilePathInput(asRecord(body).path);
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:POST:/api/workspace-files/duplicate',
+        session,
+        route: '/api/workspace-files/duplicate',
+        action: 'POST /api/workspace-files/duplicate',
+        entityId: sourcePath,
+        entityType: 'workspace_file',
+        input: sourcePath,
+        execute: () => this.options.duplicateWorkspaceFile(sourcePath),
+      });
     }
 
     if (action === 'copy' && method === 'POST') {
-      const record = asRecord(body);
-      const sourcePath = stringField(record, 'path');
-      const targetRelativePath = typeof record.targetPath === 'string'
-        ? record.targetPath
-        : '';
-      return this.options.copyWorkspaceFile(sourcePath, targetRelativePath);
+      const input = validateWorkspaceFileCopyMoveInput(asRecord(body));
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:POST:/api/workspace-files/copy',
+        session,
+        route: '/api/workspace-files/copy',
+        action: 'POST /api/workspace-files/copy',
+        entityId: input.path,
+        entityType: 'workspace_file',
+        input,
+        execute: () => this.options.copyWorkspaceFile(input.path, input.targetPath),
+      });
     }
 
     if (action === 'move' && method === 'POST') {
-      const record = asRecord(body);
-      const sourcePath = stringField(record, 'path');
-      const targetRelativePath = typeof record.targetPath === 'string'
-        ? record.targetPath
-        : '';
-      return this.options.moveWorkspaceFile(sourcePath, targetRelativePath);
+      const input = validateWorkspaceFileCopyMoveInput(asRecord(body));
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:POST:/api/workspace-files/move',
+        session,
+        route: '/api/workspace-files/move',
+        action: 'POST /api/workspace-files/move',
+        entityId: input.path,
+        entityType: 'workspace_file',
+        input,
+        execute: () => this.options.moveWorkspaceFile(input.path, input.targetPath),
+      });
     }
 
     if (action === 'trash') {
-      return this.routeWorkspaceTrashApi(method, subAction, body);
+      return this.routeWorkspaceTrashApi(method, subAction, body, session);
     }
 
     if (!action && method === 'PATCH') {
       const record = asRecord(body);
-      const renamePath = stringField(record, 'path');
-      const renamed = typeof record.newName === 'string'
-        ? record.newName
-        : typeof record.name === 'string'
-          ? record.name
-          : '';
-      if (!renamed) {
-        throw new HttpError(400, 'Missing string field "newName" or "name".');
-      }
-      return this.options.renameWorkspaceFile(renamePath, renamed);
+      const input = validateWorkspaceFileRenameInput({
+        path: record.path,
+        newName: record.newName ?? record.name,
+      });
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:PATCH:/api/workspace-files',
+        session,
+        route: '/api/workspace-files',
+        action: 'PATCH /api/workspace-files',
+        entityId: input.path,
+        entityType: 'workspace_file',
+        input,
+        execute: () => this.options.renameWorkspaceFile(input.path, input.newName),
+      });
     }
 
     if (!action && method === 'DELETE') {
-      const relativePath = url.searchParams.get('path');
-      if (!relativePath) {
-        throw new HttpError(400, 'Missing required query parameter "path".');
-      }
-      return this.options.deleteWorkspaceFilePermanent(relativePath);
+      const relativePath = validateWorkspaceFilePathInput(url.searchParams.get('path'));
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:DELETE:/api/workspace-files',
+        session,
+        route: '/api/workspace-files',
+        action: 'DELETE /api/workspace-files',
+        entityId: relativePath,
+        entityType: 'workspace_file',
+        input: relativePath,
+        execute: () => this.options.deleteWorkspaceFilePermanent(relativePath),
+      });
     }
 
     throw new HttpError(404, `No hosted workspace-files route for ${method} /api/${segments.join('/')}.`);
@@ -823,27 +921,74 @@ export class HostedServer {
     method: string,
     subAction: string | undefined,
     body: unknown,
+    session: HostedSession | null,
   ): unknown {
     if (subAction === 'restore' && method === 'POST') {
-      const id = stringField(asRecord(body), 'id');
-      return this.options.restoreWorkspaceTrashItem(id);
+      const id = validateWorkspaceTrashIdInput(asRecord(body).id);
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:POST:/api/workspace-files/trash/restore',
+        session,
+        route: '/api/workspace-files/trash/restore',
+        action: 'POST /api/workspace-files/trash/restore',
+        entityId: id,
+        entityType: 'workspace_trash',
+        input: id,
+        execute: () => this.options.restoreWorkspaceTrashItem(id),
+      });
     }
 
     if (subAction && method === 'DELETE') {
-      return this.options.deleteWorkspaceTrashItemPermanent(decodeURIComponent(subAction));
+      const id = validateWorkspaceTrashIdInput(decodeURIComponent(subAction));
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:DELETE:/api/workspace-files/trash/:id',
+        session,
+        route: `/api/workspace-files/trash/${id}`,
+        action: 'DELETE /api/workspace-files/trash/:id',
+        entityId: id,
+        entityType: 'workspace_trash',
+        input: id,
+        execute: () => this.options.deleteWorkspaceTrashItemPermanent(id),
+      });
     }
 
     if (!subAction && method === 'GET') {
-      return this.options.listWorkspaceTrash();
+      validateHostedNoRequestBody(body);
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:GET:/api/workspace-files/trash',
+        session,
+        route: '/api/workspace-files/trash',
+        action: 'GET /api/workspace-files/trash',
+        entityType: 'workspace_trash',
+        input: null,
+        execute: () => this.options.listWorkspaceTrash(),
+      });
     }
 
     if (!subAction && method === 'POST') {
-      const path = stringField(asRecord(body), 'path');
-      return this.options.moveWorkspaceFileToTrash(path);
+      const path = validateWorkspaceFilePathInput(asRecord(body).path);
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:POST:/api/workspace-files/trash',
+        session,
+        route: '/api/workspace-files/trash',
+        action: 'POST /api/workspace-files/trash',
+        entityId: path,
+        entityType: 'workspace_file',
+        input: path,
+        execute: () => this.options.moveWorkspaceFileToTrash(path),
+      });
     }
 
     if (!subAction && method === 'DELETE') {
-      return this.options.emptyWorkspaceTrash();
+      validateHostedNoRequestBody(body);
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:DELETE:/api/workspace-files/trash',
+        session,
+        route: '/api/workspace-files/trash',
+        action: 'DELETE /api/workspace-files/trash',
+        entityType: 'workspace_trash',
+        input: null,
+        execute: () => this.options.emptyWorkspaceTrash(),
+      });
     }
 
     throw new HttpError(404, `No hosted workspace trash route for ${method}.`);
@@ -1291,6 +1436,19 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function validateHostedNoRequestBody(value: unknown): void {
+  if (
+    typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && Object.keys(value as Record<string, unknown>).length === 0
+  ) {
+    validateNoInput(undefined);
+    return;
+  }
+  validateNoInput(value);
+}
+
 function stringField(value: unknown, field: string): string {
   const record = asRecord(value);
   const fieldValue = record[field];
@@ -1298,11 +1456,6 @@ function stringField(value: unknown, field: string): string {
     throw new HttpError(400, `Missing string field "${field}".`);
   }
   return fieldValue;
-}
-
-function optionalStringField(value: unknown, field: string): string {
-  const fieldValue = asRecord(value)[field];
-  return typeof fieldValue === 'string' ? fieldValue : '';
 }
 
 function bodyHostId(value: unknown): string | null {

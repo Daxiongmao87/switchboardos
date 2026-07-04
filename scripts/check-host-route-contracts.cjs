@@ -111,6 +111,71 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:workspace-file:list',
+    routeMarker: "'workspace-file:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:create-folder',
+    routeMarker: "'workspace-file:create-folder'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:create-file',
+    routeMarker: "'workspace-file:create-file'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:rename',
+    routeMarker: "'workspace-file:rename'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:duplicate',
+    routeMarker: "'workspace-file:duplicate'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:copy',
+    routeMarker: "'workspace-file:copy'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:move',
+    routeMarker: "'workspace-file:move'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:delete-permanent',
+    routeMarker: "'workspace-file:delete-permanent'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:list-trash',
+    routeMarker: "'workspace-file:list-trash'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:move-to-trash',
+    routeMarker: "'workspace-file:move-to-trash'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:restore-trash',
+    routeMarker: "'workspace-file:restore-trash'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:delete-trash-permanent',
+    routeMarker: "'workspace-file:delete-trash-permanent'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-file:empty-trash',
+    routeMarker: "'workspace-file:empty-trash'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     routeMarker: "'/api/hosts'",
     contextFile: 'src/main/hosted-server.ts',
@@ -129,6 +194,58 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:POST:/api/host-operations/run',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/workspace-files',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/folder',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/file',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/workspace-files',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/duplicate',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/copy',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/move',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace-files',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/workspace-files/trash',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/trash',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/trash/restore',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace-files/trash/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace-files/trash',
     contextFile: 'src/main/hosted-server.ts',
   },
 ];
@@ -151,6 +268,8 @@ const REQUIRED_HOST_CAPABILITIES = [
   'host-tag:update',
   'host-tag:delete',
   'host-operation:run',
+  'workspace-file:read',
+  'workspace-file:write',
 ];
 
 const failures = [];
@@ -409,8 +528,10 @@ function validateIpcHostHandlers() {
         const channelArg = node.arguments[0];
         const handler = node.arguments[1];
         if (ts.isStringLiteral(channelArg)) {
+          const handlerText = handler.getText();
           handlersByChannel.set(channelArg.text, {
-            hasContractCall: handler.getText().includes('runHostRouteContract({'),
+            hasContractCall: handlerText.includes('runHostRouteContract({')
+              || handlerText.includes('runWorkspaceFileIpcRoute('),
           });
         }
       }
@@ -438,11 +559,28 @@ function validateIpcHostHandlers() {
 
 function validateHostedDispatches() {
   for (const contract of REQUIRED_HOST_CONTRACTS.filter((entry) => entry.contextFile === 'src/main/hosted-server.ts')) {
-    if (!hostedText.includes(`getHostRouteContract('${contract.id}')`) && !hostedText.includes(`getHostRouteContract("${contract.id}")`)) {
+    const hasDirectContractLookup = hostedText.includes(`getHostRouteContract('${contract.id}')`)
+      || hostedText.includes(`getHostRouteContract("${contract.id}")`);
+    const hasWorkspaceContractHelper = hostedText.includes(`contractId: '${contract.id}'`)
+      || hostedText.includes(`contractId: "${contract.id}"`);
+    if (!hasDirectContractLookup && !hasWorkspaceContractHelper) {
       fail(`Hosted route contract ${contract.id} not wired in hosted-server.ts.`);
     }
-    if (!hostedText.includes('runHostRouteContract({')) {
-      fail('Hosted route handlers are not using runHostRouteContract.');
+  }
+
+  if (!hostedText.includes('runHostRouteContract({')) {
+    fail('Hosted route handlers are not using runHostRouteContract.');
+  }
+
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/workspace-files'))) {
+    const workspaceHelperIndex = hostedText.indexOf('runHostedWorkspaceFileRoute');
+    if (workspaceHelperIndex === -1) {
+      fail('Hosted workspace file routes are not using runHostedWorkspaceFileRoute.');
+    } else {
+      const helperBody = hostedText.slice(workspaceHelperIndex, workspaceHelperIndex + 1600);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted workspace file helper is not backed by runHostRouteContract.');
+      }
     }
   }
 

@@ -745,6 +745,461 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:workspace-file:list',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:list',
+    },
+    requestValidator: 'validateWorkspaceFileListInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_file.listed',
+      entityType: 'workspace_file',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace files listed.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/workspace-files',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:workspace-file:create-folder',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:create-folder',
+    },
+    requestValidator: 'validateWorkspaceFileTargetPathInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.created',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace folder created.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace-files/folder',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:create-file',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:create-file',
+    },
+    requestValidator: 'validateWorkspaceFileCreateFileInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.created',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file created.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace-files/file',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:rename',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:rename',
+    },
+    requestValidator: 'validateWorkspaceFileRenameInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.renamed',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file renamed.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:PATCH:/api/workspace-files',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:duplicate',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:duplicate',
+    },
+    requestValidator: 'validateWorkspaceFilePathInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.duplicated',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file duplicated.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace-files/duplicate',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:copy',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:copy',
+    },
+    requestValidator: 'validateWorkspaceFileCopyMoveInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.copied',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file copied.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace-files/copy',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:move',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:move',
+    },
+    requestValidator: 'validateWorkspaceFileCopyMoveInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.moved',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file moved.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace-files/move',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:delete-permanent',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:delete-permanent',
+    },
+    requestValidator: 'validateWorkspaceFilePathInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.deleted',
+      entityType: 'workspace_file',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace file permanently deleted.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:DELETE:/api/workspace-files',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:list-trash',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:list-trash',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_trash.listed',
+      entityType: 'workspace_trash',
+      entityIdSource: 'none',
+      message: 'Workspace trash listed.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/workspace-files/trash',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:workspace-file:move-to-trash',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:move-to-trash',
+    },
+    requestValidator: 'validateWorkspaceFilePathInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.trashed',
+      entityType: 'workspace_trash',
+      entityIdSource: 'result-id',
+      message: 'Workspace file moved to trash.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace-files/trash',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:restore-trash',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:restore-trash',
+    },
+    requestValidator: 'validateWorkspaceTrashIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_trash.restored',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace trash item restored.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace-files/trash/restore',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:delete-trash-permanent',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:delete-trash-permanent',
+    },
+    requestValidator: 'validateWorkspaceTrashIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_trash.deleted',
+      entityType: 'workspace_trash',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace trash item permanently deleted.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:DELETE:/api/workspace-files/trash/:id',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace-file:empty-trash',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace-file:empty-trash',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_trash.emptied',
+      entityType: 'workspace_trash',
+      entityIdSource: 'none',
+      message: 'Workspace trash emptied.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:DELETE:/api/workspace-files/trash',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     transport: 'hosted',
     route: {
@@ -921,6 +1376,474 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     parity: {
       kind: 'paired',
       peerRouteId: 'ipc:host-operation:run',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/workspace-files',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/workspace-files',
+    },
+    requestValidator: 'validateWorkspaceFileListInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_file.listed',
+      entityType: 'workspace_file',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace files listed.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:list',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/folder',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace-files/folder',
+    },
+    requestValidator: 'validateWorkspaceFileTargetPathInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.created',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace folder created.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:create-folder',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/file',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace-files/file',
+    },
+    requestValidator: 'validateWorkspaceFileCreateFileInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.created',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file created.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:create-file',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:PATCH:/api/workspace-files',
+    transport: 'hosted',
+    route: {
+      method: 'PATCH',
+      path: '/api/workspace-files',
+    },
+    requestValidator: 'validateWorkspaceFileRenameInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.renamed',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file renamed.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:rename',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/duplicate',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace-files/duplicate',
+    },
+    requestValidator: 'validateWorkspaceFilePathInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.duplicated',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file duplicated.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:duplicate',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/copy',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace-files/copy',
+    },
+    requestValidator: 'validateWorkspaceFileCopyMoveInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.copied',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file copied.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:copy',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/move',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace-files/move',
+    },
+    requestValidator: 'validateWorkspaceFileCopyMoveInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.moved',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace file moved.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:move',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace-files',
+    transport: 'hosted',
+    route: {
+      method: 'DELETE',
+      path: '/api/workspace-files',
+    },
+    requestValidator: 'validateWorkspaceFilePathInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.deleted',
+      entityType: 'workspace_file',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace file permanently deleted.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:delete-permanent',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/workspace-files/trash',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/workspace-files/trash',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_trash.listed',
+      entityType: 'workspace_trash',
+      entityIdSource: 'none',
+      message: 'Workspace trash listed.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:list-trash',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/trash',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace-files/trash',
+    },
+    requestValidator: 'validateWorkspaceFilePathInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_file.trashed',
+      entityType: 'workspace_trash',
+      entityIdSource: 'result-id',
+      message: 'Workspace file moved to trash.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:move-to-trash',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/workspace-files/trash/restore',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace-files/trash/restore',
+    },
+    requestValidator: 'validateWorkspaceTrashIdInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_trash.restored',
+      entityType: 'workspace_file',
+      entityIdSource: 'result-id',
+      message: 'Workspace trash item restored.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:restore-trash',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace-files/trash/:id',
+    transport: 'hosted',
+    route: {
+      method: 'DELETE',
+      path: '/api/workspace-files/trash/:id',
+    },
+    requestValidator: 'validateWorkspaceTrashIdInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_trash.deleted',
+      entityType: 'workspace_trash',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace trash item permanently deleted.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:delete-trash-permanent',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace-files/trash',
+    transport: 'hosted',
+    route: {
+      method: 'DELETE',
+      path: '/api/workspace-files/trash',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_trash.emptied',
+      entityType: 'workspace_trash',
+      entityIdSource: 'none',
+      message: 'Workspace trash emptied.',
+      metadata: {
+        actionClass: 'workspace-file-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace-file:empty-trash',
     },
     mutatesState: true,
   },

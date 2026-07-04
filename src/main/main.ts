@@ -60,6 +60,13 @@ import {
   validateTerminalStartInput,
   validateTerminalStopInput,
   validateTerminalWriteInput,
+  validateWorkspaceFileCopyMoveInput,
+  validateWorkspaceFileCreateFileInput,
+  validateWorkspaceFileListInput,
+  validateWorkspaceFilePathInput,
+  validateWorkspaceFileRenameInput,
+  validateWorkspaceFileTargetPathInput,
+  validateWorkspaceTrashIdInput,
 } from './runtime-validation';
 import type {
   BootstrapGenerateInput,
@@ -857,6 +864,38 @@ function emptyWorkspaceTrash(): boolean {
   return true;
 }
 
+function requireRouteAccessContract(contractId: string): NonNullable<ReturnType<typeof getHostRouteContract>> {
+  const contract = getHostRouteContract(contractId);
+  if (!contract) {
+    throw new Error(`Missing route access contract: ${contractId}`);
+  }
+  return contract;
+}
+
+function runWorkspaceFileIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+  });
+}
+
 /**
  * Create the main application window.
  */
@@ -1539,31 +1578,77 @@ ipcMain.handle(
 ipcMain.handle(
   'workspace-file:list',
   async (_event, relativePath = ''): Promise<WorkspaceFileEntry[]> => {
-    return listWorkspaceFiles(typeof relativePath === 'string' ? relativePath : '');
+    const validatedPath = validateWorkspaceFileListInput(relativePath);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:list',
+      {
+        route: 'workspace-file:list',
+        action: 'workspace-file:list',
+        entityId: validatedPath || null,
+        entityType: 'workspace_file',
+      },
+      validatedPath,
+      () => listWorkspaceFiles(validatedPath),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:create-folder',
   async (_event, targetRelativePath = ''): Promise<WorkspaceFileEntry> => {
-    return createWorkspaceFolder(typeof targetRelativePath === 'string' ? targetRelativePath : '');
+    const validatedTargetPath = validateWorkspaceFileTargetPathInput(targetRelativePath);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:create-folder',
+      {
+        route: 'workspace-file:create-folder',
+        action: 'workspace-file:create-folder',
+        entityId: validatedTargetPath || null,
+        entityType: 'workspace_file',
+      },
+      validatedTargetPath,
+      () => createWorkspaceFolder(validatedTargetPath),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:create-file',
   async (_event, kind: WorkspaceFileEntry['kind'] = 'note', targetRelativePath = ''): Promise<WorkspaceFileEntry> => {
-    const safeKind = kind === 'applet' || kind === 'scriptlet' || kind === 'note' ? kind : 'note';
-    return createWorkspaceFile(safeKind, typeof targetRelativePath === 'string' ? targetRelativePath : '');
+    const validatedInput = validateWorkspaceFileCreateFileInput({
+      kind,
+      targetPath: targetRelativePath,
+    });
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:create-file',
+      {
+        route: 'workspace-file:create-file',
+        action: 'workspace-file:create-file',
+        entityId: validatedInput.targetPath || null,
+        entityType: 'workspace_file',
+      },
+      validatedInput,
+      () => createWorkspaceFile(validatedInput.kind, validatedInput.targetPath),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:rename',
   async (_event, relativePath: string, newName: string): Promise<WorkspaceFileEntry> => {
-    return renameWorkspaceFile(
-      typeof relativePath === 'string' ? relativePath : '',
-      typeof newName === 'string' ? newName : '',
+    const validatedInput = validateWorkspaceFileRenameInput({
+      path: relativePath,
+      newName,
+    });
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:rename',
+      {
+        route: 'workspace-file:rename',
+        action: 'workspace-file:rename',
+        entityId: validatedInput.path,
+        entityType: 'workspace_file',
+      },
+      validatedInput,
+      () => renameWorkspaceFile(validatedInput.path, validatedInput.newName),
     );
   }
 );
@@ -1571,16 +1656,38 @@ ipcMain.handle(
 ipcMain.handle(
   'workspace-file:duplicate',
   async (_event, relativePath: string): Promise<WorkspaceFileEntry> => {
-    return duplicateWorkspaceFile(typeof relativePath === 'string' ? relativePath : '');
+    const validatedPath = validateWorkspaceFilePathInput(relativePath);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:duplicate',
+      {
+        route: 'workspace-file:duplicate',
+        action: 'workspace-file:duplicate',
+        entityId: validatedPath,
+        entityType: 'workspace_file',
+      },
+      validatedPath,
+      () => duplicateWorkspaceFile(validatedPath),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:copy',
   async (_event, relativePath: string, targetRelativePath?: string): Promise<WorkspaceFileEntry> => {
-    return copyWorkspaceFile(
-      typeof relativePath === 'string' ? relativePath : '',
-      typeof targetRelativePath === 'string' ? targetRelativePath : '',
+    const validatedInput = validateWorkspaceFileCopyMoveInput({
+      path: relativePath,
+      targetPath: targetRelativePath,
+    });
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:copy',
+      {
+        route: 'workspace-file:copy',
+        action: 'workspace-file:copy',
+        entityId: validatedInput.path,
+        entityType: 'workspace_file',
+      },
+      validatedInput,
+      () => copyWorkspaceFile(validatedInput.path, validatedInput.targetPath),
     );
   }
 );
@@ -1588,9 +1695,20 @@ ipcMain.handle(
 ipcMain.handle(
   'workspace-file:move',
   async (_event, relativePath: string, targetRelativePath?: string): Promise<WorkspaceFileEntry> => {
-    return moveWorkspaceFile(
-      typeof relativePath === 'string' ? relativePath : '',
-      typeof targetRelativePath === 'string' ? targetRelativePath : '',
+    const validatedInput = validateWorkspaceFileCopyMoveInput({
+      path: relativePath,
+      targetPath: targetRelativePath,
+    });
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:move',
+      {
+        route: 'workspace-file:move',
+        action: 'workspace-file:move',
+        entityId: validatedInput.path,
+        entityType: 'workspace_file',
+      },
+      validatedInput,
+      () => moveWorkspaceFile(validatedInput.path, validatedInput.targetPath),
     );
   }
 );
@@ -1598,42 +1716,106 @@ ipcMain.handle(
 ipcMain.handle(
   'workspace-file:delete-permanent',
   async (_event, relativePath: string): Promise<boolean> => {
-    return deleteWorkspaceFilePermanent(typeof relativePath === 'string' ? relativePath : '');
+    const validatedPath = validateWorkspaceFilePathInput(relativePath);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:delete-permanent',
+      {
+        route: 'workspace-file:delete-permanent',
+        action: 'workspace-file:delete-permanent',
+        entityId: validatedPath,
+        entityType: 'workspace_file',
+      },
+      validatedPath,
+      () => deleteWorkspaceFilePermanent(validatedPath),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:list-trash',
-  async (): Promise<WorkspaceTrashEntry[]> => {
-    return listWorkspaceTrash();
+  async (_event, input?: unknown): Promise<WorkspaceTrashEntry[]> => {
+    validateNoInput(input);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:list-trash',
+      {
+        route: 'workspace-file:list-trash',
+        action: 'workspace-file:list-trash',
+        entityType: 'workspace_trash',
+      },
+      null,
+      () => listWorkspaceTrash(),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:move-to-trash',
   async (_event, relativePath: string): Promise<WorkspaceTrashEntry> => {
-    return moveWorkspaceFileToTrash(typeof relativePath === 'string' ? relativePath : '');
+    const validatedPath = validateWorkspaceFilePathInput(relativePath);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:move-to-trash',
+      {
+        route: 'workspace-file:move-to-trash',
+        action: 'workspace-file:move-to-trash',
+        entityId: validatedPath,
+        entityType: 'workspace_file',
+      },
+      validatedPath,
+      () => moveWorkspaceFileToTrash(validatedPath),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:restore-trash',
   async (_event, id: string): Promise<WorkspaceFileEntry> => {
-    return restoreWorkspaceTrashItem(typeof id === 'string' ? id : '');
+    const validatedId = validateWorkspaceTrashIdInput(id);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:restore-trash',
+      {
+        route: 'workspace-file:restore-trash',
+        action: 'workspace-file:restore-trash',
+        entityId: validatedId,
+        entityType: 'workspace_trash',
+      },
+      validatedId,
+      () => restoreWorkspaceTrashItem(validatedId),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:delete-trash-permanent',
   async (_event, id: string): Promise<boolean> => {
-    return deleteWorkspaceTrashItemPermanent(typeof id === 'string' ? id : '');
+    const validatedId = validateWorkspaceTrashIdInput(id);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:delete-trash-permanent',
+      {
+        route: 'workspace-file:delete-trash-permanent',
+        action: 'workspace-file:delete-trash-permanent',
+        entityId: validatedId,
+        entityType: 'workspace_trash',
+      },
+      validatedId,
+      () => deleteWorkspaceTrashItemPermanent(validatedId),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace-file:empty-trash',
-  async (): Promise<boolean> => {
-    return emptyWorkspaceTrash();
+  async (_event, input?: unknown): Promise<boolean> => {
+    validateNoInput(input);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-file:empty-trash',
+      {
+        route: 'workspace-file:empty-trash',
+        action: 'workspace-file:empty-trash',
+        entityType: 'workspace_trash',
+      },
+      null,
+      () => emptyWorkspaceTrash(),
+    );
   }
 );
 
