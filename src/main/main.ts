@@ -93,6 +93,7 @@ import type {
   MvpSettingsUpdate,
   OperatorProposeInput,
   SshExecInput,
+  SshExecResult,
   SshFileListInput,
   SshFileStatInput,
   SshFileTransferInput,
@@ -1001,6 +1002,44 @@ function runAuditIpcRoute<TResult>(
     input,
     execute,
   });
+}
+
+function runSshIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    hostId?: string | null;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => Promise<TResult> | TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
+function sshExecRouteSuccessMetadata(result: SshExecResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    secretsLogged: false,
+  };
 }
 
 /**
@@ -2438,12 +2477,18 @@ ipcMain.handle('host-operation:run', async (_event, input: HostOperationInput) =
 // Structured SSH command execution
 ipcMain.handle('ssh:exec', async (_event, input: SshExecInput) => {
   const validatedInput = validateSshExecInput(input);
-  policyService.assertAllowed('ssh:exec', {
-    caller: 'ipc',
-    action: 'ssh:exec',
-    hostId: validatedInput.hostId,
-  });
-  return sshService.exec(validatedInput);
+  return runSshIpcRoute(
+    'ipc:ssh:exec',
+    {
+      route: 'ssh:exec',
+      action: 'ssh:exec',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => sshService.exec(validatedInput),
+    sshExecRouteSuccessMetadata,
+  );
 });
 
 // Bootstrap generator

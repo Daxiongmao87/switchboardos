@@ -111,6 +111,11 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:ssh:exec',
+    routeMarker: "'ssh:exec'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:list',
     routeMarker: "'workspace-file:list'",
     contextFile: 'src/main/main.ts',
@@ -290,6 +295,10 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:POST:/api/ssh/exec',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/workspace-files',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -393,6 +402,9 @@ const REQUIRED_HOST_CAPABILITIES = [
   'host-tag:update',
   'host-tag:delete',
   'host-operation:run',
+  'ssh:exec',
+  'ssh:file:read',
+  'ssh:file:write',
   'workspace-file:read',
   'workspace-file:write',
   'workspace-profile:read',
@@ -671,7 +683,8 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runWorkspaceProfileIpcRoute(')
               || handlerText.includes('runCredentialRefIpcRoute(')
               || handlerText.includes('runSecretIpcRoute(')
-              || handlerText.includes('runAuditIpcRoute('),
+              || handlerText.includes('runAuditIpcRoute(')
+              || handlerText.includes('runSshIpcRoute('),
           });
         }
       }
@@ -748,12 +761,36 @@ function validateHostedDispatches() {
     }
   }
 
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/ssh/'))) {
+    const sshHelperIndex = hostedText.indexOf('private runHostedSshRoute');
+    if (sshHelperIndex === -1) {
+      fail('Hosted SSH routes are not using runHostedSshRoute.');
+    } else {
+      const helperBody = hostedText.slice(sshHelperIndex, sshHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted SSH helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
   if (hostedText.includes("requireHostedCapability(request, session, 'host-operation:run'")) {
     fail('Hosted route still uses requireHostedCapability for host-operation:run instead of host route contract enforcement.');
   }
 
   if (hostedText.includes('this.options.hostOperations.run(validateHostOperationInput(body))')) {
     fail('Direct hosted host-operation fallback detected in hosted-server.ts. All host operation runs must execute through runHostRouteContract.');
+  }
+
+  if (hostedText.includes("requireHostedCapability(request, session, 'ssh:exec'")) {
+    fail('Hosted route still uses requireHostedCapability for ssh:exec instead of SSH route contract enforcement.');
+  }
+
+  if (hostedText.includes('this.options.sshService.exec(validateSshExecInput(body))')) {
+    fail('Direct hosted SSH exec fallback detected in hosted-server.ts. SSH exec must execute through runHostRouteContract.');
+  }
+
+  if (mainText.includes("policyService.assertAllowed('ssh:exec'")) {
+    fail('IPC ssh:exec still uses direct policyService.assertAllowed instead of SSH route contract enforcement.');
   }
 }
 

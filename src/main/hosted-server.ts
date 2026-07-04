@@ -47,6 +47,7 @@ import type {
   CreateAppManifestInput,
   CreateAppPermissionInput,
   CreateCommandHistoryInput,
+  SshExecResult,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
@@ -699,8 +700,7 @@ export class HostedServer {
     }
 
     if (resource === 'ssh') {
-      this.requireHostedCapability(request, session, 'ssh:exec', url.pathname, bodyHostId(body));
-      return this.routeSshApi(method, actionOrId, body);
+      return this.routeSshApi(method, actionOrId, body, session);
     }
 
     if (resource === 'bootstrap') {
@@ -891,6 +891,39 @@ export class HostedServer {
       },
       input: params.input,
       execute: params.execute,
+    });
+  }
+
+  private runHostedSshRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      hostId?: string | null;
+      entityId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => Promise<TResult> | TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        hostId: params.hostId ?? null,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
     });
   }
 
@@ -1237,9 +1270,25 @@ export class HostedServer {
     throw new HttpError(404, `No hosted agent route for ${method}.`);
   }
 
-  private routeSshApi(method: string, action: string | undefined, body: unknown): Promise<unknown> {
+  private routeSshApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): Promise<unknown> {
     if (action === 'exec' && method === 'POST') {
-      return this.options.sshService.exec(validateSshExecInput(body));
+      const validatedInput = validateSshExecInput(body);
+      return this.runHostedSshRoute({
+        contractId: 'hosted:POST:/api/ssh/exec',
+        session,
+        route: '/api/ssh/exec',
+        action: 'POST /api/ssh/exec',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.sshService.exec(validatedInput),
+        successAuditMetadata: sshExecRouteSuccessMetadata,
+      });
     }
 
     throw new HttpError(404, `No hosted SSH route for ${method}.`);
@@ -1614,6 +1663,17 @@ function validateHostedNoRequestBody(value: unknown): void {
     return;
   }
   validateNoInput(value);
+}
+
+function sshExecRouteSuccessMetadata(result: SshExecResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    secretsLogged: false,
+  };
 }
 
 function bodyHostId(value: unknown): string | null {

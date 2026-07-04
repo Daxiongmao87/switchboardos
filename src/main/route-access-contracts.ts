@@ -748,6 +748,45 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:ssh:exec',
+    transport: 'ipc',
+    route: {
+      channel: 'ssh:exec',
+    },
+    requestValidator: 'validateSshExecInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'ssh:exec',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'ssh.exec_route_completed',
+      entityType: 'host',
+      entityIdSource: 'input-host-id',
+      message: 'SSH exec route completed.',
+      metadata: {
+        actionClass: 'ssh-route',
+        mutatingOperation: true,
+        remoteCommandExecution: true,
+        commandTextLogged: false,
+        commandOutputLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/ssh/exec',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'ipc:workspace-file:list',
     transport: 'ipc',
     route: {
@@ -2348,6 +2387,46 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     parity: {
       kind: 'paired',
       peerRouteId: 'ipc:host-operation:run',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/ssh/exec',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/ssh/exec',
+    },
+    requestValidator: 'validateSshExecInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'ssh:exec',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'ssh.exec_route_completed',
+      entityType: 'host',
+      entityIdSource: 'input-host-id',
+      message: 'SSH exec route completed.',
+      metadata: {
+        actionClass: 'ssh-route',
+        mutatingOperation: true,
+        remoteCommandExecution: true,
+        commandTextLogged: false,
+        commandOutputLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:ssh:exec',
     },
     mutatesState: true,
   },
