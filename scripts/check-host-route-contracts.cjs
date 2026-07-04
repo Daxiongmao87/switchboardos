@@ -266,6 +266,21 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:command-history:list',
+    routeMarker: "'command-history:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:command-history:create',
+    routeMarker: "'command-history:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:command-history:delete',
+    routeMarker: "'command-history:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:list',
     routeMarker: "'workspace-file:list'",
     contextFile: 'src/main/main.ts',
@@ -533,6 +548,18 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/command-history',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/command-history',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/command-history/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/workspace-files',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -664,6 +691,9 @@ const REQUIRED_HOST_CAPABILITIES = [
   'bootstrap:run:update',
   'bootstrap:run:delete',
   'bootstrap:generate',
+  'command-history:read',
+  'command-history:create',
+  'command-history:delete',
   'workspace-file:read',
   'workspace-file:write',
   'workspace-profile:read',
@@ -948,7 +978,8 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runAgentEndpointIpcRoute(')
               || handlerText.includes('runAgentOperatorIpcRoute(')
               || handlerText.includes('runAppRouteIpc(')
-              || handlerText.includes('runBootstrapRouteIpc('),
+              || handlerText.includes('runBootstrapRouteIpc(')
+              || handlerText.includes('runCommandHistoryIpcRoute('),
           });
         }
       }
@@ -1097,6 +1128,18 @@ function validateHostedDispatches() {
     }
   }
 
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/command-history'))) {
+    const commandHistoryHelperIndex = hostedText.indexOf('private runHostedCommandHistoryRoute');
+    if (commandHistoryHelperIndex === -1) {
+      fail('Hosted command-history routes are not using runHostedCommandHistoryRoute.');
+    } else {
+      const helperBody = hostedText.slice(commandHistoryHelperIndex, commandHistoryHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted command-history helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
   if (hostedText.includes("requireHostedCapability(request, session, 'host-operation:run'")) {
     fail('Hosted route still uses requireHostedCapability for host-operation:run instead of host route contract enforcement.');
   }
@@ -1207,6 +1250,18 @@ function validateHostedDispatches() {
     || mainText.includes("policyService.assertAllowed('bootstrap:generate'")
     || mainText.includes("mvpStore.logAuditEvent({\n      type: 'bootstrap.generated'")) {
     fail('Direct IPC bootstrap fallback detected in main.ts.');
+  }
+
+  if (mainText.includes("ipcMain.handle('command-history:list', async (_event, limit?: number) => mvpStore.listCommandHistory(limit))")
+    || mainText.includes("ipcMain.handle('command-history:create', async (_event, input: CreateCommandHistoryInput) => mvpStore.createCommandHistoryEntry(input))")
+    || mainText.includes("ipcMain.handle('command-history:delete', async (_event, entryId: string) => mvpStore.deleteCommandHistoryEntry(entryId))")) {
+    fail('Direct IPC command-history fallback detected in main.ts.');
+  }
+
+  if (hostedText.includes('return this.options.store.listCommandHistory();')
+    || hostedText.includes('return this.options.store.createCommandHistoryEntry(asRecord(body) as CreateCommandHistoryInput);')
+    || hostedText.includes('return this.options.store.deleteCommandHistoryEntry(decodeURIComponent(action));')) {
+    fail('Direct hosted command-history fallback detected in hosted-server.ts.');
   }
 }
 

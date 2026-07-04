@@ -20,6 +20,8 @@ import {
   validateAppPermissionListInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
+  validateCommandHistoryCreateInput,
+  validateCommandHistoryEntryIdInput,
   validateHostCreateInput,
   validateHostIdInput,
   validateHostUpdateInput,
@@ -56,7 +58,7 @@ import type {
   AppPermission,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
-  CreateCommandHistoryInput,
+  CommandHistoryEntry,
   OperatorProposeResult,
   SshExecResult,
   TerminalResizeResult,
@@ -674,7 +676,7 @@ export class HostedServer {
     }
 
     if (resource === 'command-history') {
-      return this.routeCommandHistoryApi(method, actionOrId, body);
+      return this.routeCommandHistoryApi(method, actionOrId, body, session);
     }
 
     if (resource === 'app-manifests') {
@@ -1058,6 +1060,56 @@ export class HostedServer {
     });
   }
 
+  private runHostedCommandHistoryRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private commandHistoryRouteSuccessMetadata(result: CommandHistoryEntry | boolean): Record<string, unknown> {
+    if (typeof result === 'boolean') {
+      return {
+        deleted: result,
+        commandLogged: false,
+        commandOutputLogged: false,
+      };
+    }
+
+    return {
+      hasHostId: Boolean(result.hostId),
+      hasSessionId: Boolean(result.sessionId),
+      hasExitCode: result.exitCode !== null,
+      hasDurationMs: result.durationMs !== null,
+      commandLogged: false,
+      commandOutputLogged: false,
+    };
+  }
+
   private runHostedAgentOperatorRoute<TResult>(
     params: {
       contractId: string;
@@ -1356,15 +1408,50 @@ export class HostedServer {
     throw new HttpError(404, `No hosted workspace trash route for ${method}.`);
   }
 
-  private routeCommandHistoryApi(method: string, action: string | undefined, body: unknown): unknown {
+  private routeCommandHistoryApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
     if (!action && method === 'GET') {
-      return this.options.store.listCommandHistory();
+      validateHostedNoRequestBody(body);
+      return this.runHostedCommandHistoryRoute({
+        contractId: 'hosted:GET:/api/command-history',
+        session,
+        route: '/api/command-history',
+        action: 'GET /api/command-history',
+        entityType: 'command_history',
+        input: null,
+        execute: () => this.options.store.listCommandHistory(),
+      });
     }
     if (!action && method === 'POST') {
-      return this.options.store.createCommandHistoryEntry(asRecord(body) as CreateCommandHistoryInput);
+      const input = validateCommandHistoryCreateInput(asRecord(body));
+      return this.runHostedCommandHistoryRoute({
+        contractId: 'hosted:POST:/api/command-history',
+        session,
+        route: '/api/command-history',
+        action: 'POST /api/command-history',
+        entityType: 'command_history',
+        input,
+        execute: () => this.options.store.createCommandHistoryEntry(input),
+        successAuditMetadata: (result) => this.commandHistoryRouteSuccessMetadata(result),
+      });
     }
     if (action && method === 'DELETE') {
-      return this.options.store.deleteCommandHistoryEntry(decodeURIComponent(action));
+      const entryId = validateCommandHistoryEntryIdInput(decodeURIComponent(action));
+      return this.runHostedCommandHistoryRoute({
+        contractId: 'hosted:DELETE:/api/command-history/:id',
+        session,
+        route: '/api/command-history/:id',
+        action: 'DELETE /api/command-history/:id',
+        entityId: entryId,
+        entityType: 'command_history',
+        input: entryId,
+        execute: () => this.options.store.deleteCommandHistoryEntry(entryId),
+        successAuditMetadata: (result) => this.commandHistoryRouteSuccessMetadata(result),
+      });
     }
 
     throw new HttpError(404, `No hosted command history route for ${method}.`);

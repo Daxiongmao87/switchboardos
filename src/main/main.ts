@@ -50,6 +50,9 @@ import {
   validateBootstrapRunCreateInput,
   validateBootstrapRunIdInput,
   validateBootstrapRunUpdateInput,
+  validateCommandHistoryCreateInput,
+  validateCommandHistoryEntryIdInput,
+  validateCommandHistoryListLimitInput,
   validateCredentialRefCreateInput,
   validateCredentialRefIdInput,
   validateCredentialRefUpdateInput,
@@ -98,6 +101,7 @@ import type {
   BootstrapGenerateResult,
   BootstrapPresetRecord,
   BootstrapRun,
+  CommandHistoryEntry,
   CreateAgentEndpointInput,
   CreateAppManifestInput,
   CreateAppPermissionInput,
@@ -1187,6 +1191,52 @@ function runBootstrapRouteIpc<TResult>(
     execute,
     successAuditMetadata,
   });
+}
+
+function runCommandHistoryIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    hostId?: string | null;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
+function commandHistoryRouteSuccessMetadata(result: CommandHistoryEntry | boolean): Record<string, unknown> {
+  if (typeof result === 'boolean') {
+    return {
+      deleted: result,
+      commandLogged: false,
+      commandOutputLogged: false,
+    };
+  }
+
+  return {
+    hasHostId: Boolean(result.hostId),
+    hasSessionId: Boolean(result.sessionId),
+    hasExitCode: result.exitCode !== null,
+    hasDurationMs: result.durationMs !== null,
+    commandLogged: false,
+    commandOutputLogged: false,
+  };
 }
 
 function runAgentOperatorIpcRoute<TResult>(
@@ -3043,9 +3093,49 @@ ipcMain.handle('bootstrap-run:delete', async (_event, runId: string) => {
 });
 
 // Command History
-ipcMain.handle('command-history:list', async (_event, limit?: number) => mvpStore.listCommandHistory(limit));
-ipcMain.handle('command-history:create', async (_event, input: CreateCommandHistoryInput) => mvpStore.createCommandHistoryEntry(input));
-ipcMain.handle('command-history:delete', async (_event, entryId: string) => mvpStore.deleteCommandHistoryEntry(entryId));
+ipcMain.handle('command-history:list', async (_event, limit?: number) => {
+  const validatedLimit = validateCommandHistoryListLimitInput(limit);
+  return runCommandHistoryIpcRoute(
+    'ipc:command-history:list',
+    {
+      route: 'command-history:list',
+      action: 'command-history:list',
+      entityType: 'command_history',
+    },
+    validatedLimit ?? null,
+    () => mvpStore.listCommandHistory(validatedLimit),
+  );
+});
+ipcMain.handle('command-history:create', async (_event, input: CreateCommandHistoryInput) => {
+  const validatedInput = validateCommandHistoryCreateInput(input);
+  return runCommandHistoryIpcRoute(
+    'ipc:command-history:create',
+    {
+      route: 'command-history:create',
+      action: 'command-history:create',
+      hostId: validatedInput.hostId ?? null,
+      entityType: 'command_history',
+    },
+    validatedInput,
+    () => mvpStore.createCommandHistoryEntry(validatedInput),
+    commandHistoryRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('command-history:delete', async (_event, entryId: string) => {
+  const validatedEntryId = validateCommandHistoryEntryIdInput(entryId);
+  return runCommandHistoryIpcRoute(
+    'ipc:command-history:delete',
+    {
+      route: 'command-history:delete',
+      action: 'command-history:delete',
+      entityId: validatedEntryId,
+      entityType: 'command_history',
+    },
+    validatedEntryId,
+    () => mvpStore.deleteCommandHistoryEntry(validatedEntryId),
+    commandHistoryRouteSuccessMetadata,
+  );
+});
 
 // Read-only Host Operations
 ipcMain.handle('host-operation:run', async (_event, input: HostOperationInput) => {

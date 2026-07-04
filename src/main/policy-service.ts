@@ -59,6 +59,9 @@ export type PolicyCapability =
   | 'bootstrap:run:update'
   | 'bootstrap:run:delete'
   | 'bootstrap:generate'
+  | 'command-history:read'
+  | 'command-history:create'
+  | 'command-history:delete'
   | 'settings:update';
 
 export type PolicyMode = 'disabled' | 'safe' | 'balanced' | 'permissive' | 'full-trust';
@@ -142,6 +145,9 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'bootstrap:run:update',
   'bootstrap:run:delete',
   'bootstrap:generate',
+  'command-history:read',
+  'command-history:create',
+  'command-history:delete',
   'settings:update',
 ];
 
@@ -152,6 +158,7 @@ const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
   'app-permission:read',
   'bootstrap:preset:read',
   'bootstrap:run:read',
+  'command-history:read',
   'ssh:file:read',
   'workspace-file:read',
   'workspace-profile:read',

@@ -9,6 +9,7 @@ import type {
   CreateAuditEventInput,
   CreateBootstrapPresetInput,
   CreateBootstrapRunInput,
+  CreateCommandHistoryInput,
   CreateHostGroupInput,
   CreateHostInput,
   CreateHostTagInput,
@@ -382,6 +383,39 @@ export function validateHostOperationInput(value: unknown): HostOperationInput {
     input.limit = requireInteger(record.limit, 'limit', 1, 250);
   }
   return input;
+}
+
+export function validateCommandHistoryListLimitInput(value: unknown): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return requireInteger(value, 'limit', 1, 500);
+}
+
+export function validateCommandHistoryCreateInput(value: unknown): CreateCommandHistoryInput {
+  const record = requireRecord(value, 'command history create input');
+  const input: CreateCommandHistoryInput = {
+    command: record.command === undefined ? '' : requireString(record.command, 'command'),
+  };
+
+  if (record.hostId !== undefined) {
+    input.hostId = record.hostId === null ? null : requireNonEmptyString(record.hostId, 'hostId');
+  }
+  if (record.sessionId !== undefined) {
+    input.sessionId = record.sessionId === null ? null : requireNonEmptyString(record.sessionId, 'sessionId');
+  }
+  if (record.exitCode !== undefined) {
+    input.exitCode = record.exitCode === null ? null : requireInteger(record.exitCode, 'exitCode', 0, 255);
+  }
+  if (record.durationMs !== undefined) {
+    input.durationMs = record.durationMs === null ? null : requireInteger(record.durationMs, 'durationMs', 0, 86400000);
+  }
+
+  return input;
+}
+
+export function validateCommandHistoryEntryIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'entryId');
 }
 
 export function validateNoInput(value: unknown): void {
