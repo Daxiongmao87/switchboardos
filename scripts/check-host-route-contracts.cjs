@@ -251,6 +251,24 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:audit:list',
+    routeMarker: "'audit:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:audit:log',
+    routeMarker: "'audit:log'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'hosted:GET:/api/audit',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/audit',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     routeMarker: "'/api/hosts'",
     contextFile: 'src/main/hosted-server.ts',
@@ -386,6 +404,8 @@ const REQUIRED_HOST_CAPABILITIES = [
   'secret:store',
   'secret:retrieve',
   'secret:delete',
+  'audit:read',
+  'audit:write',
 ];
 
 const failures = [];
@@ -650,7 +670,8 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runWorkspaceFileIpcRoute(')
               || handlerText.includes('runWorkspaceProfileIpcRoute(')
               || handlerText.includes('runCredentialRefIpcRoute(')
-              || handlerText.includes('runSecretIpcRoute('),
+              || handlerText.includes('runSecretIpcRoute(')
+              || handlerText.includes('runAuditIpcRoute('),
           });
         }
       }
@@ -711,6 +732,18 @@ function validateHostedDispatches() {
       const helperBody = hostedText.slice(profileHelperIndex, profileHelperIndex + 1600);
       if (!helperBody.includes('runHostRouteContract({')) {
         fail('Hosted workspace profile helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/audit'))) {
+    const auditHelperIndex = hostedText.indexOf('private runHostedAuditRoute');
+    if (auditHelperIndex === -1) {
+      fail('Hosted audit routes are not using runHostedAuditRoute.');
+    } else {
+      const helperBody = hostedText.slice(auditHelperIndex, auditHelperIndex + 1600);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted audit helper is not backed by runHostRouteContract.');
       }
     }
   }

@@ -2026,6 +2026,152 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:audit:list',
+    transport: 'ipc',
+    route: {
+      channel: 'audit:list',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'audit:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'audit.listed',
+      entityType: 'audit_event',
+      entityIdSource: 'none',
+      message: 'Audit events listed.',
+      metadata: {
+        actionClass: 'audit-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/audit',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:audit:log',
+    transport: 'ipc',
+    route: {
+      channel: 'audit:log',
+    },
+    requestValidator: 'validateAuditEventInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'audit:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'audit.client_logged',
+      entityType: 'audit_event',
+      entityIdSource: 'result-id',
+      message: 'Client-originated audit event written.',
+      metadata: {
+        actionClass: 'audit-route',
+        mutatingOperation: true,
+        clientOriginated: true,
+        backendVerified: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/audit',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/audit',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/audit',
+    },
+    requestValidator: 'validateHostedNoRequestBody',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'audit:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'audit.listed',
+      entityType: 'audit_event',
+      entityIdSource: 'none',
+      message: 'Audit events listed.',
+      metadata: {
+        actionClass: 'audit-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:audit:list',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'hosted:POST:/api/audit',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/audit',
+    },
+    requestValidator: 'validateAuditEventInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'audit:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'audit.client_logged',
+      entityType: 'audit_event',
+      entityIdSource: 'result-id',
+      message: 'Client-originated audit event written.',
+      metadata: {
+        actionClass: 'audit-route',
+        mutatingOperation: true,
+        clientOriginated: true,
+        backendVerified: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:audit:log',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     transport: 'hosted',
     route: {

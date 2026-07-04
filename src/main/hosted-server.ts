@@ -9,6 +9,7 @@ import type { MvpSqliteStore } from './mvp-sqlite-store';
 import { PolicyDeniedError, type PolicyCapability, type PolicyService } from './policy-service';
 import {
   RuntimeValidationError,
+  validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateHostCreateInput,
   validateHostIdInput,
@@ -46,7 +47,6 @@ import type {
   CreateAppManifestInput,
   CreateAppPermissionInput,
   CreateCommandHistoryInput,
-  CreateAuditEventInput,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
@@ -610,10 +610,28 @@ export class HostedServer {
 
     if (resource === 'audit') {
       if (method === 'GET') {
-        return this.options.store.listAuditEvents();
+        validateHostedNoRequestBody(body);
+        return this.runHostedAuditRoute({
+          contractId: 'hosted:GET:/api/audit',
+          session,
+          route: '/api/audit',
+          action: 'GET /api/audit',
+          entityType: 'audit_event',
+          input: null,
+          execute: () => this.options.store.listAuditEvents(),
+        });
       }
       if (method === 'POST') {
-        return this.options.store.logAuditEvent(asRecord(body) as unknown as CreateAuditEventInput);
+        const auditEvent = validateAuditEventInput(asRecord(body));
+        return this.runHostedAuditRoute({
+          contractId: 'hosted:POST:/api/audit',
+          session,
+          route: '/api/audit',
+          action: 'POST /api/audit',
+          entityType: 'audit_event',
+          input: auditEvent,
+          execute: () => this.options.store.logAuditEvent(auditEvent),
+        });
       }
     }
 
@@ -845,6 +863,35 @@ export class HostedServer {
       throw new HttpError(500, `Missing route access contract: ${contractId}`);
     }
     return contract;
+  }
+
+  private runHostedAuditRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+    });
   }
 
   private runHostedWorkspaceProfileRoute<TResult>(

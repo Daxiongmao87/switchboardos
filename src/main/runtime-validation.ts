@@ -1,6 +1,7 @@
 import type {
   BootstrapGenerateInput,
   BootstrapPresetId,
+  CreateAuditEventInput,
   CreateHostGroupInput,
   CreateHostInput,
   CreateHostTagInput,
@@ -167,6 +168,42 @@ export function validateNoInput(value: unknown): void {
   if (value !== undefined && value !== null) {
     throw new RuntimeValidationError('Route does not accept a request payload.');
   }
+}
+
+const CLIENT_AUDIT_RESERVED_METADATA_KEYS = new Set([
+  'appId',
+  'approvalStatus',
+  'backendApproved',
+  'backendExecuted',
+  'backendVerified',
+  'caller',
+  'contractId',
+  'mutatesState',
+  'policyCapability',
+  'policyDecision',
+  'policyMode',
+  'privilegedAction',
+  'route',
+  'routePolicyRequired',
+  'sessionId',
+  'transport',
+]);
+
+export function validateAuditEventInput(value: unknown): CreateAuditEventInput {
+  const record = requireRecord(value, 'audit event input');
+  const metadata = record.metadata === undefined
+    ? sanitizeClientAuditMetadata({})
+    : sanitizeClientAuditMetadata(validateMetadataRecord(record.metadata, 'metadata'));
+
+  return {
+    type: requireNonEmptyString(record.type, 'type'),
+    entityType: requireNonEmptyString(record.entityType, 'entityType'),
+    entityId: record.entityId === undefined || record.entityId === null
+      ? null
+      : requireString(record.entityId, 'entityId'),
+    message: requireString(record.message, 'message'),
+    metadata,
+  };
 }
 
 export function validateWorkspaceFileListInput(value: unknown): string {
@@ -617,6 +654,28 @@ function validateWorkspaceLayoutInput(value: unknown): WorkspaceLayoutSnapshot {
 
 function validateMetadataRecord(value: unknown, label: string): Record<string, unknown> {
   return requireRecord(value, label);
+}
+
+function sanitizeClientAuditMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  let removedReservedAssertion = false;
+
+  for (const [key, value] of Object.entries(metadata)) {
+    if (CLIENT_AUDIT_RESERVED_METADATA_KEYS.has(key)) {
+      removedReservedAssertion = true;
+      continue;
+    }
+    sanitized[key] = value;
+  }
+
+  return {
+    ...sanitized,
+    clientOriginated: true,
+    backendVerified: false,
+    backendApproved: false,
+    backendExecuted: false,
+    ...(removedReservedAssertion ? { clientAssertionSanitized: true } : {}),
+  };
 }
 
 function emptyWorkspaceLayout(): WorkspaceLayoutSnapshot {

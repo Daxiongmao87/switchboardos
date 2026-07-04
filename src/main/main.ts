@@ -33,6 +33,7 @@ import {
   runHostRouteContract,
 } from './route-access-contracts';
 import {
+  validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateCredentialRefCreateInput,
   validateCredentialRefIdInput,
@@ -978,6 +979,30 @@ function runSecretIpcRoute<TResult>(
   });
 }
 
+function runAuditIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+  });
+}
+
 /**
  * Create the main application window.
  */
@@ -1561,15 +1586,35 @@ ipcMain.handle(
 // Audit logging
 ipcMain.handle(
   'audit:list',
-  async () => {
-    return mvpStore.listAuditEvents();
+  async (_event, input?: unknown) => {
+    validateNoInput(input);
+    return runAuditIpcRoute(
+      'ipc:audit:list',
+      {
+        route: 'audit:list',
+        action: 'audit:list',
+        entityType: 'audit_event',
+      },
+      null,
+      () => mvpStore.listAuditEvents(),
+    );
   }
 );
 
 ipcMain.handle(
   'audit:log',
   async (_event, event: CreateAuditEventInput) => {
-    return mvpStore.logAuditEvent(event);
+    const validatedEvent = validateAuditEventInput(event);
+    return runAuditIpcRoute(
+      'ipc:audit:log',
+      {
+        route: 'audit:log',
+        action: 'audit:log',
+        entityType: 'audit_event',
+      },
+      validatedEvent,
+      () => mvpStore.logAuditEvent(validatedEvent),
+    );
   }
 );
 

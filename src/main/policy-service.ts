@@ -27,6 +27,8 @@ export type PolicyCapability =
   | 'credential-ref:create'
   | 'credential-ref:update'
   | 'credential-ref:delete'
+  | 'audit:read'
+  | 'audit:write'
   | 'terminal:start'
   | 'terminal:write'
   | 'terminal:resize'
@@ -88,6 +90,8 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'credential-ref:create',
   'credential-ref:update',
   'credential-ref:delete',
+  'audit:read',
+  'audit:write',
   'terminal:start',
   'terminal:write',
   'terminal:resize',
