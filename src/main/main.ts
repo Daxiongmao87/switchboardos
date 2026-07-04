@@ -1239,6 +1239,43 @@ function commandHistoryRouteSuccessMetadata(result: CommandHistoryEntry | boolea
   };
 }
 
+function runSettingsIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
+function settingsRouteSuccessMetadata(update: MvpSettingsUpdate): Record<string, unknown> {
+  return {
+    themeUpdated: update.theme !== undefined,
+    windowBehaviorUpdated: update.defaultWindowBehavior !== undefined,
+    wallpaperUpdated: update.desktopWallpaper !== undefined || update.desktopWallpaperLayout !== undefined,
+    sshDefaultsUpdated: update.sshDefaults !== undefined,
+    operatorUpdated: update.operator !== undefined,
+    settingsValuesLogged: false,
+    secretsLogged: false,
+  };
+}
+
 function runAgentOperatorIpcRoute<TResult>(
   contractId: string,
   context: {
@@ -1819,8 +1856,18 @@ ipcMain.handle(
 // MVP settings
 ipcMain.handle(
   'settings:get',
-  async () => {
-    return mvpStore.getSettings();
+  async (_event, input?: unknown) => {
+    validateNoInput(input);
+    return runSettingsIpcRoute(
+      'ipc:settings:get',
+      {
+        route: 'settings:get',
+        action: 'settings:get',
+        entityType: 'settings',
+      },
+      null,
+      () => mvpStore.getSettings(),
+    );
   }
 );
 
@@ -1828,11 +1875,17 @@ ipcMain.handle(
   'settings:update',
   async (_event, update: MvpSettingsUpdate) => {
     const validatedUpdate = validateSettingsUpdate(update);
-    policyService.assertAllowed('settings:update', {
-      caller: 'ipc',
-      action: 'settings:update',
-    });
-    return mvpStore.updateSettings(validatedUpdate);
+    return runSettingsIpcRoute(
+      'ipc:settings:update',
+      {
+        route: 'settings:update',
+        action: 'settings:update',
+        entityType: 'settings',
+      },
+      validatedUpdate,
+      () => mvpStore.updateSettings(validatedUpdate),
+      () => settingsRouteSuccessMetadata(validatedUpdate),
+    );
   }
 );
 

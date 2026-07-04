@@ -59,6 +59,7 @@ import type {
   BootstrapGenerateInput,
   BootstrapGenerateResult,
   CommandHistoryEntry,
+  MvpSettingsUpdate,
   OperatorProposeResult,
   SshExecResult,
   TerminalResizeResult,
@@ -632,11 +633,29 @@ export class HostedServer {
 
     if (resource === 'settings') {
       if (method === 'GET') {
-        return this.options.store.getSettings();
+        validateHostedNoRequestBody(body);
+        return this.runHostedSettingsRoute({
+          contractId: 'hosted:GET:/api/settings',
+          session,
+          route: '/api/settings',
+          action: 'GET /api/settings',
+          entityType: 'settings',
+          input: null,
+          execute: () => this.options.store.getSettings(),
+        });
       }
       if (method === 'PATCH') {
-        this.requireHostedCapability(request, session, 'settings:update', url.pathname);
-        return this.options.store.updateSettings(validateSettingsUpdate(body));
+        const validatedUpdate = validateSettingsUpdate(body);
+        return this.runHostedSettingsRoute({
+          contractId: 'hosted:PATCH:/api/settings',
+          session,
+          route: '/api/settings',
+          action: 'PATCH /api/settings',
+          entityType: 'settings',
+          input: validatedUpdate,
+          execute: () => this.options.store.updateSettings(validatedUpdate),
+          successAuditMetadata: () => this.settingsRouteSuccessMetadata(validatedUpdate),
+        });
       }
     }
 
@@ -1089,6 +1108,47 @@ export class HostedServer {
       execute: params.execute,
       successAuditMetadata: params.successAuditMetadata,
     });
+  }
+
+  private runHostedSettingsRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private settingsRouteSuccessMetadata(update: MvpSettingsUpdate): Record<string, unknown> {
+    return {
+      themeUpdated: update.theme !== undefined,
+      windowBehaviorUpdated: update.defaultWindowBehavior !== undefined,
+      wallpaperUpdated: update.desktopWallpaper !== undefined || update.desktopWallpaperLayout !== undefined,
+      sshDefaultsUpdated: update.sshDefaults !== undefined,
+      operatorUpdated: update.operator !== undefined,
+      settingsValuesLogged: false,
+      secretsLogged: false,
+    };
   }
 
   private commandHistoryRouteSuccessMetadata(result: CommandHistoryEntry | boolean): Record<string, unknown> {

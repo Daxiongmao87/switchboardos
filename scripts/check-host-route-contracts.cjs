@@ -281,6 +281,16 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:settings:get',
+    routeMarker: "'settings:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:settings:update',
+    routeMarker: "'settings:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:list',
     routeMarker: "'workspace-file:list'",
     contextFile: 'src/main/main.ts',
@@ -560,6 +570,14 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/settings',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/settings',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/workspace-files',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -694,6 +712,8 @@ const REQUIRED_HOST_CAPABILITIES = [
   'command-history:read',
   'command-history:create',
   'command-history:delete',
+  'settings:read',
+  'settings:update',
   'workspace-file:read',
   'workspace-file:write',
   'workspace-profile:read',
@@ -979,7 +999,8 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runAgentOperatorIpcRoute(')
               || handlerText.includes('runAppRouteIpc(')
               || handlerText.includes('runBootstrapRouteIpc(')
-              || handlerText.includes('runCommandHistoryIpcRoute('),
+              || handlerText.includes('runCommandHistoryIpcRoute(')
+              || handlerText.includes('runSettingsIpcRoute('),
           });
         }
       }
@@ -1140,6 +1161,18 @@ function validateHostedDispatches() {
     }
   }
 
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/settings'))) {
+    const settingsHelperIndex = hostedText.indexOf('private runHostedSettingsRoute');
+    if (settingsHelperIndex === -1) {
+      fail('Hosted settings routes are not using runHostedSettingsRoute.');
+    } else {
+      const helperBody = hostedText.slice(settingsHelperIndex, settingsHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted settings helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
   if (hostedText.includes("requireHostedCapability(request, session, 'host-operation:run'")) {
     fail('Hosted route still uses requireHostedCapability for host-operation:run instead of host route contract enforcement.');
   }
@@ -1262,6 +1295,18 @@ function validateHostedDispatches() {
     || hostedText.includes('return this.options.store.createCommandHistoryEntry(asRecord(body) as CreateCommandHistoryInput);')
     || hostedText.includes('return this.options.store.deleteCommandHistoryEntry(decodeURIComponent(action));')) {
     fail('Direct hosted command-history fallback detected in hosted-server.ts.');
+  }
+
+  if (mainText.includes("policyService.assertAllowed('settings:update'")
+    || mainText.includes("ipcMain.handle(\n  'settings:get',\n  async () => {\n    return mvpStore.getSettings();")
+    || mainText.includes('return mvpStore.updateSettings(validatedUpdate);')) {
+    fail('Direct IPC settings fallback detected in main.ts.');
+  }
+
+  if (hostedText.includes("requireHostedCapability(request, session, 'settings:update'")
+    || hostedText.includes('return this.options.store.getSettings();')
+    || hostedText.includes('return this.options.store.updateSettings(validateSettingsUpdate(body));')) {
+    fail('Direct hosted settings fallback detected in hosted-server.ts.');
   }
 }
 

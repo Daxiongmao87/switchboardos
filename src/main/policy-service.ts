@@ -62,6 +62,7 @@ export type PolicyCapability =
   | 'command-history:read'
   | 'command-history:create'
   | 'command-history:delete'
+  | 'settings:read'
   | 'settings:update';
 
 export type PolicyMode = 'disabled' | 'safe' | 'balanced' | 'permissive' | 'full-trust';
@@ -148,6 +149,7 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'command-history:read',
   'command-history:create',
   'command-history:delete',
+  'settings:read',
   'settings:update',
 ];
 
@@ -159,6 +161,7 @@ const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
   'bootstrap:preset:read',
   'bootstrap:run:read',
   'command-history:read',
+  'settings:read',
   'ssh:file:read',
   'workspace-file:read',
   'workspace-profile:read',
@@ -167,6 +170,7 @@ const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
 ];
 
 const DISABLED_CAPABILITIES: readonly PolicyCapability[] = [
+  'settings:read',
   'settings:update',
 ];
 

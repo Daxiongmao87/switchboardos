@@ -2880,6 +2880,156 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:settings:get',
+    transport: 'ipc',
+    route: {
+      channel: 'settings:get',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'settings:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'settings.read',
+      entityType: 'settings',
+      entityIdSource: 'none',
+      message: 'Settings read.',
+      metadata: {
+        actionClass: 'settings-route',
+        mutatingOperation: false,
+        settingsValuesLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/settings',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:settings:update',
+    transport: 'ipc',
+    route: {
+      channel: 'settings:update',
+    },
+    requestValidator: 'validateSettingsUpdate',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'settings:update',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'settings.updated',
+      entityType: 'settings',
+      entityIdSource: 'none',
+      message: 'Settings updated.',
+      metadata: {
+        actionClass: 'settings-route',
+        mutatingOperation: true,
+        settingsValuesLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:PATCH:/api/settings',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/settings',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/settings',
+    },
+    requestValidator: 'validateHostedNoRequestBody',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'settings:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'settings.read',
+      entityType: 'settings',
+      entityIdSource: 'none',
+      message: 'Settings read.',
+      metadata: {
+        actionClass: 'settings-route',
+        mutatingOperation: false,
+        settingsValuesLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:settings:get',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'hosted:PATCH:/api/settings',
+    transport: 'hosted',
+    route: {
+      method: 'PATCH',
+      path: '/api/settings',
+    },
+    requestValidator: 'validateSettingsUpdate',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'settings:update',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'settings.updated',
+      entityType: 'settings',
+      entityIdSource: 'none',
+      message: 'Settings updated.',
+      metadata: {
+        actionClass: 'settings-route',
+        mutatingOperation: true,
+        settingsValuesLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:settings:update',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'ipc:app-manifest:list',
     transport: 'ipc',
     route: {
