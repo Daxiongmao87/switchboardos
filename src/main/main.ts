@@ -97,6 +97,10 @@ import type {
   SshFileListInput,
   SshFileStatInput,
   SshFileTransferInput,
+  TerminalResizeResult,
+  TerminalStartResult,
+  TerminalStopResult,
+  TerminalWriteResult,
   UpdateAgentEndpointInput,
   UpdateAppManifestInput,
   UpdateBootstrapPresetInput,
@@ -1042,6 +1046,47 @@ function sshExecRouteSuccessMetadata(result: SshExecResult): Record<string, unkn
   };
 }
 
+function runTerminalIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    hostId?: string | null;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
+function terminalRouteSuccessMetadata(
+  result: TerminalStartResult | TerminalWriteResult | TerminalResizeResult | TerminalStopResult,
+): Record<string, unknown> {
+  return {
+    resultStatus: 'status' in result ? result.status : null,
+    success: 'success' in result ? result.success : null,
+    sessionId: result.sessionId,
+    cols: 'cols' in result ? result.cols : null,
+    rows: 'rows' in result ? result.rows : null,
+    terminalInputLogged: false,
+    terminalOutputLogged: false,
+  };
+}
+
 /**
  * Create the main application window.
  */
@@ -1662,12 +1707,18 @@ ipcMain.handle(
   'terminal:start',
   async (_event, hostId: string) => {
     const validatedHostId = validateTerminalStartInput(hostId);
-    policyService.assertAllowed('terminal:start', {
-      caller: 'ipc',
-      action: 'terminal:start',
-      hostId: validatedHostId,
-    });
-    return terminalSessions.start(validatedHostId);
+    return runTerminalIpcRoute(
+      'ipc:terminal:start',
+      {
+        route: 'terminal:start',
+        action: 'terminal:start',
+        hostId: validatedHostId,
+        entityType: 'host',
+      },
+      validatedHostId,
+      () => terminalSessions.start(validatedHostId),
+      terminalRouteSuccessMetadata,
+    );
   }
 );
 
@@ -1675,12 +1726,18 @@ ipcMain.handle(
   'terminal:write',
   async (_event, sessionId: string, input: string) => {
     const validated = validateTerminalWriteInput(sessionId, input);
-    policyService.assertAllowed('terminal:write', {
-      caller: 'ipc',
-      action: 'terminal:write',
-      sessionId: validated.sessionId,
-    });
-    return terminalSessions.write(validated.sessionId, validated.input);
+    return runTerminalIpcRoute(
+      'ipc:terminal:write',
+      {
+        route: 'terminal:write',
+        action: 'terminal:write',
+        entityId: validated.sessionId,
+        entityType: 'terminal_session',
+      },
+      validated,
+      () => terminalSessions.write(validated.sessionId, validated.input),
+      terminalRouteSuccessMetadata,
+    );
   }
 );
 
@@ -1688,12 +1745,18 @@ ipcMain.handle(
   'terminal:resize',
   async (_event, sessionId: string, cols: number, rows: number) => {
     const validated = validateTerminalResizeInput(sessionId, cols, rows);
-    policyService.assertAllowed('terminal:resize', {
-      caller: 'ipc',
-      action: 'terminal:resize',
-      sessionId: validated.sessionId,
-    });
-    return terminalSessions.resize(validated.sessionId, validated.cols, validated.rows);
+    return runTerminalIpcRoute(
+      'ipc:terminal:resize',
+      {
+        route: 'terminal:resize',
+        action: 'terminal:resize',
+        entityId: validated.sessionId,
+        entityType: 'terminal_session',
+      },
+      validated,
+      () => terminalSessions.resize(validated.sessionId, validated.cols, validated.rows),
+      terminalRouteSuccessMetadata,
+    );
   }
 );
 
@@ -1701,12 +1764,18 @@ ipcMain.handle(
   'terminal:stop',
   async (_event, sessionId: string) => {
     const validatedSessionId = validateTerminalStopInput(sessionId);
-    policyService.assertAllowed('terminal:stop', {
-      caller: 'ipc',
-      action: 'terminal:stop',
-      sessionId: validatedSessionId,
-    });
-    return terminalSessions.stop(validatedSessionId);
+    return runTerminalIpcRoute(
+      'ipc:terminal:stop',
+      {
+        route: 'terminal:stop',
+        action: 'terminal:stop',
+        entityId: validatedSessionId,
+        entityType: 'terminal_session',
+      },
+      validatedSessionId,
+      () => terminalSessions.stop(validatedSessionId),
+      terminalRouteSuccessMetadata,
+    );
   }
 );
 

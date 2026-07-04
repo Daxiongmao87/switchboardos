@@ -116,6 +116,26 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:terminal:start',
+    routeMarker: "'terminal:start'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:terminal:write',
+    routeMarker: "'terminal:write'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:terminal:resize',
+    routeMarker: "'terminal:resize'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:terminal:stop',
+    routeMarker: "'terminal:stop'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:list',
     routeMarker: "'workspace-file:list'",
     contextFile: 'src/main/main.ts',
@@ -299,6 +319,26 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:POST:/api/terminal/start',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/terminal/write',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/terminal/resize',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/terminal/stop',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/terminal/events',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/workspace-files',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -405,6 +445,10 @@ const REQUIRED_HOST_CAPABILITIES = [
   'ssh:exec',
   'ssh:file:read',
   'ssh:file:write',
+  'terminal:start',
+  'terminal:write',
+  'terminal:resize',
+  'terminal:stop',
   'workspace-file:read',
   'workspace-file:write',
   'workspace-profile:read',
@@ -684,7 +728,8 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runCredentialRefIpcRoute(')
               || handlerText.includes('runSecretIpcRoute(')
               || handlerText.includes('runAuditIpcRoute(')
-              || handlerText.includes('runSshIpcRoute('),
+              || handlerText.includes('runSshIpcRoute(')
+              || handlerText.includes('runTerminalIpcRoute('),
           });
         }
       }
@@ -773,6 +818,18 @@ function validateHostedDispatches() {
     }
   }
 
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/terminal/'))) {
+    const terminalHelperIndex = hostedText.indexOf('private runHostedTerminalRoute');
+    if (terminalHelperIndex === -1) {
+      fail('Hosted terminal routes are not using runHostedTerminalRoute.');
+    } else {
+      const helperBody = hostedText.slice(terminalHelperIndex, terminalHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted terminal helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
   if (hostedText.includes("requireHostedCapability(request, session, 'host-operation:run'")) {
     fail('Hosted route still uses requireHostedCapability for host-operation:run instead of host route contract enforcement.');
   }
@@ -791,6 +848,24 @@ function validateHostedDispatches() {
 
   if (mainText.includes("policyService.assertAllowed('ssh:exec'")) {
     fail('IPC ssh:exec still uses direct policyService.assertAllowed instead of SSH route contract enforcement.');
+  }
+
+  if (hostedText.includes("requireHostedCapability(request, session, 'terminal:")) {
+    fail('Hosted terminal routes still use requireHostedCapability instead of terminal route contract enforcement.');
+  }
+
+  if (hostedText.includes("this.options.terminalSessions.start(validateTerminalStartInput")) {
+    fail('Direct hosted terminal start fallback detected in hosted-server.ts.');
+  }
+
+  if (hostedText.includes('return this.options.terminalSessions.write(')
+    || hostedText.includes('return this.options.terminalSessions.resize(')
+    || hostedText.includes('return this.options.terminalSessions.stop(')) {
+    fail('Direct hosted terminal mutation fallback detected in hosted-server.ts.');
+  }
+
+  if (mainText.includes("policyService.assertAllowed('terminal:")) {
+    fail('IPC terminal routes still use direct policyService.assertAllowed instead of terminal route contract enforcement.');
   }
 }
 

@@ -48,6 +48,10 @@ import type {
   CreateAppPermissionInput,
   CreateCommandHistoryInput,
   SshExecResult,
+  TerminalResizeResult,
+  TerminalStartResult,
+  TerminalStopResult,
+  TerminalWriteResult,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
@@ -341,7 +345,23 @@ export class HostedServer {
     session: HostedSession | null,
   ): Promise<void> {
     if (url.pathname === '/api/terminal/events' && request.method === 'GET') {
-      this.requireHostedCapability(request, session, 'terminal:start', url.pathname);
+      validateHostedNoRequestBody({});
+      await this.runHostedTerminalRoute({
+        contractId: 'hosted:GET:/api/terminal/events',
+        session,
+        route: '/api/terminal/events',
+        action: 'GET /api/terminal/events',
+        entityType: 'terminal_event_stream',
+        input: {},
+        execute: () => ({ subscribed: true }),
+        successAuditMetadata: () => ({
+          channel: isTerminalChannel(url.searchParams.get('channel'))
+            ? url.searchParams.get('channel')
+            : null,
+          terminalInputLogged: false,
+          terminalOutputLogged: false,
+        }),
+      });
       this.openTerminalEventStream(request, response, url);
       return;
     }
@@ -714,18 +734,7 @@ export class HostedServer {
     }
 
     if (resource === 'terminal') {
-      const capability = terminalCapabilityForAction(actionOrId);
-      if (capability) {
-        this.requireHostedCapability(
-          request,
-          session,
-          capability,
-          url.pathname,
-          bodyHostId(body),
-          bodySessionId(body),
-        );
-      }
-      return this.routeTerminalApi(method, actionOrId, body);
+      return this.routeTerminalApi(method, actionOrId, body, session);
     }
 
     throw new HttpError(404, `No hosted API route for ${method} /api/${segments.join('/')}.`);
@@ -905,6 +914,39 @@ export class HostedServer {
       entityType: string;
       input: unknown;
       execute: () => Promise<TResult> | TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        hostId: params.hostId ?? null,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private runHostedTerminalRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      hostId?: string | null;
+      entityId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
       successAuditMetadata?: (result: TResult) => Record<string, unknown>;
     },
   ): Promise<TResult> {
@@ -1294,29 +1336,76 @@ export class HostedServer {
     throw new HttpError(404, `No hosted SSH route for ${method}.`);
   }
 
-  private routeTerminalApi(method: string, action: string | undefined, body: unknown): unknown {
+  private routeTerminalApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): Promise<unknown> {
     if (method !== 'POST') {
       throw new HttpError(405, 'Terminal hosted API only accepts POST commands.');
     }
 
     if (action === 'start') {
-      return this.options.terminalSessions.start(validateTerminalStartInput(asRecord(body).hostId));
+      const validatedHostId = validateTerminalStartInput(asRecord(body).hostId);
+      return this.runHostedTerminalRoute({
+        contractId: 'hosted:POST:/api/terminal/start',
+        session,
+        route: '/api/terminal/start',
+        action: 'POST /api/terminal/start',
+        hostId: validatedHostId,
+        entityType: 'host',
+        input: validatedHostId,
+        execute: () => this.options.terminalSessions.start(validatedHostId),
+        successAuditMetadata: terminalRouteSuccessMetadata,
+      });
     }
     if (action === 'write') {
       const validated = validateTerminalWriteInput(asRecord(body).sessionId, asRecord(body).input);
-      return this.options.terminalSessions.write(validated.sessionId, validated.input);
+      return this.runHostedTerminalRoute({
+        contractId: 'hosted:POST:/api/terminal/write',
+        session,
+        route: '/api/terminal/write',
+        action: 'POST /api/terminal/write',
+        entityId: validated.sessionId,
+        entityType: 'terminal_session',
+        input: validated,
+        execute: () => this.options.terminalSessions.write(validated.sessionId, validated.input),
+        successAuditMetadata: terminalRouteSuccessMetadata,
+      });
     }
     if (action === 'resize') {
       const record = asRecord(body);
       const validated = validateTerminalResizeInput(record.sessionId, record.cols, record.rows);
-      return this.options.terminalSessions.resize(
-        validated.sessionId,
-        validated.cols,
-        validated.rows,
-      );
+      return this.runHostedTerminalRoute({
+        contractId: 'hosted:POST:/api/terminal/resize',
+        session,
+        route: '/api/terminal/resize',
+        action: 'POST /api/terminal/resize',
+        entityId: validated.sessionId,
+        entityType: 'terminal_session',
+        input: validated,
+        execute: () => this.options.terminalSessions.resize(
+          validated.sessionId,
+          validated.cols,
+          validated.rows,
+        ),
+        successAuditMetadata: terminalRouteSuccessMetadata,
+      });
     }
     if (action === 'stop') {
-      return this.options.terminalSessions.stop(validateTerminalStopInput(asRecord(body).sessionId));
+      const validatedSessionId = validateTerminalStopInput(asRecord(body).sessionId);
+      return this.runHostedTerminalRoute({
+        contractId: 'hosted:POST:/api/terminal/stop',
+        session,
+        route: '/api/terminal/stop',
+        action: 'POST /api/terminal/stop',
+        entityId: validatedSessionId,
+        entityType: 'terminal_session',
+        input: validatedSessionId,
+        execute: () => this.options.terminalSessions.stop(validatedSessionId),
+        successAuditMetadata: terminalRouteSuccessMetadata,
+      });
     }
 
     throw new HttpError(404, `No hosted terminal action "${action ?? ''}".`);
@@ -1676,30 +1765,23 @@ function sshExecRouteSuccessMetadata(result: SshExecResult): Record<string, unkn
   };
 }
 
+function terminalRouteSuccessMetadata(
+  result: TerminalStartResult | TerminalWriteResult | TerminalResizeResult | TerminalStopResult,
+): Record<string, unknown> {
+  return {
+    resultStatus: 'status' in result ? result.status : null,
+    success: 'success' in result ? result.success : null,
+    sessionId: result.sessionId,
+    cols: 'cols' in result ? result.cols : null,
+    rows: 'rows' in result ? result.rows : null,
+    terminalInputLogged: false,
+    terminalOutputLogged: false,
+  };
+}
+
 function bodyHostId(value: unknown): string | null {
   const hostId = asRecord(value).hostId;
   return typeof hostId === 'string' && hostId.trim() ? hostId.trim() : null;
-}
-
-function bodySessionId(value: unknown): string | null {
-  const sessionId = asRecord(value).sessionId;
-  return typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : null;
-}
-
-function terminalCapabilityForAction(action: string | undefined): PolicyCapability | null {
-  if (action === 'start') {
-    return 'terminal:start';
-  }
-  if (action === 'write') {
-    return 'terminal:write';
-  }
-  if (action === 'resize') {
-    return 'terminal:resize';
-  }
-  if (action === 'stop') {
-    return 'terminal:stop';
-  }
-  return null;
 }
 
 function tokensMatch(candidate: string, expected: string): boolean {
