@@ -33,6 +33,9 @@ import {
   runHostRouteContract,
 } from './route-access-contracts';
 import {
+  validateAgentEndpointCreateInput,
+  validateAgentEndpointIdInput,
+  validateAgentEndpointUpdateInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateCredentialRefCreateInput,
@@ -76,6 +79,7 @@ import {
   validateWorkspaceTrashIdInput,
 } from './runtime-validation';
 import type {
+  AgentEndpoint,
   BootstrapGenerateInput,
   CreateAgentEndpointInput,
   CreateAppManifestInput,
@@ -92,6 +96,7 @@ import type {
   CreateWorkspaceProfileInput,
   MvpSettingsUpdate,
   OperatorProposeInput,
+  OperatorProposeResult,
   SshExecInput,
   SshExecResult,
   SshFileListInput,
@@ -1084,6 +1089,93 @@ function terminalRouteSuccessMetadata(
     rows: 'rows' in result ? result.rows : null,
     terminalInputLogged: false,
     terminalOutputLogged: false,
+  };
+}
+
+function runAgentEndpointIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
+function runAgentOperatorIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    hostId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => Promise<TResult> | TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
+function agentEndpointRouteSuccessMetadata(result: AgentEndpoint | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      endpointFound: Boolean(result),
+      storesSecretMaterial: false,
+      apiKeyLogged: false,
+    };
+  }
+
+  return {
+    endpointId: result.id,
+    endpointProvider: result.provider,
+    endpointModel: result.model,
+    endpointPolicy: result.policy,
+    endpointEnabled: result.enabled,
+    credentialRefIdLogged: false,
+    storesSecretMaterial: false,
+    apiKeyLogged: false,
+  };
+}
+
+function operatorProposeRouteSuccessMetadata(result: OperatorProposeResult): Record<string, unknown> {
+  return {
+    mode: result.mode,
+    endpointId: result.endpointId,
+    proposalCount: result.proposals.length,
+    warningCount: result.warnings.length,
+    proposalOnly: true,
+    structuredActionExecution: false,
+    operatorRequestLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
   };
 }
 
@@ -2475,32 +2567,94 @@ ipcMain.handle('app-permission:delete', async (_event, permissionId: string) => 
 });
 
 // Agent Endpoints
-ipcMain.handle('agent-endpoint:list', async () => mvpStore.listAgentEndpoints());
-ipcMain.handle('agent-endpoint:get', async (_event, endpointId: string) => mvpStore.getAgentEndpoint(endpointId));
+ipcMain.handle('agent-endpoint:list', async (_event, input?: unknown) => {
+  validateNoInput(input);
+  return runAgentEndpointIpcRoute(
+    'ipc:agent-endpoint:list',
+    {
+      route: 'agent-endpoint:list',
+      action: 'agent-endpoint:list',
+      entityType: 'agent_endpoint',
+    },
+    null,
+    () => mvpStore.listAgentEndpoints(),
+  );
+});
+ipcMain.handle('agent-endpoint:get', async (_event, endpointId: string) => {
+  const validatedEndpointId = validateAgentEndpointIdInput(endpointId);
+  return runAgentEndpointIpcRoute(
+    'ipc:agent-endpoint:get',
+    {
+      route: 'agent-endpoint:get',
+      action: 'agent-endpoint:get',
+      entityId: validatedEndpointId,
+      entityType: 'agent_endpoint',
+    },
+    validatedEndpointId,
+    () => mvpStore.getAgentEndpoint(validatedEndpointId),
+  );
+});
 ipcMain.handle('agent-endpoint:create', async (_event, input: CreateAgentEndpointInput) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'agent-endpoint:create',
-  });
-  return mvpStore.createAgentEndpoint(input);
+  const validatedInput = validateAgentEndpointCreateInput(input);
+  return runAgentEndpointIpcRoute(
+    'ipc:agent-endpoint:create',
+    {
+      route: 'agent-endpoint:create',
+      action: 'agent-endpoint:create',
+      entityType: 'agent_endpoint',
+    },
+    validatedInput,
+    () => mvpStore.createAgentEndpoint(validatedInput),
+    agentEndpointRouteSuccessMetadata,
+  );
 });
 ipcMain.handle('agent-endpoint:update', async (_event, endpointId: string, input: UpdateAgentEndpointInput) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'agent-endpoint:update',
-  });
-  return mvpStore.updateAgentEndpoint(endpointId, input);
+  const validatedEndpointId = validateAgentEndpointIdInput(endpointId);
+  const validatedInput = validateAgentEndpointUpdateInput(input);
+  return runAgentEndpointIpcRoute(
+    'ipc:agent-endpoint:update',
+    {
+      route: 'agent-endpoint:update',
+      action: 'agent-endpoint:update',
+      entityId: validatedEndpointId,
+      entityType: 'agent_endpoint',
+    },
+    validatedInput,
+    () => mvpStore.updateAgentEndpoint(validatedEndpointId, validatedInput),
+    agentEndpointRouteSuccessMetadata,
+  );
 });
 ipcMain.handle('agent-endpoint:delete', async (_event, endpointId: string) => {
-  policyService.assertAllowed('settings:update', {
-    caller: 'ipc',
-    action: 'agent-endpoint:delete',
-  });
-  return mvpStore.deleteAgentEndpoint(endpointId);
+  const validatedEndpointId = validateAgentEndpointIdInput(endpointId);
+  return runAgentEndpointIpcRoute(
+    'ipc:agent-endpoint:delete',
+    {
+      route: 'agent-endpoint:delete',
+      action: 'agent-endpoint:delete',
+      entityId: validatedEndpointId,
+      entityType: 'agent_endpoint',
+    },
+    validatedEndpointId,
+    () => mvpStore.deleteAgentEndpoint(validatedEndpointId),
+  );
 });
 
 // Operator proposals
-ipcMain.handle('agent:propose', async (_event, input: OperatorProposeInput) => agentOperator.propose(validateOperatorProposeInput(input)));
+ipcMain.handle('agent:propose', async (_event, input: OperatorProposeInput) => {
+  const validatedInput = validateOperatorProposeInput(input);
+  return runAgentOperatorIpcRoute(
+    'ipc:agent:propose',
+    {
+      route: 'agent:propose',
+      action: 'agent:propose',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => agentOperator.propose(validatedInput),
+    operatorProposeRouteSuccessMetadata,
+  );
+});
 
 // Bootstrap Presets
 ipcMain.handle('bootstrap-preset:list', async () => mvpStore.listBootstrapPresets());

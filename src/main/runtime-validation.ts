@@ -1,6 +1,8 @@
 import type {
+  AgentEndpoint,
   BootstrapGenerateInput,
   BootstrapPresetId,
+  CreateAgentEndpointInput,
   CreateAuditEventInput,
   CreateHostGroupInput,
   CreateHostInput,
@@ -19,6 +21,7 @@ import type {
   SshFileStatInput,
   SshFileTransferInput,
   SshExecInput,
+  UpdateAgentEndpointInput,
   UpdateHostGroupInput,
   UpdateHostInput,
   UpdateHostTagInput,
@@ -61,6 +64,7 @@ const AUTH_MODES: readonly MvpSettings['sshDefaults']['authMode'][] = ['placehol
 const HOST_AUTH_MODES: readonly HostAuthMode[] = ['placeholder', 'password', 'key', 'agent'];
 const HOST_BOOTSTRAP_STATUSES: readonly HostBootstrapStatus[] = ['unknown', 'not_started', 'pending', 'ready', 'failed'];
 const OPERATOR_POLICIES: readonly MvpSettings['operator']['policy'][] = ['manual-approval', 'disabled'];
+const AGENT_ENDPOINT_POLICIES: readonly AgentEndpoint['policy'][] = ['safe', 'balanced', 'permissive', 'full-trust'];
 const WORKSPACE_FILE_KINDS = ['applet', 'scriptlet', 'note'] as const;
 const CREDENTIAL_TYPES: readonly CredentialType[] = ['keychain_ref', 'file_path', 'ssh_agent', 'env_var'];
 
@@ -143,6 +147,91 @@ export function validateOperatorProposeInput(value: unknown): OperatorProposeInp
       ? 'Generate safe diagnostic proposals for this host.'
       : requireString(record.request, 'request').slice(0, 4000),
   };
+}
+
+export function validateAgentEndpointIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'endpointId');
+}
+
+export function validateAgentEndpointCreateInput(value: unknown): CreateAgentEndpointInput {
+  const record = requireRecord(value, 'agent endpoint create input');
+  const input: CreateAgentEndpointInput = {
+    name: '',
+    provider: '',
+    baseUrl: '',
+    model: '',
+  };
+
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.provider !== undefined) {
+    input.provider = sanitizeOptionalString(record.provider, 'provider');
+  }
+  if (record.baseUrl !== undefined) {
+    input.baseUrl = sanitizeOptionalString(record.baseUrl, 'baseUrl');
+  }
+  if (record.model !== undefined) {
+    input.model = sanitizeOptionalString(record.model, 'model');
+  }
+  if (record.credentialRefId !== undefined) {
+    input.credentialRefId = normalizeNullableId(record.credentialRefId, 'credentialRefId');
+  }
+  if (record.contextLimit !== undefined) {
+    input.contextLimit = requireInteger(record.contextLimit, 'contextLimit', 1, 10000000);
+  }
+  if (record.toolUse !== undefined) {
+    input.toolUse = requireBoolean(record.toolUse, 'toolUse');
+  }
+  if (record.streaming !== undefined) {
+    input.streaming = requireBoolean(record.streaming, 'streaming');
+  }
+  if (record.policy !== undefined) {
+    input.policy = requireEnum(record.policy, AGENT_ENDPOINT_POLICIES, 'policy');
+  }
+  if (record.enabled !== undefined) {
+    input.enabled = requireBoolean(record.enabled, 'enabled');
+  }
+
+  return input;
+}
+
+export function validateAgentEndpointUpdateInput(value: unknown): UpdateAgentEndpointInput {
+  const record = requireRecord(value, 'agent endpoint update input');
+  const input: UpdateAgentEndpointInput = {};
+
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.provider !== undefined) {
+    input.provider = sanitizeOptionalString(record.provider, 'provider');
+  }
+  if (record.baseUrl !== undefined) {
+    input.baseUrl = sanitizeOptionalString(record.baseUrl, 'baseUrl');
+  }
+  if (record.model !== undefined) {
+    input.model = sanitizeOptionalString(record.model, 'model');
+  }
+  if (record.credentialRefId !== undefined) {
+    input.credentialRefId = normalizeNullableId(record.credentialRefId, 'credentialRefId');
+  }
+  if (record.contextLimit !== undefined) {
+    input.contextLimit = requireInteger(record.contextLimit, 'contextLimit', 1, 10000000);
+  }
+  if (record.toolUse !== undefined) {
+    input.toolUse = requireBoolean(record.toolUse, 'toolUse');
+  }
+  if (record.streaming !== undefined) {
+    input.streaming = requireBoolean(record.streaming, 'streaming');
+  }
+  if (record.policy !== undefined) {
+    input.policy = requireEnum(record.policy, AGENT_ENDPOINT_POLICIES, 'policy');
+  }
+  if (record.enabled !== undefined) {
+    input.enabled = requireBoolean(record.enabled, 'enabled');
+  }
+
+  return input;
 }
 
 export function validateHostOperationInput(value: unknown): HostOperationInput {
@@ -639,6 +728,14 @@ function requireStringList(value: unknown, label: string): string[] {
 function sanitizeOptionalString(value: unknown, label: string): string {
   const text = requireString(value, label);
   return text.trim();
+}
+
+function normalizeNullableId(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  const text = requireString(value, label).trim();
+  return text ? text : null;
 }
 
 function normalizeWorkspaceFileKind(value: unknown): WorkspaceFileKindInput {

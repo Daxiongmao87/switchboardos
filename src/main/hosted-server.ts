@@ -9,6 +9,9 @@ import type { MvpSqliteStore } from './mvp-sqlite-store';
 import { PolicyDeniedError, type PolicyCapability, type PolicyService } from './policy-service';
 import {
   RuntimeValidationError,
+  validateAgentEndpointCreateInput,
+  validateAgentEndpointIdInput,
+  validateAgentEndpointUpdateInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateHostCreateInput,
@@ -42,11 +45,12 @@ import { getHostRouteContract, runHostRouteContract } from './route-access-contr
 import type { SshService } from './ssh-service';
 import type { TerminalSessionManager } from './terminal-session-manager';
 import type {
+  AgentEndpoint,
   BootstrapGenerateInput,
-  CreateAgentEndpointInput,
   CreateAppManifestInput,
   CreateAppPermissionInput,
   CreateCommandHistoryInput,
+  OperatorProposeResult,
   SshExecResult,
   TerminalResizeResult,
   TerminalStartResult,
@@ -55,7 +59,6 @@ import type {
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
-  UpdateAgentEndpointInput,
   UpdateAppManifestInput,
 } from '../shared/mvp-models';
 
@@ -683,14 +686,11 @@ export class HostedServer {
     }
 
     if (resource === 'agent-endpoints') {
-      if (method !== 'GET') {
-        this.requireHostedCapability(request, session, 'settings:update', url.pathname);
-      }
-      return this.routeAgentEndpointApi(method, actionOrId, body);
+      return this.routeAgentEndpointApi(method, actionOrId, body, session);
     }
 
     if (resource === 'agent') {
-      return this.routeAgentApi(method, actionOrId, body);
+      return this.routeAgentApi(method, actionOrId, body, session);
     }
 
     if (resource === 'host-operations') {
@@ -960,6 +960,68 @@ export class HostedServer {
         action: params.action,
         hostId: params.hostId ?? null,
         entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private runHostedAgentEndpointRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private runHostedAgentOperatorRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      hostId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => Promise<TResult> | TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        hostId: params.hostId ?? null,
         entityType: params.entityType,
         sessionId: params.session?.id ?? null,
       },
@@ -1284,29 +1346,101 @@ export class HostedServer {
     throw new HttpError(404, `No hosted app permission route for ${method}.`);
   }
 
-  private routeAgentEndpointApi(method: string, action: string | undefined, body: unknown): unknown {
+  private routeAgentEndpointApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): Promise<unknown> {
     if (!action && method === 'GET') {
-      return this.options.store.listAgentEndpoints();
+      validateHostedNoRequestBody(body);
+      return this.runHostedAgentEndpointRoute({
+        contractId: 'hosted:GET:/api/agent-endpoints',
+        session,
+        route: '/api/agent-endpoints',
+        action: 'GET /api/agent-endpoints',
+        entityType: 'agent_endpoint',
+        input: null,
+        execute: () => this.options.store.listAgentEndpoints(),
+      });
     }
     if (!action && method === 'POST') {
-      return this.options.store.createAgentEndpoint(asRecord(body) as CreateAgentEndpointInput);
+      const validatedInput = validateAgentEndpointCreateInput(body);
+      return this.runHostedAgentEndpointRoute({
+        contractId: 'hosted:POST:/api/agent-endpoints',
+        session,
+        route: '/api/agent-endpoints',
+        action: 'POST /api/agent-endpoints',
+        entityType: 'agent_endpoint',
+        input: validatedInput,
+        execute: () => this.options.store.createAgentEndpoint(validatedInput),
+        successAuditMetadata: agentEndpointRouteSuccessMetadata,
+      });
     }
     if (action && method === 'GET') {
-      return this.options.store.getAgentEndpoint(decodeURIComponent(action));
+      const endpointId = validateAgentEndpointIdInput(decodeURIComponent(action));
+      return this.runHostedAgentEndpointRoute({
+        contractId: 'hosted:GET:/api/agent-endpoints/:id',
+        session,
+        route: '/api/agent-endpoints/:id',
+        action: 'GET /api/agent-endpoints/:id',
+        entityId: endpointId,
+        entityType: 'agent_endpoint',
+        input: endpointId,
+        execute: () => this.options.store.getAgentEndpoint(endpointId),
+      });
     }
     if (action && method === 'PATCH') {
-      return this.options.store.updateAgentEndpoint(decodeURIComponent(action), asRecord(body) as UpdateAgentEndpointInput);
+      const endpointId = validateAgentEndpointIdInput(decodeURIComponent(action));
+      const validatedInput = validateAgentEndpointUpdateInput(body);
+      return this.runHostedAgentEndpointRoute({
+        contractId: 'hosted:PATCH:/api/agent-endpoints/:id',
+        session,
+        route: '/api/agent-endpoints/:id',
+        action: 'PATCH /api/agent-endpoints/:id',
+        entityId: endpointId,
+        entityType: 'agent_endpoint',
+        input: validatedInput,
+        execute: () => this.options.store.updateAgentEndpoint(endpointId, validatedInput),
+        successAuditMetadata: agentEndpointRouteSuccessMetadata,
+      });
     }
     if (action && method === 'DELETE') {
-      return this.options.store.deleteAgentEndpoint(decodeURIComponent(action));
+      const endpointId = validateAgentEndpointIdInput(decodeURIComponent(action));
+      return this.runHostedAgentEndpointRoute({
+        contractId: 'hosted:DELETE:/api/agent-endpoints/:id',
+        session,
+        route: '/api/agent-endpoints/:id',
+        action: 'DELETE /api/agent-endpoints/:id',
+        entityId: endpointId,
+        entityType: 'agent_endpoint',
+        input: endpointId,
+        execute: () => this.options.store.deleteAgentEndpoint(endpointId),
+      });
     }
 
     throw new HttpError(404, `No hosted agent endpoint route for ${method}.`);
   }
 
-  private routeAgentApi(method: string, action: string | undefined, body: unknown): Promise<unknown> {
+  private routeAgentApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): Promise<unknown> {
     if (action === 'propose' && method === 'POST') {
-      return this.options.agentOperator.propose(validateOperatorProposeInput(body));
+      const validatedInput = validateOperatorProposeInput(body);
+      return this.runHostedAgentOperatorRoute({
+        contractId: 'hosted:POST:/api/agent/propose',
+        session,
+        route: '/api/agent/propose',
+        action: 'POST /api/agent/propose',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.agentOperator.propose(validatedInput),
+        successAuditMetadata: operatorProposeRouteSuccessMetadata,
+      });
     }
 
     throw new HttpError(404, `No hosted agent route for ${method}.`);
@@ -1776,6 +1910,41 @@ function terminalRouteSuccessMetadata(
     rows: 'rows' in result ? result.rows : null,
     terminalInputLogged: false,
     terminalOutputLogged: false,
+  };
+}
+
+function agentEndpointRouteSuccessMetadata(result: AgentEndpoint | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      endpointFound: Boolean(result),
+      storesSecretMaterial: false,
+      apiKeyLogged: false,
+    };
+  }
+
+  return {
+    endpointId: result.id,
+    endpointProvider: result.provider,
+    endpointModel: result.model,
+    endpointPolicy: result.policy,
+    endpointEnabled: result.enabled,
+    credentialRefIdLogged: false,
+    storesSecretMaterial: false,
+    apiKeyLogged: false,
+  };
+}
+
+function operatorProposeRouteSuccessMetadata(result: OperatorProposeResult): Record<string, unknown> {
+  return {
+    mode: result.mode,
+    endpointId: result.endpointId,
+    proposalCount: result.proposals.length,
+    warningCount: result.warnings.length,
+    proposalOnly: true,
+    structuredActionExecution: false,
+    operatorRequestLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
   };
 }
 

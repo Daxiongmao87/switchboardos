@@ -38,6 +38,11 @@ export type PolicyCapability =
   | 'secret:store'
   | 'secret:delete'
   | 'secret:retrieve'
+  | 'agent-endpoint:read'
+  | 'agent-endpoint:create'
+  | 'agent-endpoint:update'
+  | 'agent-endpoint:delete'
+  | 'agent:propose'
   | 'bootstrap:generate'
   | 'settings:update';
 
@@ -101,11 +106,18 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'secret:store',
   'secret:delete',
   'secret:retrieve',
+  'agent-endpoint:read',
+  'agent-endpoint:create',
+  'agent-endpoint:update',
+  'agent-endpoint:delete',
+  'agent:propose',
   'bootstrap:generate',
   'settings:update',
 ];
 
 const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
+  'agent-endpoint:read',
+  'agent:propose',
   'ssh:file:read',
   'workspace-file:read',
   'workspace-profile:read',

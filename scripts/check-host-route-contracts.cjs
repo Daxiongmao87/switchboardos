@@ -136,6 +136,36 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:agent-endpoint:list',
+    routeMarker: "'agent-endpoint:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:agent-endpoint:get',
+    routeMarker: "'agent-endpoint:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:agent-endpoint:create',
+    routeMarker: "'agent-endpoint:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:agent-endpoint:update',
+    routeMarker: "'agent-endpoint:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:agent-endpoint:delete',
+    routeMarker: "'agent-endpoint:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:agent:propose',
+    routeMarker: "'agent:propose'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:list',
     routeMarker: "'workspace-file:list'",
     contextFile: 'src/main/main.ts',
@@ -339,6 +369,30 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/agent-endpoints',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/agent-endpoints',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/agent-endpoints/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/agent-endpoints/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/agent-endpoints/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/agent/propose',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/workspace-files',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -449,6 +503,11 @@ const REQUIRED_HOST_CAPABILITIES = [
   'terminal:write',
   'terminal:resize',
   'terminal:stop',
+  'agent-endpoint:read',
+  'agent-endpoint:create',
+  'agent-endpoint:update',
+  'agent-endpoint:delete',
+  'agent:propose',
   'workspace-file:read',
   'workspace-file:write',
   'workspace-profile:read',
@@ -729,7 +788,9 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runSecretIpcRoute(')
               || handlerText.includes('runAuditIpcRoute(')
               || handlerText.includes('runSshIpcRoute(')
-              || handlerText.includes('runTerminalIpcRoute('),
+              || handlerText.includes('runTerminalIpcRoute(')
+              || handlerText.includes('runAgentEndpointIpcRoute(')
+              || handlerText.includes('runAgentOperatorIpcRoute('),
           });
         }
       }
@@ -830,6 +891,30 @@ function validateHostedDispatches() {
     }
   }
 
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/agent-endpoints'))) {
+    const agentEndpointHelperIndex = hostedText.indexOf('private runHostedAgentEndpointRoute');
+    if (agentEndpointHelperIndex === -1) {
+      fail('Hosted agent endpoint routes are not using runHostedAgentEndpointRoute.');
+    } else {
+      const helperBody = hostedText.slice(agentEndpointHelperIndex, agentEndpointHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted agent endpoint helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/agent/propose'))) {
+    const agentOperatorHelperIndex = hostedText.indexOf('private runHostedAgentOperatorRoute');
+    if (agentOperatorHelperIndex === -1) {
+      fail('Hosted agent operator routes are not using runHostedAgentOperatorRoute.');
+    } else {
+      const helperBody = hostedText.slice(agentOperatorHelperIndex, agentOperatorHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted agent operator helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
   if (hostedText.includes("requireHostedCapability(request, session, 'host-operation:run'")) {
     fail('Hosted route still uses requireHostedCapability for host-operation:run instead of host route contract enforcement.');
   }
@@ -866,6 +951,33 @@ function validateHostedDispatches() {
 
   if (mainText.includes("policyService.assertAllowed('terminal:")) {
     fail('IPC terminal routes still use direct policyService.assertAllowed instead of terminal route contract enforcement.');
+  }
+
+  if (hostedText.includes("if (resource === 'agent-endpoints') {\n      if (method !== 'GET') {")) {
+    fail('Hosted agent endpoint routes still use direct requireHostedCapability gating instead of route contract enforcement.');
+  }
+
+  if (hostedText.includes('return this.options.store.listAgentEndpoints();')
+    || hostedText.includes('return this.options.store.createAgentEndpoint(asRecord(body) as CreateAgentEndpointInput);')
+    || hostedText.includes('return this.options.store.updateAgentEndpoint(decodeURIComponent(action), asRecord(body) as UpdateAgentEndpointInput);')
+    || hostedText.includes('return this.options.store.deleteAgentEndpoint(decodeURIComponent(action));')) {
+    fail('Direct hosted agent endpoint fallback detected in hosted-server.ts.');
+  }
+
+  if (hostedText.includes('return this.options.agentOperator.propose(validateOperatorProposeInput(body));')) {
+    fail('Direct hosted agent operator fallback detected in hosted-server.ts.');
+  }
+
+  if (mainText.includes("ipcMain.handle('agent-endpoint:list', async () => mvpStore.listAgentEndpoints())")
+    || mainText.includes('mvpStore.getAgentEndpoint(endpointId)')
+    || mainText.includes('return mvpStore.createAgentEndpoint(input);')
+    || mainText.includes('return mvpStore.updateAgentEndpoint(endpointId, input);')
+    || mainText.includes('return mvpStore.deleteAgentEndpoint(endpointId);')) {
+    fail('Direct IPC agent endpoint fallback detected in main.ts.');
+  }
+
+  if (mainText.includes('agentOperator.propose(validateOperatorProposeInput(input))')) {
+    fail('Direct IPC agent operator fallback detected in main.ts.');
   }
 }
 
