@@ -83,6 +83,35 @@ function createStore(endpoint) {
   };
 }
 
+function assertOperatorGeneratedAuditIsSanitized(event, options) {
+  const metadata = event.metadata;
+  assert.equal(event.type, 'agent.proposals.generated');
+  assert.equal(metadata.secretsLogged, false);
+  assert.equal(metadata.requestLogged, false);
+  assert.equal(metadata.operatorRequestLogged, false);
+  assert.equal(metadata.proposedCommandsLogged, false);
+  assert.equal(metadata.providerPayloadLogged, false);
+  assert.equal(metadata.proposalCount, options.proposalCount);
+  assert.equal(metadata.commandCount, options.commandCount);
+  assert.equal(metadata.warningCount, options.warningCount);
+  assert.equal(Object.hasOwn(metadata, 'commands'), false);
+  assert.equal(Object.hasOwn(metadata, 'warnings'), false);
+  assert.equal(Object.hasOwn(metadata.contextSummary, 'request'), false);
+  assert.equal(Object.hasOwn(metadata.contextSummary, 'selectedHost'), false);
+
+  const serializedEvent = JSON.stringify(event);
+  assert.equal(serializedEvent.includes(options.request), false);
+  for (const command of options.commands) {
+    assert.equal(serializedEvent.includes(command), false);
+  }
+  for (const warning of options.warnings) {
+    assert.equal(serializedEvent.includes(warning), false);
+  }
+  for (const forbiddenFragment of options.forbiddenFragments ?? []) {
+    assert.equal(serializedEvent.includes(forbiddenFragment), false);
+  }
+}
+
 async function main() {
   const fallbackStore = createStore(null);
   const fallbackService = new AgentOperatorService({
@@ -95,13 +124,21 @@ async function main() {
 
   const fallback = await fallbackService.propose({
     hostId: host.id,
-    request: 'Find safe diagnostics.',
+    request: 'secret operator request from lead smoke',
   });
   assert.equal(fallback.mode, 'fallback');
   assert.equal(fallback.proposals.length >= 4, true);
   assert.equal(fallback.proposals.every((proposal) => proposal.source === 'fallback'), true);
   assert.equal(fallback.context.untrustedHostOutput.length, 1);
-  assert.equal(fallbackStore.auditEvents[0].metadata.secretsLogged, false);
+  assertOperatorGeneratedAuditIsSanitized(fallbackStore.auditEvents[0], {
+    request: 'secret operator request from lead smoke',
+    proposalCount: fallback.proposals.length,
+    commandCount: fallback.proposals.length,
+    warningCount: fallback.warnings.length,
+    commands: fallback.proposals.map((proposal) => proposal.command),
+    warnings: fallback.warnings,
+    forbiddenFragments: ['fixture-marker', 'journalctl -p err -n 20', '10.0.0.42', 'Operator Host'],
+  });
 
   const endpoint = {
     id: 'endpoint-1',
@@ -136,9 +173,9 @@ async function main() {
               content: JSON.stringify({
                 proposals: [
                   {
-                    title: 'Provider uptime',
-                    command: 'uptime',
-                    rationale: 'Read load average.',
+                    title: 'provider-payload-title-marker',
+                    command: 'provider-secret-command-marker',
+                    rationale: 'provider-payload-rationale-marker',
                     risk: 'low',
                   },
                 ],
@@ -163,14 +200,29 @@ async function main() {
     });
     const provider = await providerService.propose({
       hostId: host.id,
-      request: 'Use provider.',
+      request: 'secret provider operator request from lead smoke',
     });
     assert.equal(provider.mode, 'provider');
     assert.equal(provider.endpointId, endpoint.id);
     assert.equal(provider.proposals[0].source, 'provider');
-    assert.equal(provider.proposals[0].command, 'uptime');
+    assert.equal(provider.proposals[0].command, 'provider-secret-command-marker');
     assert.equal(providerStore.auditEvents[0].metadata.endpointModel, endpoint.model);
-    assert.equal(providerStore.auditEvents[0].metadata.secretsLogged, false);
+    assertOperatorGeneratedAuditIsSanitized(providerStore.auditEvents[0], {
+      request: 'secret provider operator request from lead smoke',
+      proposalCount: provider.proposals.length,
+      commandCount: provider.proposals.length,
+      warningCount: provider.warnings.length,
+      commands: provider.proposals.map((proposal) => proposal.command),
+      warnings: provider.warnings,
+      forbiddenFragments: [
+        'fixture-marker',
+        'provider-payload-title-marker',
+        'provider-payload-rationale-marker',
+        'journalctl -p err -n 20',
+        '10.0.0.42',
+        'Operator Host',
+      ],
+    });
   } finally {
     global.fetch = originalFetch;
   }
