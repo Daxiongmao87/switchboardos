@@ -44,6 +44,12 @@ import {
   validateAppPermissionListInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
+  validateBootstrapPresetCreateInput,
+  validateBootstrapPresetIdInput,
+  validateBootstrapPresetUpdateInput,
+  validateBootstrapRunCreateInput,
+  validateBootstrapRunIdInput,
+  validateBootstrapRunUpdateInput,
   validateCredentialRefCreateInput,
   validateCredentialRefIdInput,
   validateCredentialRefUpdateInput,
@@ -89,6 +95,9 @@ import type {
   AppManifest,
   AppPermission,
   BootstrapGenerateInput,
+  BootstrapGenerateResult,
+  BootstrapPresetRecord,
+  BootstrapRun,
   CreateAgentEndpointInput,
   CreateAppManifestInput,
   CreateAppPermissionInput,
@@ -1153,6 +1162,33 @@ function runAppRouteIpc<TResult>(
   });
 }
 
+function runBootstrapRouteIpc<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    hostId?: string | null;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    successAuditMetadata,
+  });
+}
+
 function runAgentOperatorIpcRoute<TResult>(
   contractId: string,
   context: {
@@ -1233,6 +1269,56 @@ function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | nul
     appId: result.appId,
     capability: result.capability,
     granted: result.granted,
+  };
+}
+
+function bootstrapPresetRouteSuccessMetadata(result: BootstrapPresetRecord | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      presetFound: Boolean(result),
+      scriptTemplateLogged: false,
+    };
+  }
+
+  return {
+    bootstrapPresetId: result.id,
+    presetId: result.presetId,
+    presetEnabled: result.enabled,
+    variableCount: result.variables.length,
+    scriptTemplateLogged: false,
+  };
+}
+
+function bootstrapRunRouteSuccessMetadata(result: BootstrapRun | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      runFound: Boolean(result),
+      scriptOutputLogged: false,
+    };
+  }
+
+  return {
+    runId: result.id,
+    presetId: result.presetId,
+    hostId: result.hostId,
+    status: result.status,
+    scriptOutputLogged: false,
+  };
+}
+
+function bootstrapGenerateRouteSuccessMetadata(
+  result: BootstrapGenerateResult,
+  input: BootstrapGenerateInput,
+): Record<string, unknown> {
+  return {
+    presetId: result.preset.id,
+    hostId: result.hostId,
+    installPackages: input.options?.installPackages ?? true,
+    includeDockerCheck: input.options?.includeDockerCheck ?? false,
+    generatedScriptLogged: false,
+    generatedScriptLength: result.script.length,
+    generatedScriptLineCount: result.script.split(/\r?\n/).length,
+    executesRemotely: false,
   };
 }
 
@@ -2808,18 +2894,153 @@ ipcMain.handle('agent:propose', async (_event, input: OperatorProposeInput) => {
 });
 
 // Bootstrap Presets
-ipcMain.handle('bootstrap-preset:list', async () => mvpStore.listBootstrapPresets());
-ipcMain.handle('bootstrap-preset:get', async (_event, presetId: string) => mvpStore.getBootstrapPreset(presetId));
-ipcMain.handle('bootstrap-preset:create', async (_event, input: CreateBootstrapPresetInput) => mvpStore.createBootstrapPreset(input));
-ipcMain.handle('bootstrap-preset:update', async (_event, presetId: string, input: UpdateBootstrapPresetInput) => mvpStore.updateBootstrapPreset(presetId, input));
-ipcMain.handle('bootstrap-preset:delete', async (_event, presetId: string) => mvpStore.deleteBootstrapPreset(presetId));
+ipcMain.handle('bootstrap-preset:list', async (_event, input?: unknown) => {
+  validateNoInput(input);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-preset:list',
+    {
+      route: 'bootstrap-preset:list',
+      action: 'bootstrap-preset:list',
+      entityType: 'bootstrap_preset',
+    },
+    null,
+    () => mvpStore.listBootstrapPresets(),
+  );
+});
+ipcMain.handle('bootstrap-preset:get', async (_event, presetId: string) => {
+  const validatedPresetId = validateBootstrapPresetIdInput(presetId);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-preset:get',
+    {
+      route: 'bootstrap-preset:get',
+      action: 'bootstrap-preset:get',
+      entityId: validatedPresetId,
+      entityType: 'bootstrap_preset',
+    },
+    validatedPresetId,
+    () => mvpStore.getBootstrapPreset(validatedPresetId),
+  );
+});
+ipcMain.handle('bootstrap-preset:create', async (_event, input: CreateBootstrapPresetInput) => {
+  const validatedInput = validateBootstrapPresetCreateInput(input);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-preset:create',
+    {
+      route: 'bootstrap-preset:create',
+      action: 'bootstrap-preset:create',
+      entityType: 'bootstrap_preset',
+    },
+    validatedInput,
+    () => mvpStore.createBootstrapPreset(validatedInput),
+    bootstrapPresetRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('bootstrap-preset:update', async (_event, presetId: string, input: UpdateBootstrapPresetInput) => {
+  const validatedPresetId = validateBootstrapPresetIdInput(presetId);
+  const validatedInput = validateBootstrapPresetUpdateInput(input);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-preset:update',
+    {
+      route: 'bootstrap-preset:update',
+      action: 'bootstrap-preset:update',
+      entityId: validatedPresetId,
+      entityType: 'bootstrap_preset',
+    },
+    validatedInput,
+    () => mvpStore.updateBootstrapPreset(validatedPresetId, validatedInput),
+    bootstrapPresetRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('bootstrap-preset:delete', async (_event, presetId: string) => {
+  const validatedPresetId = validateBootstrapPresetIdInput(presetId);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-preset:delete',
+    {
+      route: 'bootstrap-preset:delete',
+      action: 'bootstrap-preset:delete',
+      entityId: validatedPresetId,
+      entityType: 'bootstrap_preset',
+    },
+    validatedPresetId,
+    () => mvpStore.deleteBootstrapPreset(validatedPresetId),
+    bootstrapPresetRouteSuccessMetadata,
+  );
+});
 
 // Bootstrap Runs
-ipcMain.handle('bootstrap-run:list', async () => mvpStore.listBootstrapRuns());
-ipcMain.handle('bootstrap-run:get', async (_event, runId: string) => mvpStore.getBootstrapRun(runId));
-ipcMain.handle('bootstrap-run:create', async (_event, input: CreateBootstrapRunInput) => mvpStore.createBootstrapRun(input));
-ipcMain.handle('bootstrap-run:update', async (_event, runId: string, input: UpdateBootstrapRunInput) => mvpStore.updateBootstrapRun(runId, input));
-ipcMain.handle('bootstrap-run:delete', async (_event, runId: string) => mvpStore.deleteBootstrapRun(runId));
+ipcMain.handle('bootstrap-run:list', async (_event, input?: unknown) => {
+  validateNoInput(input);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-run:list',
+    {
+      route: 'bootstrap-run:list',
+      action: 'bootstrap-run:list',
+      entityType: 'bootstrap_run',
+    },
+    null,
+    () => mvpStore.listBootstrapRuns(),
+  );
+});
+ipcMain.handle('bootstrap-run:get', async (_event, runId: string) => {
+  const validatedRunId = validateBootstrapRunIdInput(runId);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-run:get',
+    {
+      route: 'bootstrap-run:get',
+      action: 'bootstrap-run:get',
+      entityId: validatedRunId,
+      entityType: 'bootstrap_run',
+    },
+    validatedRunId,
+    () => mvpStore.getBootstrapRun(validatedRunId),
+  );
+});
+ipcMain.handle('bootstrap-run:create', async (_event, input: CreateBootstrapRunInput) => {
+  const validatedInput = validateBootstrapRunCreateInput(input);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-run:create',
+    {
+      route: 'bootstrap-run:create',
+      action: 'bootstrap-run:create',
+      hostId: validatedInput.hostId,
+      entityType: 'bootstrap_run',
+    },
+    validatedInput,
+    () => mvpStore.createBootstrapRun(validatedInput),
+    bootstrapRunRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('bootstrap-run:update', async (_event, runId: string, input: UpdateBootstrapRunInput) => {
+  const validatedRunId = validateBootstrapRunIdInput(runId);
+  const validatedInput = validateBootstrapRunUpdateInput(input);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-run:update',
+    {
+      route: 'bootstrap-run:update',
+      action: 'bootstrap-run:update',
+      entityId: validatedRunId,
+      entityType: 'bootstrap_run',
+    },
+    validatedInput,
+    () => mvpStore.updateBootstrapRun(validatedRunId, validatedInput),
+    bootstrapRunRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('bootstrap-run:delete', async (_event, runId: string) => {
+  const validatedRunId = validateBootstrapRunIdInput(runId);
+  return runBootstrapRouteIpc(
+    'ipc:bootstrap-run:delete',
+    {
+      route: 'bootstrap-run:delete',
+      action: 'bootstrap-run:delete',
+      entityId: validatedRunId,
+      entityType: 'bootstrap_run',
+    },
+    validatedRunId,
+    () => mvpStore.deleteBootstrapRun(validatedRunId),
+    bootstrapRunRouteSuccessMetadata,
+  );
+});
 
 // Command History
 ipcMain.handle('command-history:list', async (_event, limit?: number) => mvpStore.listCommandHistory(limit));
@@ -2868,8 +3089,18 @@ ipcMain.handle('ssh:exec', async (_event, input: SshExecInput) => {
 // Bootstrap generator
 ipcMain.handle(
   'bootstrap:presets',
-  async () => {
-    return listBootstrapPresets();
+  async (_event, input?: unknown) => {
+    validateNoInput(input);
+    return runBootstrapRouteIpc(
+      'ipc:bootstrap:presets',
+      {
+        route: 'bootstrap:presets',
+        action: 'bootstrap:presets',
+        entityType: 'bootstrap',
+      },
+      null,
+      () => listBootstrapPresets(),
+    );
   }
 );
 
@@ -2878,27 +3109,21 @@ ipcMain.handle(
   async (_event, input: BootstrapGenerateInput) => {
     const validatedInput = validateBootstrapGenerateInput(input);
     const hostId = validatedInput.hostId ?? null;
-    policyService.assertAllowed('bootstrap:generate', {
-      caller: 'ipc',
-      action: 'bootstrap:generate',
-      hostId,
-    });
-    const host = hostId ? mvpStore.getHost(hostId) : null;
-    const result = generateBootstrapScript(validatedInput, host);
-    mvpStore.logAuditEvent({
-      type: 'bootstrap.generated',
-      entityType: host ? 'host' : 'bootstrap',
-      entityId: host?.id ?? null,
-      message: `Generated ${result.preset.name} bootstrap script${host ? ` for ${host.name}` : ''}.`,
-      metadata: {
-        presetId: result.preset.id,
-        hostId: host?.id ?? null,
-        installPackages: validatedInput.options?.installPackages ?? true,
-        includeDockerCheck: validatedInput.options?.includeDockerCheck ?? false,
-        executesRemotely: false,
+    return runBootstrapRouteIpc(
+      'ipc:bootstrap:generate',
+      {
+        route: 'bootstrap:generate',
+        action: 'bootstrap:generate',
+        hostId,
+        entityType: hostId ? 'host' : 'bootstrap',
       },
-    });
-    return result;
+      validatedInput,
+      () => {
+        const host = hostId ? mvpStore.getHost(hostId) : null;
+        return generateBootstrapScript(validatedInput, host);
+      },
+      (result) => bootstrapGenerateRouteSuccessMetadata(result, validatedInput),
+    );
   }
 );
 

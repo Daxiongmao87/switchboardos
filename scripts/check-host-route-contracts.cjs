@@ -206,6 +206,66 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:bootstrap-preset:list',
+    routeMarker: "'bootstrap-preset:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-preset:get',
+    routeMarker: "'bootstrap-preset:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-preset:create',
+    routeMarker: "'bootstrap-preset:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-preset:update',
+    routeMarker: "'bootstrap-preset:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-preset:delete',
+    routeMarker: "'bootstrap-preset:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-run:list',
+    routeMarker: "'bootstrap-run:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-run:get',
+    routeMarker: "'bootstrap-run:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-run:create',
+    routeMarker: "'bootstrap-run:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-run:update',
+    routeMarker: "'bootstrap-run:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap-run:delete',
+    routeMarker: "'bootstrap-run:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap:presets',
+    routeMarker: "'bootstrap:presets'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:bootstrap:generate',
+    routeMarker: "'bootstrap:generate'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:list',
     routeMarker: "'workspace-file:list'",
     contextFile: 'src/main/main.ts',
@@ -465,6 +525,14 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/bootstrap/presets',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/bootstrap/generate',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/workspace-files',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -587,6 +655,15 @@ const REQUIRED_HOST_CAPABILITIES = [
   'app-permission:read',
   'app-permission:grant',
   'app-permission:revoke',
+  'bootstrap:preset:read',
+  'bootstrap:preset:create',
+  'bootstrap:preset:update',
+  'bootstrap:preset:delete',
+  'bootstrap:run:read',
+  'bootstrap:run:create',
+  'bootstrap:run:update',
+  'bootstrap:run:delete',
+  'bootstrap:generate',
   'workspace-file:read',
   'workspace-file:write',
   'workspace-profile:read',
@@ -870,7 +947,8 @@ function validateIpcHostHandlers() {
               || handlerText.includes('runTerminalIpcRoute(')
               || handlerText.includes('runAgentEndpointIpcRoute(')
               || handlerText.includes('runAgentOperatorIpcRoute(')
-              || handlerText.includes('runAppRouteIpc('),
+              || handlerText.includes('runAppRouteIpc(')
+              || handlerText.includes('runBootstrapRouteIpc('),
           });
         }
       }
@@ -1007,6 +1085,18 @@ function validateHostedDispatches() {
     }
   }
 
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/bootstrap/'))) {
+    const bootstrapHelperIndex = hostedText.indexOf('private runHostedBootstrapRoute');
+    if (bootstrapHelperIndex === -1) {
+      fail('Hosted bootstrap routes are not using runHostedBootstrapRoute.');
+    } else {
+      const helperBody = hostedText.slice(bootstrapHelperIndex, bootstrapHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted bootstrap helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
   if (hostedText.includes("requireHostedCapability(request, session, 'host-operation:run'")) {
     fail('Hosted route still uses requireHostedCapability for host-operation:run instead of host route contract enforcement.');
   }
@@ -1096,6 +1186,27 @@ function validateHostedDispatches() {
     || mainText.includes('return mvpStore.createAppPermission(input);')
     || mainText.includes('return mvpStore.deleteAppPermission(permissionId);')) {
     fail('Direct IPC app manifest/permission fallback detected in main.ts.');
+  }
+
+  if (hostedText.includes("if (actionOrId === 'presets' && method === 'GET') {\n        return listBootstrapPresets();")
+    || hostedText.includes("requireHostedCapability(request, session, 'bootstrap:generate'")
+    || hostedText.includes('return this.generateBootstrap(validateBootstrapGenerateInput(body));')) {
+    fail('Direct hosted bootstrap fallback detected in hosted-server.ts.');
+  }
+
+  if (mainText.includes("ipcMain.handle('bootstrap-preset:list', async () => mvpStore.listBootstrapPresets())")
+    || mainText.includes("ipcMain.handle('bootstrap-preset:get', async (_event, presetId: string) => mvpStore.getBootstrapPreset(presetId))")
+    || mainText.includes("ipcMain.handle('bootstrap-preset:create', async (_event, input: CreateBootstrapPresetInput) => mvpStore.createBootstrapPreset(input))")
+    || mainText.includes("ipcMain.handle('bootstrap-preset:update', async (_event, presetId: string, input: UpdateBootstrapPresetInput) => mvpStore.updateBootstrapPreset(presetId, input))")
+    || mainText.includes("ipcMain.handle('bootstrap-preset:delete', async (_event, presetId: string) => mvpStore.deleteBootstrapPreset(presetId))")
+    || mainText.includes("ipcMain.handle('bootstrap-run:list', async () => mvpStore.listBootstrapRuns())")
+    || mainText.includes("ipcMain.handle('bootstrap-run:get', async (_event, runId: string) => mvpStore.getBootstrapRun(runId))")
+    || mainText.includes("ipcMain.handle('bootstrap-run:create', async (_event, input: CreateBootstrapRunInput) => mvpStore.createBootstrapRun(input))")
+    || mainText.includes("ipcMain.handle('bootstrap-run:update', async (_event, runId: string, input: UpdateBootstrapRunInput) => mvpStore.updateBootstrapRun(runId, input))")
+    || mainText.includes("ipcMain.handle('bootstrap-run:delete', async (_event, runId: string) => mvpStore.deleteBootstrapRun(runId))")
+    || mainText.includes("policyService.assertAllowed('bootstrap:generate'")
+    || mainText.includes("mvpStore.logAuditEvent({\n      type: 'bootstrap.generated'")) {
+    fail('Direct IPC bootstrap fallback detected in main.ts.');
   }
 }
 

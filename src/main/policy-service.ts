@@ -50,6 +50,14 @@ export type PolicyCapability =
   | 'app-permission:read'
   | 'app-permission:grant'
   | 'app-permission:revoke'
+  | 'bootstrap:preset:read'
+  | 'bootstrap:preset:create'
+  | 'bootstrap:preset:update'
+  | 'bootstrap:preset:delete'
+  | 'bootstrap:run:read'
+  | 'bootstrap:run:create'
+  | 'bootstrap:run:update'
+  | 'bootstrap:run:delete'
   | 'bootstrap:generate'
   | 'settings:update';
 
@@ -125,6 +133,14 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'app-permission:read',
   'app-permission:grant',
   'app-permission:revoke',
+  'bootstrap:preset:read',
+  'bootstrap:preset:create',
+  'bootstrap:preset:update',
+  'bootstrap:preset:delete',
+  'bootstrap:run:read',
+  'bootstrap:run:create',
+  'bootstrap:run:update',
+  'bootstrap:run:delete',
   'bootstrap:generate',
   'settings:update',
 ];
@@ -134,6 +150,8 @@ const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
   'agent:propose',
   'app-manifest:read',
   'app-permission:read',
+  'bootstrap:preset:read',
+  'bootstrap:run:read',
   'ssh:file:read',
   'workspace-file:read',
   'workspace-profile:read',

@@ -55,6 +55,7 @@ import type {
   AppManifest,
   AppPermission,
   BootstrapGenerateInput,
+  BootstrapGenerateResult,
   CreateCommandHistoryInput,
   OperatorProposeResult,
   SshExecResult,
@@ -723,13 +724,7 @@ export class HostedServer {
     }
 
     if (resource === 'bootstrap') {
-      if (actionOrId === 'presets' && method === 'GET') {
-        return listBootstrapPresets();
-      }
-      if (actionOrId === 'generate' && method === 'POST') {
-        this.requireHostedCapability(request, session, 'bootstrap:generate', url.pathname, bodyHostId(body));
-        return this.generateBootstrap(validateBootstrapGenerateInput(body));
-      }
+      return this.routeBootstrapApi(method, actionOrId, body, session);
     }
 
     if (resource === 'terminal') {
@@ -1024,6 +1019,37 @@ export class HostedServer {
         entityId: params.entityId ?? null,
         entityType: params.entityType,
         appId: params.appId ?? null,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private runHostedBootstrapRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      hostId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        hostId: params.hostId ?? null,
+        entityType: params.entityType,
         sessionId: params.session?.id ?? null,
       },
       input: params.input,
@@ -1342,6 +1368,44 @@ export class HostedServer {
     }
 
     throw new HttpError(404, `No hosted command history route for ${method}.`);
+  }
+
+  private routeBootstrapApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
+    if (action === 'presets' && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      return this.runHostedBootstrapRoute({
+        contractId: 'hosted:GET:/api/bootstrap/presets',
+        session,
+        route: '/api/bootstrap/presets',
+        action: 'GET /api/bootstrap/presets',
+        entityType: 'bootstrap',
+        input: null,
+        execute: () => listBootstrapPresets(),
+      });
+    }
+
+    if (action === 'generate' && method === 'POST') {
+      const input = validateBootstrapGenerateInput(body);
+      const hostId = input.hostId ?? null;
+      return this.runHostedBootstrapRoute({
+        contractId: 'hosted:POST:/api/bootstrap/generate',
+        session,
+        route: '/api/bootstrap/generate',
+        action: 'POST /api/bootstrap/generate',
+        hostId,
+        entityType: hostId ? 'host' : 'bootstrap',
+        input,
+        execute: () => this.generateBootstrap(input),
+        successAuditMetadata: (result) => bootstrapGenerateRouteSuccessMetadata(result, input),
+      });
+    }
+
+    throw new HttpError(404, `No hosted bootstrap route for ${method}.`);
   }
 
   private routeAppManifestApi(
@@ -1851,21 +1915,7 @@ export class HostedServer {
   private generateBootstrap(input: BootstrapGenerateInput) {
     const hostId = input.hostId ?? null;
     const host = hostId ? this.options.store.getHost(hostId) : null;
-    const result = generateBootstrapScript(input, host);
-    this.options.store.logAuditEvent({
-      type: 'bootstrap.generated',
-      entityType: host ? 'host' : 'bootstrap',
-      entityId: host?.id ?? null,
-      message: `Generated ${result.preset.name} bootstrap script${host ? ` for ${host.name}` : ''}.`,
-      metadata: {
-        presetId: result.preset.id,
-        hostId: host?.id ?? null,
-        installPackages: input.options?.installPackages ?? true,
-        includeDockerCheck: input.options?.includeDockerCheck ?? false,
-        executesRemotely: false,
-      },
-    });
-    return result;
+    return generateBootstrapScript(input, host);
   }
 
   private getSessionFromRequest(request: IncomingMessage): HostedSession | null {
@@ -2103,6 +2153,22 @@ function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | nul
   };
 }
 
+function bootstrapGenerateRouteSuccessMetadata(
+  result: BootstrapGenerateResult,
+  input: BootstrapGenerateInput,
+): Record<string, unknown> {
+  return {
+    presetId: result.preset.id,
+    hostId: result.hostId,
+    installPackages: input.options?.installPackages ?? true,
+    includeDockerCheck: input.options?.includeDockerCheck ?? false,
+    generatedScriptLogged: false,
+    generatedScriptLength: result.script.length,
+    generatedScriptLineCount: result.script.split(/\r?\n/).length,
+    executesRemotely: false,
+  };
+}
+
 function operatorProposeRouteSuccessMetadata(result: OperatorProposeResult): Record<string, unknown> {
   return {
     mode: result.mode,
@@ -2115,11 +2181,6 @@ function operatorProposeRouteSuccessMetadata(result: OperatorProposeResult): Rec
     providerPayloadLogged: false,
     secretsLogged: false,
   };
-}
-
-function bodyHostId(value: unknown): string | null {
-  const hostId = asRecord(value).hostId;
-  return typeof hostId === 'string' && hostId.trim() ? hostId.trim() : null;
 }
 
 function tokensMatch(candidate: string, expected: string): boolean {

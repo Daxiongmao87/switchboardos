@@ -2,10 +2,13 @@ import type {
   AgentEndpoint,
   BootstrapGenerateInput,
   BootstrapPresetId,
+  BootstrapRun,
   CreateAppManifestInput,
   CreateAppPermissionInput,
   CreateAgentEndpointInput,
   CreateAuditEventInput,
+  CreateBootstrapPresetInput,
+  CreateBootstrapRunInput,
   CreateHostGroupInput,
   CreateHostInput,
   CreateHostTagInput,
@@ -25,6 +28,8 @@ import type {
   SshExecInput,
   UpdateAgentEndpointInput,
   UpdateAppManifestInput,
+  UpdateBootstrapPresetInput,
+  UpdateBootstrapRunInput,
   UpdateHostGroupInput,
   UpdateHostInput,
   UpdateHostTagInput,
@@ -50,6 +55,13 @@ const BOOTSTRAP_PRESETS: readonly BootstrapPresetId[] = [
   'macos',
   'windows-openssh',
   'generic-posix',
+];
+const BOOTSTRAP_RUN_STATUSES: readonly BootstrapRun['status'][] = [
+  'pending',
+  'running',
+  'success',
+  'failed',
+  'cancelled',
 ];
 const HOST_OPERATION_KINDS: readonly HostOperationKind[] = ['files', 'processes', 'services', 'logs', 'metrics'];
 const THEMES: readonly MvpSettings['theme'][] = ['system', 'dark', 'light'];
@@ -710,6 +722,79 @@ export function validateBootstrapGenerateInput(value: unknown): BootstrapGenerat
     if (options.includeDockerCheck !== undefined) {
       input.options.includeDockerCheck = requireBoolean(options.includeDockerCheck, 'includeDockerCheck');
     }
+  }
+  return input;
+}
+
+export function validateBootstrapPresetIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'presetId');
+}
+
+export function validateBootstrapPresetCreateInput(value: unknown): CreateBootstrapPresetInput {
+  const record = requireRecord(value, 'bootstrap preset create input');
+  const input: CreateBootstrapPresetInput = {
+    presetId: requireNonEmptyString(record.presetId, 'presetId'),
+    name: requireNonEmptyString(record.name, 'name'),
+    description: requireString(record.description, 'description'),
+    scriptTemplate: requireString(record.scriptTemplate, 'scriptTemplate'),
+  };
+  if (record.variables !== undefined) {
+    input.variables = requireStringList(record.variables, 'variables');
+  }
+  if (record.enabled !== undefined) {
+    input.enabled = requireBoolean(record.enabled, 'enabled');
+  }
+  return input;
+}
+
+export function validateBootstrapPresetUpdateInput(value: unknown): UpdateBootstrapPresetInput {
+  const record = requireRecord(value, 'bootstrap preset update input');
+  const input: UpdateBootstrapPresetInput = {};
+  if (record.presetId !== undefined) {
+    input.presetId = requireNonEmptyString(record.presetId, 'presetId');
+  }
+  if (record.name !== undefined) {
+    input.name = requireNonEmptyString(record.name, 'name');
+  }
+  if (record.description !== undefined) {
+    input.description = requireString(record.description, 'description');
+  }
+  if (record.scriptTemplate !== undefined) {
+    input.scriptTemplate = requireString(record.scriptTemplate, 'scriptTemplate');
+  }
+  if (record.variables !== undefined) {
+    input.variables = requireStringList(record.variables, 'variables');
+  }
+  if (record.enabled !== undefined) {
+    input.enabled = requireBoolean(record.enabled, 'enabled');
+  }
+  return input;
+}
+
+export function validateBootstrapRunIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'runId');
+}
+
+export function validateBootstrapRunCreateInput(value: unknown): CreateBootstrapRunInput {
+  const record = requireRecord(value, 'bootstrap run create input');
+  return {
+    presetId: requireNonEmptyString(record.presetId, 'presetId'),
+    hostId: record.hostId === undefined || record.hostId === null
+      ? null
+      : requireNonEmptyString(record.hostId, 'hostId'),
+    scriptOutput: requireString(record.scriptOutput, 'scriptOutput'),
+    status: requireEnum(record.status, BOOTSTRAP_RUN_STATUSES, 'status'),
+  };
+}
+
+export function validateBootstrapRunUpdateInput(value: unknown): UpdateBootstrapRunInput {
+  const record = requireRecord(value, 'bootstrap run update input');
+  const input: UpdateBootstrapRunInput = {};
+  if (record.scriptOutput !== undefined) {
+    input.scriptOutput = requireString(record.scriptOutput, 'scriptOutput');
+  }
+  if (record.status !== undefined) {
+    input.status = requireEnum(record.status, BOOTSTRAP_RUN_STATUSES, 'status');
   }
   return input;
 }
