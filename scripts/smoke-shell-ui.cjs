@@ -105,7 +105,7 @@ class CdpClient {
       const pending = this.pending.get(message.id);
       this.pending.delete(message.id);
       if (message.error) {
-        pending.reject(new Error(message.error.message));
+        pending.reject(new Error(`${pending.method}: ${message.error.message}`));
       } else {
         pending.resolve(message.result);
       }
@@ -124,7 +124,7 @@ class CdpClient {
     const id = this.nextId++;
     this.ws.send(JSON.stringify({ id, method, params }));
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { method, resolve, reject });
       setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
@@ -146,6 +146,180 @@ class CdpClient {
     }
     return result.result.value;
   }
+}
+
+async function runLegacyDefaultDesktopMigrationSmoke(cdp) {
+  const desktopShortcutsKey = 'switchboardos.desktopShortcuts.v2';
+  const desktopIconPositionsKey = 'switchboardos.desktopIconPositions.v1';
+  const legacyDefaultShortcutObjects = [
+    'hosts',
+    'terminal',
+    'file-browser',
+    'process-viewer',
+    'service-manager',
+    'log-viewer',
+    'command-history',
+    'app-studio',
+    'bootstrap',
+    'agents',
+    'apps',
+    'host-map',
+    'audit',
+    'settings',
+  ].map((appId) => ({
+    id: `shortcut-${appId}`,
+    appId,
+    shellOwned: true,
+  }));
+  const explicitUserPin = {
+    id: 'shortcut-bootstrap-explicit-pin-smoke',
+    appId: 'bootstrap',
+    shellOwned: false,
+    label: 'Bootstrap Pin',
+  };
+
+  await cdp.evaluate(`(() => {
+    localStorage.setItem(${JSON.stringify(desktopShortcutsKey)}, ${JSON.stringify(JSON.stringify([
+    ...legacyDefaultShortcutObjects,
+    explicitUserPin,
+  ]))});
+    localStorage.setItem(${JSON.stringify(desktopIconPositionsKey)}, ${JSON.stringify(JSON.stringify({
+    'shortcut-hosts': { x: 24, y: 24 },
+    'shortcut-terminal': { x: 24, y: 132 },
+    'shortcut-bootstrap-explicit-pin-smoke': { x: 24, y: 240 },
+  }))});
+    return true;
+  })()`);
+  await reloadRendererPage(cdp);
+
+  const report = await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const waitFor = async (predicate, label, timeout = 10000) => {
+      const deadline = Date.now() + timeout;
+      while (Date.now() < deadline) {
+        const value = predicate();
+        if (value) return value;
+        await sleep(100);
+      }
+      throw new Error('Timed out waiting for ' + label);
+    };
+    const labels = () => [...document.querySelectorAll('.desktop-icon-label')]
+      .map((node) => node.textContent.trim())
+      .filter(Boolean);
+    const forbiddenLegacyLabels = [
+      'Hosts',
+      'Terminal',
+      'File Browser',
+      'Process Viewer',
+      'Service Manager',
+      'Log Viewer',
+      'Command History',
+      'App Studio',
+      'Operator',
+      'App Manager',
+      'Host Map',
+      'Audit',
+      'Settings',
+    ];
+
+    await waitFor(() => document.querySelector('[data-testid="desktop-shell"]'), 'desktop shell after legacy shortcut reload');
+    const iconLabels = await waitFor(() => {
+      const current = labels();
+      return current.includes('File Explorer') && current.includes('Recycle Bin') && current.includes('Bootstrap Pin')
+        ? current
+        : null;
+    }, 'sanitized legacy default desktop shortcuts');
+    const sortedLabels = [...iconLabels].sort();
+    const storedShortcuts = JSON.parse(localStorage.getItem(${JSON.stringify(desktopShortcutsKey)}) || '[]')
+      .map((shortcut) => ({
+        id: shortcut.id,
+        appId: shortcut.appId,
+        shellOwned: shortcut.shellOwned,
+        label: shortcut.label || null,
+      }));
+    const storedShortcutLabels = storedShortcuts
+      .map((shortcut) => shortcut.label || (shortcut.appId === 'workspace-files'
+        ? 'File Explorer'
+        : shortcut.appId === 'trash'
+          ? 'Recycle Bin'
+          : shortcut.appId === 'bootstrap'
+            ? 'Bootstrap Pin'
+            : shortcut.appId))
+      .sort();
+    return {
+      iconLabels,
+      sortedLabels,
+      expectedLabels: ['Bootstrap Pin', 'File Explorer', 'Recycle Bin'],
+      legacyClutterRemoved: !iconLabels.some((label) => forbiddenLegacyLabels.includes(label)),
+      explicitUserPinPreserved: iconLabels.includes('Bootstrap Pin'),
+      defaultIconsPresent: iconLabels.includes('File Explorer') && iconLabels.includes('Recycle Bin'),
+      storedShortcuts,
+      storedShortcutLabels,
+      storedLegacyClutterRemoved: !storedShortcutLabels.some((label) => forbiddenLegacyLabels.includes(label)),
+      storedSanitizedShortcutSet: JSON.stringify(storedShortcutLabels) === JSON.stringify(['Bootstrap Pin', 'File Explorer', 'Recycle Bin']),
+    };
+  })()`);
+
+  await cdp.evaluate(`(() => {
+    localStorage.removeItem(${JSON.stringify(desktopShortcutsKey)});
+    localStorage.removeItem(${JSON.stringify(desktopIconPositionsKey)});
+    return true;
+  })()`);
+  await reloadRendererPage(cdp);
+  await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const labels = [...document.querySelectorAll('.desktop-icon-label')]
+        .map((node) => node.textContent.trim())
+        .filter(Boolean);
+      if (labels.length === 2 && labels.includes('File Explorer') && labels.includes('Recycle Bin')) {
+        return true;
+      }
+      await sleep(100);
+    }
+    throw new Error('Timed out waiting for clean default desktop after legacy migration smoke reset.');
+  })()`);
+
+  return report;
+}
+
+async function reloadRendererPage(cdp) {
+  try {
+    await cdp.send('Page.reload', { ignoreCache: true });
+  } catch (error) {
+    if (!isNavigationTransientError(error)) {
+      throw error;
+    }
+  }
+  await sleep(750);
+  await waitForRendererContext(cdp);
+}
+
+function isNavigationTransientError(error) {
+  const message = String(error?.message || error);
+  return message.includes('Execution context was destroyed')
+    || message.includes('Cannot find context with specified id')
+    || message.includes('Inspected target navigated or closed')
+    || message.includes('Cannot access detached Frame');
+}
+
+async function waitForRendererContext(cdp) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    try {
+      const readyState = await cdp.evaluate('document.readyState');
+      if (readyState === 'interactive' || readyState === 'complete') {
+        return;
+      }
+    } catch (error) {
+      if (!isNavigationTransientError(error)) {
+        throw error;
+      }
+    }
+    await sleep(100);
+  }
+  throw new Error('Timed out waiting for renderer context after reload.');
 }
 
 async function browserSmoke() {
@@ -358,6 +532,8 @@ async function browserSmoke() {
     const launcherRowMetadata = launcherRows.map((row) => ({
       label: row.querySelector('.launcher-text span')?.textContent?.trim() || '',
       isSystemApplet: row.getAttribute('data-system-applet') === 'true',
+      launcherCategory: row.getAttribute('data-launcher-category') || '',
+      defaultLauncherRow: row.getAttribute('data-default-launcher-row') === 'true',
       capabilities: launcherRowCapabilities(row),
     }));
 
@@ -913,6 +1089,7 @@ async function main() {
   await cdp.send('Page.enable');
   await cdp.send('Page.bringToFront');
 
+  const legacyDefaultDesktopMigration = await runLegacyDefaultDesktopMigrationSmoke(cdp);
   const report = await cdp.evaluate(`(${browserSmoke.toString()})()`);
   const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
   writeFileSync(screenshotPath, Buffer.from(screenshot.data, 'base64'));
@@ -931,7 +1108,11 @@ async function main() {
   );
   const defaultLauncherRowsBackedBySystemApplet = requiredDefaultLauncherRows.every((label) => {
     const row = systemManifestRowMap.get(label);
-    return Boolean(row?.isSystemApplet) && Array.isArray(row?.capabilities) && row.capabilities.length > 0;
+    return Boolean(row?.isSystemApplet)
+      && row?.launcherCategory === 'core-launcher-system'
+      && row?.defaultLauncherRow
+      && Array.isArray(row?.capabilities)
+      && row.capabilities.length > 0;
   });
   const terminalActionMenuItem = (label) => report.menus.terminalContextMenuItems
     .find((item) => item.text.includes(label));
@@ -946,6 +1127,12 @@ async function main() {
   const initialDesktopIconSetFromReport = [...report.initial.iconLabels].sort();
 
   const checks = [
+    legacyDefaultDesktopMigration.defaultIconsPresent,
+    legacyDefaultDesktopMigration.legacyClutterRemoved,
+    legacyDefaultDesktopMigration.explicitUserPinPreserved,
+    JSON.stringify(legacyDefaultDesktopMigration.sortedLabels) === JSON.stringify(legacyDefaultDesktopMigration.expectedLabels),
+    legacyDefaultDesktopMigration.storedLegacyClutterRemoved,
+    legacyDefaultDesktopMigration.storedSanitizedShortcutSet,
     report.initial.desktopShell,
     report.initial.wallpaperMode === 'default',
     report.initial.wallpaperApplied,
@@ -1103,6 +1290,7 @@ async function main() {
     report.windows.workspaceBreadcrumbText.includes('New Folder'),
     report.launcher.open,
     report.launcher.rowCount === 6,
+    JSON.stringify(report.launcher.rowLabels) === JSON.stringify(requiredDefaultLauncherRows),
     report.launcher.iconCount === report.launcher.rowCount,
     report.launcher.pinButtonCount === report.launcher.rowCount,
     report.launcher.miniButtonCount >= 1,
@@ -1125,6 +1313,8 @@ async function main() {
     report.launcher.rowLabels.includes('Status') === false,
     report.launcher.rowLabels.includes('Host Dashboard') === false,
     report.launcher.rowLabels.includes('Host Terminal') === false,
+    report.launcher.launcherRowMetadata.every((row) => row.launcherCategory === 'core-launcher-system'),
+    report.launcher.launcherRowMetadata.every((row) => row.defaultLauncherRow),
     report.launcher.rowsAtRestNoChrome,
     report.launcher.launchIconsQuiet,
     report.launcher.launchFirstIconIsQuiet,
@@ -1140,11 +1330,11 @@ async function main() {
   ];
 
   if (checks.some((check) => !check)) {
-    console.log(JSON.stringify({ report, screenshotPath }, null, 2));
+    console.log(JSON.stringify({ legacyDefaultDesktopMigration, report, screenshotPath }, null, 2));
     throw new Error('Desktop shell UI smoke assertions failed.');
   }
 
-  console.log(JSON.stringify({ report, screenshotPath }, null, 2));
+  console.log(JSON.stringify({ legacyDefaultDesktopMigration, report, screenshotPath }, null, 2));
   cleanup();
   process.exit(0);
 }

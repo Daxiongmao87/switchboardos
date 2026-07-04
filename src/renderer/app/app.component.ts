@@ -335,6 +335,13 @@ interface DesktopShortcut {
   label?: string;
 }
 
+type NormalizedRawShortcut = {
+  appId: ShellAppId;
+  id?: string;
+  shellOwned: boolean;
+  label?: string;
+};
+
 interface DesktopShortcutItem {
   id: string;
   appId: ShellAppId;
@@ -947,6 +954,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // Initialize with empty defaults to avoid localStorage sync coupling.
     this.syncFirstRunState();
     this.desktopShortcuts = this.loadDesktopShortcuts();
+    this.saveDesktopShortcuts();
     this.desktopIconPositions = this.loadDesktopIconPositions();
     this.workspaceArtifacts = this.loadWorkspaceArtifacts();
   }
@@ -1137,6 +1145,11 @@ export class AppComponent implements OnInit, OnDestroy {
     const installedApps = this.installedAppDefinitions
       .filter((definition) => definition.generated && definition.searchable);
     return [...coreApps, ...installedApps];
+  }
+
+  isDefaultLauncherRow(definition: ShellAppDefinition): boolean {
+    return definition.launcherCategory === 'core-launcher-system'
+      && (DEFAULT_LAUNCHER_APP_IDS as readonly ShellAppId[]).includes(definition.appId);
   }
 
   get desktopShortcutApps(): DesktopShortcutItem[] {
@@ -4487,13 +4500,6 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private normalizeDesktopShortcuts(value: unknown[]): DesktopShortcut[] {
-    type NormalizedRawShortcut = {
-      appId: ShellAppId;
-      id?: string;
-      shellOwned: boolean;
-      label?: string;
-    };
-
     const raw = value
       .map((item) => {
         if (typeof item === 'string' && this.isShellAppId(item)) {
@@ -4518,35 +4524,38 @@ export class AppComponent implements OnInit, OnDestroy {
       })
       .filter((entry): entry is NormalizedRawShortcut => Boolean(entry));
 
-    const stringEntries = raw
-      .filter((entry) => !entry.id)
-      .map((entry) => entry.appId);
-    const normalizedLegacy = this.normalizeLegacyShortcutIds(stringEntries);
     const defaultShortcutSet = new Set<ShellAppId>(this.defaultShortcutIds);
-    const normalized: DesktopShortcut[] = [];
+    const legacyDefaultClutter = this.isLegacyDefaultShortcutSet(raw.map((entry) => entry.appId));
+    const normalized: DesktopShortcut[] = this.defaultDesktopShortcuts()
+      .map((shortcut) => {
+        const storedDefault = raw.find((entry) => entry.appId === shortcut.appId && entry.label);
+        return {
+          ...shortcut,
+          ...(storedDefault?.label ? { label: storedDefault.label } : {}),
+        };
+      });
     const usedIds = new Set<string>();
+    normalized.forEach((shortcut) => usedIds.add(shortcut.id));
 
-    for (const appId of normalizedLegacy) {
-      const shortcutId = defaultShortcutSet.has(appId) ? this.defaultShortcutId(appId) : this.legacyShortcutId(appId);
+    for (const entry of raw) {
+      if (defaultShortcutSet.has(entry.appId)) {
+        continue;
+      }
+      if (legacyDefaultClutter
+        && this.isLegacyDefaultShortcutApp(entry.appId)
+        && !this.isExplicitUserShortcut(entry)) {
+        continue;
+      }
+
+      const shortcutId = entry.id ?? this.legacyShortcutId(entry.appId);
       if (usedIds.has(shortcutId)) {
         continue;
       }
       usedIds.add(shortcutId);
-      normalized.push({ id: shortcutId, appId, shellOwned: true });
-    }
-
-    for (const entry of raw) {
-      if (!entry.id) {
-        continue;
-      }
-      if (usedIds.has(entry.id)) {
-        continue;
-      }
-      usedIds.add(entry.id);
       normalized.push({
-        id: entry.id,
+        id: shortcutId,
         appId: entry.appId,
-        shellOwned: entry.shellOwned || defaultShortcutSet.has(entry.appId),
+        shellOwned: false,
         ...(entry.label ? { label: entry.label } : {}),
       });
     }
@@ -4554,19 +4563,15 @@ export class AppComponent implements OnInit, OnDestroy {
     return normalized.length > 0 ? normalized : this.defaultDesktopShortcuts();
   }
 
-  private normalizeLegacyShortcutIds(value: ShellAppId[]): ShellAppId[] {
-    const shortcutIds = [...new Set(value)]
-      .filter((appId) => this.getAppDefinition(appId)?.searchable);
-    if (shortcutIds.length === 0) {
-      return [];
+  private isLegacyDefaultShortcutApp(appId: ShellAppId): boolean {
+    return (LEGACY_DEFAULT_DESKTOP_SHORTCUT_IDS as readonly ShellAppId[]).includes(appId);
+  }
+
+  private isExplicitUserShortcut(entry: NormalizedRawShortcut): boolean {
+    if (!entry.id || entry.shellOwned) {
+      return false;
     }
-    if (this.isLegacyDefaultShortcutSet(shortcutIds)) {
-      const legacyDefaultSet = new Set<ShellAppId>(LEGACY_DEFAULT_DESKTOP_SHORTCUT_IDS);
-      const currentDefaultSet = new Set<ShellAppId>(DEFAULT_DESKTOP_SHORTCUT_IDS);
-      const customIds = shortcutIds.filter((appId) => !legacyDefaultSet.has(appId) && !currentDefaultSet.has(appId));
-      return [...DEFAULT_DESKTOP_SHORTCUT_IDS, ...new Set(customIds)];
-    }
-    return shortcutIds;
+    return entry.id.startsWith(`shortcut-${entry.appId}-`);
   }
 
   private isLegacyDefaultShortcutSet(shortcutIds: string[]): boolean {
