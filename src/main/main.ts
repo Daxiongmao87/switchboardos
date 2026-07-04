@@ -36,11 +36,18 @@ import {
   validateBootstrapGenerateInput,
   validateHostCreateInput,
   validateHostFavoriteInput,
+  validateHostGroupCreateInput,
+  validateHostGroupIdInput,
   validateHostGroupNameInput,
+  validateHostGroupUpdateInput,
   validateHostIdInput,
   validateHostImportInput,
   validateHostOperationInput,
+  validateHostTagCreateInput,
+  validateHostTagIdInput,
+  validateHostTagUpdateInput,
   validateHostUpdateInput,
+  validateNoInput,
   validateOperatorProposeInput,
   validateSecretKeyInput,
   validateSecretStoreInput,
@@ -1631,18 +1638,214 @@ ipcMain.handle(
 );
 
 // Host Groups
-ipcMain.handle('host-group:list', async () => mvpStore.listHostGroups());
-ipcMain.handle('host-group:get', async (_event, groupId: string) => mvpStore.getHostGroup(groupId));
-ipcMain.handle('host-group:create', async (_event, input: CreateHostGroupInput) => mvpStore.createHostGroup(input));
-ipcMain.handle('host-group:update', async (_event, groupId: string, input: UpdateHostGroupInput) => mvpStore.updateHostGroup(groupId, input));
-ipcMain.handle('host-group:delete', async (_event, groupId: string) => mvpStore.deleteHostGroup(groupId));
+ipcMain.handle('host-group:list', async (_event, input?: unknown) => {
+  const contract = getHostRouteContract('ipc:host-group:list');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-group:list');
+  }
+  validateNoInput(input);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-group:list',
+      action: 'host-group:list',
+      entityType: 'host_group',
+    },
+    execute: () => mvpStore.listHostGroups(),
+  });
+});
+ipcMain.handle('host-group:get', async (_event, groupId: string) => {
+  const contract = getHostRouteContract('ipc:host-group:get');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-group:get');
+  }
+  const validatedGroupId = validateHostGroupIdInput(groupId);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-group:get',
+      action: 'host-group:get',
+      entityId: validatedGroupId,
+      entityType: 'host_group',
+    },
+    input: validatedGroupId,
+    execute: () => mvpStore.getHostGroup(validatedGroupId),
+  });
+});
+ipcMain.handle('host-group:create', async (_event, input: CreateHostGroupInput) => {
+  const contract = getHostRouteContract('ipc:host-group:create');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-group:create');
+  }
+  const validatedInput = validateHostGroupCreateInput(input);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-group:create',
+      action: 'host-group:create',
+      entityType: 'host_group',
+    },
+    input: validatedInput,
+    execute: () => mvpStore.createHostGroup(validatedInput),
+  });
+});
+ipcMain.handle('host-group:update', async (_event, groupId: string, input: UpdateHostGroupInput) => {
+  const contract = getHostRouteContract('ipc:host-group:update');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-group:update');
+  }
+  const validatedGroupId = validateHostGroupIdInput(groupId);
+  const validatedInput = validateHostGroupUpdateInput(input);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-group:update',
+      action: 'host-group:update',
+      entityId: validatedGroupId,
+      entityType: 'host_group',
+    },
+    input: validatedInput,
+    execute: () => mvpStore.updateHostGroup(validatedGroupId, validatedInput),
+  });
+});
+ipcMain.handle('host-group:delete', async (_event, groupId: string) => {
+  const contract = getHostRouteContract('ipc:host-group:delete');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-group:delete');
+  }
+  const validatedGroupId = validateHostGroupIdInput(groupId);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-group:delete',
+      action: 'host-group:delete',
+      entityId: validatedGroupId,
+      entityType: 'host_group',
+    },
+    input: validatedGroupId,
+    execute: () => mvpStore.deleteHostGroup(validatedGroupId),
+  });
+});
 
 // Host Tags
-ipcMain.handle('host-tag:list', async () => mvpStore.listHostTags());
-ipcMain.handle('host-tag:get', async (_event, tagId: string) => mvpStore.getHostTag(tagId));
-ipcMain.handle('host-tag:create', async (_event, input: CreateHostTagInput) => mvpStore.createHostTag(input));
-ipcMain.handle('host-tag:update', async (_event, tagId: string, input: UpdateHostTagInput) => mvpStore.updateHostTag(tagId, input));
-ipcMain.handle('host-tag:delete', async (_event, tagId: string) => mvpStore.deleteHostTag(tagId));
+ipcMain.handle('host-tag:list', async (_event, input?: unknown) => {
+  const contract = getHostRouteContract('ipc:host-tag:list');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-tag:list');
+  }
+  validateNoInput(input);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-tag:list',
+      action: 'host-tag:list',
+      entityType: 'host_tag',
+    },
+    execute: () => mvpStore.listHostTags(),
+  });
+});
+ipcMain.handle('host-tag:get', async (_event, tagId: string) => {
+  const contract = getHostRouteContract('ipc:host-tag:get');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-tag:get');
+  }
+  const validatedTagId = validateHostTagIdInput(tagId);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-tag:get',
+      action: 'host-tag:get',
+      entityId: validatedTagId,
+      entityType: 'host_tag',
+    },
+    input: validatedTagId,
+    execute: () => mvpStore.getHostTag(validatedTagId),
+  });
+});
+ipcMain.handle('host-tag:create', async (_event, input: CreateHostTagInput) => {
+  const contract = getHostRouteContract('ipc:host-tag:create');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-tag:create');
+  }
+  const validatedInput = validateHostTagCreateInput(input);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-tag:create',
+      action: 'host-tag:create',
+      entityType: 'host_tag',
+    },
+    input: validatedInput,
+    execute: () => mvpStore.createHostTag(validatedInput),
+  });
+});
+ipcMain.handle('host-tag:update', async (_event, tagId: string, input: UpdateHostTagInput) => {
+  const contract = getHostRouteContract('ipc:host-tag:update');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-tag:update');
+  }
+  const validatedTagId = validateHostTagIdInput(tagId);
+  const validatedInput = validateHostTagUpdateInput(input);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-tag:update',
+      action: 'host-tag:update',
+      entityId: validatedTagId,
+      entityType: 'host_tag',
+    },
+    input: validatedInput,
+    execute: () => mvpStore.updateHostTag(validatedTagId, validatedInput),
+  });
+});
+ipcMain.handle('host-tag:delete', async (_event, tagId: string) => {
+  const contract = getHostRouteContract('ipc:host-tag:delete');
+  if (!contract) {
+    throw new Error('Missing host route contract: ipc:host-tag:delete');
+  }
+  const validatedTagId = validateHostTagIdInput(tagId);
+  return runHostRouteContract({
+    contract,
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      route: 'host-tag:delete',
+      action: 'host-tag:delete',
+      entityId: validatedTagId,
+      entityType: 'host_tag',
+    },
+    input: validatedTagId,
+    execute: () => mvpStore.deleteHostTag(validatedTagId),
+  });
+});
 
 // Credential References
 ipcMain.handle('credential-ref:list', async () => mvpStore.listCredentialRefs());

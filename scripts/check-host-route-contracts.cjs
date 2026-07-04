@@ -56,6 +56,56 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:host-group:list',
+    routeMarker: "'host-group:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-group:get',
+    routeMarker: "'host-group:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-group:create',
+    routeMarker: "'host-group:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-group:update',
+    routeMarker: "'host-group:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-group:delete',
+    routeMarker: "'host-group:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-tag:list',
+    routeMarker: "'host-tag:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-tag:get',
+    routeMarker: "'host-tag:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-tag:create',
+    routeMarker: "'host-tag:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-tag:update',
+    routeMarker: "'host-tag:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:host-tag:delete',
+    routeMarker: "'host-tag:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:host-operation:run',
     routeMarker: "'host-operation:run'",
     contextFile: 'src/main/main.ts',
@@ -92,6 +142,14 @@ const REQUIRED_HOST_CAPABILITIES = [
   'host:setFavorite',
   'host:duplicate',
   'host:import',
+  'host-group:read',
+  'host-group:create',
+  'host-group:update',
+  'host-group:delete',
+  'host-tag:read',
+  'host-tag:create',
+  'host-tag:update',
+  'host-tag:delete',
   'host-operation:run',
 ];
 

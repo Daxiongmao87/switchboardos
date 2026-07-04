@@ -1,7 +1,9 @@
 import type {
   BootstrapGenerateInput,
   BootstrapPresetId,
+  CreateHostGroupInput,
   CreateHostInput,
+  CreateHostTagInput,
   HostOperationInput,
   HostOperationKind,
   HostAuthMode,
@@ -14,7 +16,9 @@ import type {
   SshFileStatInput,
   SshFileTransferInput,
   SshExecInput,
+  UpdateHostGroupInput,
   UpdateHostInput,
+  UpdateHostTagInput,
 } from '../shared/mvp-models';
 
 export class RuntimeValidationError extends Error {
@@ -134,6 +138,12 @@ export function validateHostOperationInput(value: unknown): HostOperationInput {
   return input;
 }
 
+export function validateNoInput(value: unknown): void {
+  if (value !== undefined && value !== null) {
+    throw new RuntimeValidationError('Route does not accept a request payload.');
+  }
+}
+
 export function validateHostCreateInput(value: unknown): CreateHostInput {
   const record = requireRecord(value, 'host create input');
   const input: CreateHostInput = {};
@@ -231,6 +241,54 @@ export function validateHostGroupNameInput(value: unknown): string {
 
 export function validateHostFavoriteInput(value: unknown): boolean {
   return requireBoolean(value, 'favorite');
+}
+
+export function validateHostGroupIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'groupId');
+}
+
+export function validateHostGroupCreateInput(value: unknown): CreateHostGroupInput {
+  const record = requireRecord(value, 'host group create input');
+  return {
+    name: sanitizeOptionalString(record.name, 'name'),
+    color: requireString(record.color, 'color'),
+  };
+}
+
+export function validateHostGroupUpdateInput(value: unknown): UpdateHostGroupInput {
+  const record = requireRecord(value, 'host group update input');
+  const input: UpdateHostGroupInput = {};
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.color !== undefined) {
+    input.color = requireString(record.color, 'color');
+  }
+  return input;
+}
+
+export function validateHostTagIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'tagId');
+}
+
+export function validateHostTagCreateInput(value: unknown): CreateHostTagInput {
+  const record = requireRecord(value, 'host tag create input');
+  return {
+    name: sanitizeOptionalString(record.name, 'name'),
+    color: requireString(record.color, 'color'),
+  };
+}
+
+export function validateHostTagUpdateInput(value: unknown): UpdateHostTagInput {
+  const record = requireRecord(value, 'host tag update input');
+  const input: UpdateHostTagInput = {};
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.color !== undefined) {
+    input.color = requireString(record.color, 'color');
+  }
+  return input;
 }
 
 export function validateBootstrapGenerateInput(value: unknown): BootstrapGenerateInput {

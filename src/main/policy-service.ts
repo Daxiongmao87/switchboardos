@@ -11,6 +11,14 @@ export type PolicyCapability =
   | 'host:setFavorite'
   | 'host:duplicate'
   | 'host:import'
+  | 'host-group:read'
+  | 'host-group:create'
+  | 'host-group:update'
+  | 'host-group:delete'
+  | 'host-tag:read'
+  | 'host-tag:create'
+  | 'host-tag:update'
+  | 'host-tag:delete'
   | 'terminal:start'
   | 'terminal:write'
   | 'terminal:resize'
@@ -30,6 +38,8 @@ export interface PolicyContext {
   route?: string;
   action?: string;
   hostId?: string | null;
+  entityId?: string | null;
+  entityType?: string | null;
   sessionId?: string | null;
 }
 
@@ -54,6 +64,14 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'host:setFavorite',
   'host:duplicate',
   'host:import',
+  'host-group:read',
+  'host-group:create',
+  'host-group:update',
+  'host-group:delete',
+  'host-tag:read',
+  'host-tag:create',
+  'host-tag:update',
+  'host-tag:delete',
   'terminal:start',
   'terminal:write',
   'terminal:resize',
@@ -119,7 +137,7 @@ export class PolicyService {
       this.logAuditEvent({
         type: 'policy.denied',
         entityType: 'policy',
-        entityId: context.hostId ?? null,
+        entityId: context.hostId ?? context.entityId ?? null,
         message: `Policy denied privileged capability ${decision.capability}.`,
         metadata: {
           capability: decision.capability,
@@ -129,6 +147,8 @@ export class PolicyService {
           route: context.route ?? null,
           action: context.action ?? null,
           hostId: context.hostId ?? null,
+          entityId: context.entityId ?? null,
+          entityType: context.entityType ?? null,
           sessionId: context.sessionId ?? null,
           secretsLogged: false,
         },

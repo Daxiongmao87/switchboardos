@@ -26,7 +26,14 @@ export interface RouteAccessSuccessAudit {
   required: boolean;
   eventType: string;
   entityType: string;
-  entityIdSource: 'none' | 'context-host-id' | 'result-host-id' | 'input-host-id' | 'result-first-id';
+  entityIdSource:
+    | 'none'
+    | 'context-host-id'
+    | 'context-entity-id'
+    | 'result-host-id'
+    | 'result-id'
+    | 'input-host-id'
+    | 'result-first-id';
   message: string;
   metadata: Record<string, string | number | boolean | null>;
 }
@@ -56,6 +63,8 @@ export interface RouteAccessExecutionContext {
   route: string;
   action: string;
   hostId?: string | null;
+  entityId?: string | null;
+  entityType?: string | null;
   sessionId?: string | null;
   appId?: string | null;
 }
@@ -351,6 +360,356 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:host-group:list',
+    transport: 'ipc',
+    route: {
+      channel: 'host-group:list',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-group:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'host_group.listed',
+      entityType: 'host_group',
+      entityIdSource: 'none',
+      message: 'Host groups listed.',
+      metadata: {
+        actionClass: 'host-group-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:host-group:get',
+    transport: 'ipc',
+    route: {
+      channel: 'host-group:get',
+    },
+    requestValidator: 'validateHostGroupIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-group:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'host_group.read',
+      entityType: 'host_group',
+      entityIdSource: 'context-entity-id',
+      message: 'Host group read.',
+      metadata: {
+        actionClass: 'host-group-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:host-group:create',
+    transport: 'ipc',
+    route: {
+      channel: 'host-group:create',
+    },
+    requestValidator: 'validateHostGroupCreateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-group:create',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'host_group.created',
+      entityType: 'host_group',
+      entityIdSource: 'result-id',
+      message: 'Host group created.',
+      metadata: {
+        actionClass: 'host-group-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:host-group:update',
+    transport: 'ipc',
+    route: {
+      channel: 'host-group:update',
+    },
+    requestValidator: 'validateHostGroupUpdateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-group:update',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'host_group.updated',
+      entityType: 'host_group',
+      entityIdSource: 'context-entity-id',
+      message: 'Host group updated.',
+      metadata: {
+        actionClass: 'host-group-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:host-group:delete',
+    transport: 'ipc',
+    route: {
+      channel: 'host-group:delete',
+    },
+    requestValidator: 'validateHostGroupIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-group:delete',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'host_group.deleted',
+      entityType: 'host_group',
+      entityIdSource: 'context-entity-id',
+      message: 'Host group deleted.',
+      metadata: {
+        actionClass: 'host-group-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:host-tag:list',
+    transport: 'ipc',
+    route: {
+      channel: 'host-tag:list',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-tag:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'host_tag.listed',
+      entityType: 'host_tag',
+      entityIdSource: 'none',
+      message: 'Host tags listed.',
+      metadata: {
+        actionClass: 'host-tag-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:host-tag:get',
+    transport: 'ipc',
+    route: {
+      channel: 'host-tag:get',
+    },
+    requestValidator: 'validateHostTagIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-tag:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'host_tag.read',
+      entityType: 'host_tag',
+      entityIdSource: 'context-entity-id',
+      message: 'Host tag read.',
+      metadata: {
+        actionClass: 'host-tag-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:host-tag:create',
+    transport: 'ipc',
+    route: {
+      channel: 'host-tag:create',
+    },
+    requestValidator: 'validateHostTagCreateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-tag:create',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'host_tag.created',
+      entityType: 'host_tag',
+      entityIdSource: 'result-id',
+      message: 'Host tag created.',
+      metadata: {
+        actionClass: 'host-tag-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:host-tag:update',
+    transport: 'ipc',
+    route: {
+      channel: 'host-tag:update',
+    },
+    requestValidator: 'validateHostTagUpdateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-tag:update',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'host_tag.updated',
+      entityType: 'host_tag',
+      entityIdSource: 'context-entity-id',
+      message: 'Host tag updated.',
+      metadata: {
+        actionClass: 'host-tag-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:host-tag:delete',
+    transport: 'ipc',
+    route: {
+      channel: 'host-tag:delete',
+    },
+    requestValidator: 'validateHostTagIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host-tag:delete',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'host_tag.deleted',
+      entityType: 'host_tag',
+      entityIdSource: 'context-entity-id',
+      message: 'Host tag deleted.',
+      metadata: {
+        actionClass: 'host-tag-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted equivalent in current route set.',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'ipc:host-operation:run',
     transport: 'ipc',
     route: {
@@ -583,6 +942,8 @@ export async function runHostRouteContract<TResult>(
       route: params.context.route,
       action: params.context.action,
       hostId: params.context.hostId ?? null,
+      entityId: params.context.entityId ?? null,
+      entityType: params.context.entityType ?? null,
       sessionId: params.context.sessionId ?? null,
     };
     decision = params.policyService.assertAllowed(params.contract.capability, policyContext);
@@ -615,6 +976,12 @@ export async function runHostRouteContract<TResult>(
     if (params.context.hostId) {
       metadata.hostId = params.context.hostId;
     }
+    if (params.context.entityId) {
+      metadata.entityId = params.context.entityId;
+    }
+    if (params.context.entityType) {
+      metadata.entityType = params.context.entityType;
+    }
     if (params.context.appId) {
       metadata.appId = params.context.appId;
     }
@@ -643,6 +1010,9 @@ function resolveAuditEntityId(
   if (source === 'context-host-id') {
     return sanitizeId(context.hostId);
   }
+  if (source === 'context-entity-id') {
+    return sanitizeId(context.entityId);
+  }
   if (source === 'input-host-id') {
     if (!isRecord(input)) {
       return null;
@@ -654,6 +1024,12 @@ function resolveAuditEntityId(
       return null;
     }
     return sanitizeId(requireHostIdField(result.hostId));
+  }
+  if (source === 'result-id') {
+    if (!isRecord(result)) {
+      return null;
+    }
+    return sanitizeId(requireHostIdField(result.id));
   }
   if (source === 'result-first-id' && Array.isArray(result) && result.length > 0) {
     const first = result[0];
