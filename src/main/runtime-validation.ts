@@ -4,6 +4,8 @@ import type {
   CreateHostGroupInput,
   CreateHostInput,
   CreateHostTagInput,
+  CreateCredentialRefInput,
+  CredentialType,
   HostOperationInput,
   HostOperationKind,
   HostAuthMode,
@@ -19,6 +21,7 @@ import type {
   UpdateHostGroupInput,
   UpdateHostInput,
   UpdateHostTagInput,
+  UpdateCredentialRefInput,
   CreateWorkspaceProfileInput,
   UpdateWorkspaceProfileInput,
   WorkspaceLayoutSnapshot,
@@ -58,6 +61,7 @@ const HOST_AUTH_MODES: readonly HostAuthMode[] = ['placeholder', 'password', 'ke
 const HOST_BOOTSTRAP_STATUSES: readonly HostBootstrapStatus[] = ['unknown', 'not_started', 'pending', 'ready', 'failed'];
 const OPERATOR_POLICIES: readonly MvpSettings['operator']['policy'][] = ['manual-approval', 'disabled'];
 const WORKSPACE_FILE_KINDS = ['applet', 'scriptlet', 'note'] as const;
+const CREDENTIAL_TYPES: readonly CredentialType[] = ['keychain_ref', 'file_path', 'ssh_agent', 'env_var'];
 
 export type WorkspaceFileKindInput = typeof WORKSPACE_FILE_KINDS[number];
 
@@ -247,6 +251,54 @@ export function validateWorkspaceProfileUpdateInput(value: unknown): UpdateWorks
 export function validateWorkspaceActiveProfileInput(value: unknown): string {
   const record = requireRecord(value, 'active workspace profile input');
   return validateWorkspaceProfileIdInput(record.profileId);
+}
+
+export function validateCredentialRefIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'credentialRefId');
+}
+
+export function validateCredentialRefCreateInput(value: unknown): CreateCredentialRefInput {
+  const record = requireRecord(value, 'credential reference create input');
+  const input: CreateCredentialRefInput = {
+    name: '',
+    type: 'file_path',
+    referenceValue: '',
+  };
+
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.type !== undefined) {
+    input.type = requireEnum(record.type, CREDENTIAL_TYPES, 'type');
+  }
+  if (record.referenceValue !== undefined) {
+    input.referenceValue = requireString(record.referenceValue, 'referenceValue');
+  }
+  if (record.metadata !== undefined) {
+    input.metadata = validateMetadataRecord(record.metadata, 'metadata');
+  }
+
+  return input;
+}
+
+export function validateCredentialRefUpdateInput(value: unknown): UpdateCredentialRefInput {
+  const record = requireRecord(value, 'credential reference update input');
+  const input: UpdateCredentialRefInput = {};
+
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.type !== undefined) {
+    input.type = requireEnum(record.type, CREDENTIAL_TYPES, 'type');
+  }
+  if (record.referenceValue !== undefined) {
+    input.referenceValue = requireString(record.referenceValue, 'referenceValue');
+  }
+  if (record.metadata !== undefined) {
+    input.metadata = validateMetadataRecord(record.metadata, 'metadata');
+  }
+
+  return input;
 }
 
 export function validateHostCreateInput(value: unknown): CreateHostInput {
@@ -561,6 +613,10 @@ function normalizeWorkspaceFileKind(value: unknown): WorkspaceFileKindInput {
 function validateWorkspaceLayoutInput(value: unknown): WorkspaceLayoutSnapshot {
   requireRecord(value, 'layout');
   return value as WorkspaceLayoutSnapshot;
+}
+
+function validateMetadataRecord(value: unknown, label: string): Record<string, unknown> {
+  return requireRecord(value, label);
 }
 
 function emptyWorkspaceLayout(): WorkspaceLayoutSnapshot {

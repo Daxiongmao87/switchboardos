@@ -34,6 +34,9 @@ import {
 } from './route-access-contracts';
 import {
   validateBootstrapGenerateInput,
+  validateCredentialRefCreateInput,
+  validateCredentialRefIdInput,
+  validateCredentialRefUpdateInput,
   validateHostCreateInput,
   validateHostFavoriteInput,
   validateHostGroupCreateInput,
@@ -923,6 +926,58 @@ function runWorkspaceProfileIpcRoute<TResult>(
   });
 }
 
+function runCredentialRefIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+  });
+}
+
+function runSecretIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+  shouldAuditSuccess?: (result: TResult) => boolean,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+    shouldAuditSuccess,
+    successAuditMetadata,
+  });
+}
+
 /**
  * Create the main application window.
  */
@@ -1379,38 +1434,44 @@ ipcMain.handle(
   async (_event, key: string, value: string): Promise<boolean> => {
     const validated = validateSecretStoreInput(key, value);
     const auditKey = validated.key;
-    policyService.assertAllowed('secret:store', {
-      caller: 'ipc',
-      action: 'secret:store',
-    });
-    try {
-      const secret = secretVault.store(validated.key, validated.value);
-      const credentialRefId = upsertSecretCredentialRef(secret);
-      logSecretAuditEvent(
-        'secret.stored',
-        secret.key,
-        'Secret material stored with Electron safeStorage; SQLite stores reference metadata only.',
-        {
-          backend: secret.backend,
-          credentialRefId,
-          rawSecretInSqlite: false,
-        },
-      );
-      return true;
-    } catch (err) {
-      logSecretAuditEvent(
-        'secret.store_failed',
-        auditKey,
-        err instanceof SecretVaultUnavailableError
-          ? 'Secret storage unavailable; raw secret material was not persisted.'
-          : 'Secret storage failed; raw secret material was not persisted.',
-        {
-          ...errorMetadata(err),
-          rawSecretInSqlite: false,
-        },
-      );
-      return false;
-    }
+    let successMetadata: Record<string, unknown> = {};
+    return runSecretIpcRoute(
+      'ipc:secret:store',
+      {
+        route: 'secret:store',
+        action: 'secret:store',
+        entityId: auditKey,
+        entityType: 'secret',
+      },
+      validated,
+      () => {
+        try {
+          const secret = secretVault.store(validated.key, validated.value);
+          const credentialRefId = upsertSecretCredentialRef(secret);
+          successMetadata = {
+            backend: secret.backend,
+            credentialRefId,
+            rawSecretInSqlite: false,
+          };
+          return true;
+        } catch (err) {
+          logSecretAuditEvent(
+            'secret.store_failed',
+            auditKey,
+            err instanceof SecretVaultUnavailableError
+              ? 'Secret storage unavailable; raw secret material was not persisted.'
+              : 'Secret storage failed; raw secret material was not persisted.',
+            {
+              ...errorMetadata(err),
+              rawSecretInSqlite: false,
+            },
+          );
+          return false;
+        }
+      },
+      (result) => result === true,
+      () => successMetadata,
+    );
   }
 );
 
@@ -1418,32 +1479,40 @@ ipcMain.handle(
   'secret:retrieve',
   async (_event, key: string): Promise<string | null> => {
     const auditKey = validateSecretKeyInput(key);
-    policyService.assertAllowed('secret:retrieve', {
-      caller: 'ipc',
-      action: 'secret:retrieve',
-    });
-    try {
-      logSecretAuditEvent(
-        'secret.retrieve_denied',
-        auditKey,
-        'Renderer secret retrieval denied; plaintext secrets are available only to main-process services.',
-        {
-          exists: secretVault.has(auditKey),
-          plaintextReturned: false,
-        },
-      );
-    } catch (err) {
-      logSecretAuditEvent(
-        'secret.use_failed',
-        auditKey,
-        'Secret retrieval check failed; plaintext was not returned to renderer.',
-        {
-          ...errorMetadata(err),
-          plaintextReturned: false,
-        },
-      );
-    }
-    return null;
+    return runSecretIpcRoute(
+      'ipc:secret:retrieve',
+      {
+        route: 'secret:retrieve',
+        action: 'secret:retrieve',
+        entityId: auditKey,
+        entityType: 'secret',
+      },
+      auditKey,
+      () => {
+        try {
+          logSecretAuditEvent(
+            'secret.retrieve_denied',
+            auditKey,
+            'Renderer secret retrieval denied; plaintext secrets are available only to main-process services.',
+            {
+              exists: secretVault.has(auditKey),
+              plaintextReturned: false,
+            },
+          );
+        } catch (err) {
+          logSecretAuditEvent(
+            'secret.use_failed',
+            auditKey,
+            'Secret retrieval check failed; plaintext was not returned to renderer.',
+            {
+              ...errorMetadata(err),
+              plaintextReturned: false,
+            },
+          );
+        }
+        return null;
+      },
+    );
   }
 );
 
@@ -1451,35 +1520,41 @@ ipcMain.handle(
   'secret:delete',
   async (_event, key: string): Promise<boolean> => {
     const auditKey = validateSecretKeyInput(key);
-    policyService.assertAllowed('secret:delete', {
-      caller: 'ipc',
-      action: 'secret:delete',
-    });
-    try {
-      const metadata = secretVault.metadata(auditKey);
-      const deleted = secretVault.delete(auditKey);
-      if (deleted) {
-        const deletedCredentialRefIds = deleteSecretCredentialRefs(auditKey);
-        logSecretAuditEvent(
-          'secret.deleted',
-          auditKey,
-          'Secret material deleted from secure local storage.',
-          {
-            backend: metadata?.backend ?? 'unknown',
-            deletedCredentialRefIds,
-          },
-        );
-      }
-      return deleted;
-    } catch (err) {
-      logSecretAuditEvent(
-        'secret.delete_failed',
-        auditKey,
-        'Secret delete failed; no secret value was logged.',
-        errorMetadata(err),
-      );
-      return false;
-    }
+    let successMetadata: Record<string, unknown> = {};
+    return runSecretIpcRoute(
+      'ipc:secret:delete',
+      {
+        route: 'secret:delete',
+        action: 'secret:delete',
+        entityId: auditKey,
+        entityType: 'secret',
+      },
+      auditKey,
+      () => {
+        try {
+          const metadata = secretVault.metadata(auditKey);
+          const deleted = secretVault.delete(auditKey);
+          if (deleted) {
+            const deletedCredentialRefIds = deleteSecretCredentialRefs(auditKey);
+            successMetadata = {
+              backend: metadata?.backend ?? 'unknown',
+              deletedCredentialRefIds,
+            };
+          }
+          return deleted;
+        } catch (err) {
+          logSecretAuditEvent(
+            'secret.delete_failed',
+            auditKey,
+            'Secret delete failed; no secret value was logged.',
+            errorMetadata(err),
+          );
+          return false;
+        }
+      },
+      (result) => result === true,
+      () => successMetadata,
+    );
   }
 );
 
@@ -2134,11 +2209,75 @@ ipcMain.handle('host-tag:delete', async (_event, tagId: string) => {
 });
 
 // Credential References
-ipcMain.handle('credential-ref:list', async () => mvpStore.listCredentialRefs());
-ipcMain.handle('credential-ref:get', async (_event, refId: string) => mvpStore.getCredentialRef(refId));
-ipcMain.handle('credential-ref:create', async (_event, input: CreateCredentialRefInput) => mvpStore.createCredentialRef(input));
-ipcMain.handle('credential-ref:update', async (_event, refId: string, input: UpdateCredentialRefInput) => mvpStore.updateCredentialRef(refId, input));
-ipcMain.handle('credential-ref:delete', async (_event, refId: string) => mvpStore.deleteCredentialRef(refId));
+ipcMain.handle('credential-ref:list', async (_event, input?: unknown) => {
+  validateNoInput(input);
+  return runCredentialRefIpcRoute(
+    'ipc:credential-ref:list',
+    {
+      route: 'credential-ref:list',
+      action: 'credential-ref:list',
+      entityType: 'credential_ref',
+    },
+    null,
+    () => mvpStore.listCredentialRefs(),
+  );
+});
+ipcMain.handle('credential-ref:get', async (_event, refId: string) => {
+  const validatedRefId = validateCredentialRefIdInput(refId);
+  return runCredentialRefIpcRoute(
+    'ipc:credential-ref:get',
+    {
+      route: 'credential-ref:get',
+      action: 'credential-ref:get',
+      entityId: validatedRefId,
+      entityType: 'credential_ref',
+    },
+    validatedRefId,
+    () => mvpStore.getCredentialRef(validatedRefId),
+  );
+});
+ipcMain.handle('credential-ref:create', async (_event, input: CreateCredentialRefInput) => {
+  const validatedInput = validateCredentialRefCreateInput(input);
+  return runCredentialRefIpcRoute(
+    'ipc:credential-ref:create',
+    {
+      route: 'credential-ref:create',
+      action: 'credential-ref:create',
+      entityType: 'credential_ref',
+    },
+    validatedInput,
+    () => mvpStore.createCredentialRef(validatedInput),
+  );
+});
+ipcMain.handle('credential-ref:update', async (_event, refId: string, input: UpdateCredentialRefInput) => {
+  const validatedRefId = validateCredentialRefIdInput(refId);
+  const validatedInput = validateCredentialRefUpdateInput(input);
+  return runCredentialRefIpcRoute(
+    'ipc:credential-ref:update',
+    {
+      route: 'credential-ref:update',
+      action: 'credential-ref:update',
+      entityId: validatedRefId,
+      entityType: 'credential_ref',
+    },
+    validatedInput,
+    () => mvpStore.updateCredentialRef(validatedRefId, validatedInput),
+  );
+});
+ipcMain.handle('credential-ref:delete', async (_event, refId: string) => {
+  const validatedRefId = validateCredentialRefIdInput(refId);
+  return runCredentialRefIpcRoute(
+    'ipc:credential-ref:delete',
+    {
+      route: 'credential-ref:delete',
+      action: 'credential-ref:delete',
+      entityId: validatedRefId,
+      entityType: 'credential_ref',
+    },
+    validatedRefId,
+    () => mvpStore.deleteCredentialRef(validatedRefId),
+  );
+});
 
 // App Manifests
 ipcMain.handle('app-manifest:list', async () => mvpStore.listAppManifests());

@@ -23,6 +23,10 @@ export type PolicyCapability =
   | 'workspace-file:write'
   | 'workspace-profile:read'
   | 'workspace-profile:write'
+  | 'credential-ref:read'
+  | 'credential-ref:create'
+  | 'credential-ref:update'
+  | 'credential-ref:delete'
   | 'terminal:start'
   | 'terminal:write'
   | 'terminal:resize'
@@ -80,6 +84,10 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'workspace-file:write',
   'workspace-profile:read',
   'workspace-profile:write',
+  'credential-ref:read',
+  'credential-ref:create',
+  'credential-ref:update',
+  'credential-ref:delete',
   'terminal:start',
   'terminal:write',
   'terminal:resize',

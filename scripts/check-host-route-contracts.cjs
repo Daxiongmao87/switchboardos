@@ -211,6 +211,46 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:credential-ref:list',
+    routeMarker: "'credential-ref:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:credential-ref:get',
+    routeMarker: "'credential-ref:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:credential-ref:create',
+    routeMarker: "'credential-ref:create'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:credential-ref:update',
+    routeMarker: "'credential-ref:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:credential-ref:delete',
+    routeMarker: "'credential-ref:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:secret:store',
+    routeMarker: "'secret:store'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:secret:retrieve',
+    routeMarker: "'secret:retrieve'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:secret:delete',
+    routeMarker: "'secret:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     routeMarker: "'/api/hosts'",
     contextFile: 'src/main/hosted-server.ts',
@@ -339,6 +379,13 @@ const REQUIRED_HOST_CAPABILITIES = [
   'workspace-file:write',
   'workspace-profile:read',
   'workspace-profile:write',
+  'credential-ref:read',
+  'credential-ref:create',
+  'credential-ref:update',
+  'credential-ref:delete',
+  'secret:store',
+  'secret:retrieve',
+  'secret:delete',
 ];
 
 const failures = [];
@@ -601,7 +648,9 @@ function validateIpcHostHandlers() {
           handlersByChannel.set(channelArg.text, {
             hasContractCall: handlerText.includes('runHostRouteContract({')
               || handlerText.includes('runWorkspaceFileIpcRoute(')
-              || handlerText.includes('runWorkspaceProfileIpcRoute('),
+              || handlerText.includes('runWorkspaceProfileIpcRoute(')
+              || handlerText.includes('runCredentialRefIpcRoute(')
+              || handlerText.includes('runSecretIpcRoute('),
           });
         }
       }

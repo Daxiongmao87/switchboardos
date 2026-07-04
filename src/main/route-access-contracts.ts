@@ -77,6 +77,8 @@ export interface RouteAccessExecutionParams<TResult> {
   context: RouteAccessExecutionContext;
   input?: unknown;
   execute: () => Promise<TResult> | TResult;
+  shouldAuditSuccess?: (result: TResult) => boolean;
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>;
 }
 
 export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
@@ -1734,6 +1736,296 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:credential-ref:list',
+    transport: 'ipc',
+    route: {
+      channel: 'credential-ref:list',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'credential-ref:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'credential_ref.listed',
+      entityType: 'credential_ref',
+      entityIdSource: 'none',
+      message: 'Credential references listed.',
+      metadata: {
+        actionClass: 'credential-ref-route',
+        mutatingOperation: false,
+        storesSecretMaterial: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted credential reference API is present in the current route set.',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:credential-ref:get',
+    transport: 'ipc',
+    route: {
+      channel: 'credential-ref:get',
+    },
+    requestValidator: 'validateCredentialRefIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'credential-ref:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'credential_ref.read',
+      entityType: 'credential_ref',
+      entityIdSource: 'context-entity-id',
+      message: 'Credential reference read.',
+      metadata: {
+        actionClass: 'credential-ref-route',
+        mutatingOperation: false,
+        storesSecretMaterial: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted credential reference API is present in the current route set.',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:credential-ref:create',
+    transport: 'ipc',
+    route: {
+      channel: 'credential-ref:create',
+    },
+    requestValidator: 'validateCredentialRefCreateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'credential-ref:create',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'credential_ref.created',
+      entityType: 'credential_ref',
+      entityIdSource: 'result-id',
+      message: 'Credential reference created.',
+      metadata: {
+        actionClass: 'credential-ref-route',
+        mutatingOperation: true,
+        storesSecretMaterial: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted credential reference API is present in the current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:credential-ref:update',
+    transport: 'ipc',
+    route: {
+      channel: 'credential-ref:update',
+    },
+    requestValidator: 'validateCredentialRefUpdateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'credential-ref:update',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'credential_ref.updated',
+      entityType: 'credential_ref',
+      entityIdSource: 'context-entity-id',
+      message: 'Credential reference updated.',
+      metadata: {
+        actionClass: 'credential-ref-route',
+        mutatingOperation: true,
+        storesSecretMaterial: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted credential reference API is present in the current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:credential-ref:delete',
+    transport: 'ipc',
+    route: {
+      channel: 'credential-ref:delete',
+    },
+    requestValidator: 'validateCredentialRefIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'credential-ref:delete',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'credential_ref.deleted',
+      entityType: 'credential_ref',
+      entityIdSource: 'context-entity-id',
+      message: 'Credential reference deleted.',
+      metadata: {
+        actionClass: 'credential-ref-route',
+        mutatingOperation: true,
+        storesSecretMaterial: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'No hosted credential reference API is present in the current route set.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:secret:store',
+    transport: 'ipc',
+    route: {
+      channel: 'secret:store',
+    },
+    requestValidator: 'validateSecretStoreInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'secret:store',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'secret.stored',
+      entityType: 'secret',
+      entityIdSource: 'context-entity-id',
+      message: 'Secret material stored with secure local storage; SQLite stores reference metadata only.',
+      metadata: {
+        actionClass: 'secret-route',
+        mutatingOperation: true,
+        rawSecretInSqlite: false,
+        secretMaterialLogged: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'Hosted browser secret storage is stubbed in the current route set and does not call a backend API.',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:secret:retrieve',
+    transport: 'ipc',
+    route: {
+      channel: 'secret:retrieve',
+    },
+    requestValidator: 'validateSecretKeyInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'secret:retrieve',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'secret.retrieve_checked',
+      entityType: 'secret',
+      entityIdSource: 'context-entity-id',
+      message: 'Renderer secret retrieval request checked without returning plaintext.',
+      metadata: {
+        actionClass: 'secret-route',
+        mutatingOperation: false,
+        plaintextReturned: false,
+        secretMaterialLogged: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'Hosted browser secret retrieval is stubbed in the current route set and does not call a backend API.',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:secret:delete',
+    transport: 'ipc',
+    route: {
+      channel: 'secret:delete',
+    },
+    requestValidator: 'validateSecretKeyInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'secret:delete',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'secret.deleted',
+      entityType: 'secret',
+      entityIdSource: 'context-entity-id',
+      message: 'Secret material deleted from secure local storage.',
+      metadata: {
+        actionClass: 'secret-route',
+        mutatingOperation: true,
+        secretMaterialLogged: false,
+      },
+    },
+    parity: {
+      kind: 'exception',
+      reason: 'Hosted browser secret deletion is stubbed in the current route set and does not call a backend API.',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     transport: 'hosted',
     route: {
@@ -2408,7 +2700,8 @@ export async function runHostRouteContract<TResult>(
 
   const result = await Promise.resolve(params.execute());
 
-  if (params.contract.successAudit.required) {
+  const shouldAuditSuccess = params.shouldAuditSuccess ? params.shouldAuditSuccess(result) : true;
+  if (params.contract.successAudit.required && shouldAuditSuccess) {
     const entityId = resolveAuditEntityId(
       params.contract.successAudit.entityIdSource,
       params.context,
@@ -2418,6 +2711,7 @@ export async function runHostRouteContract<TResult>(
 
     const metadata: Record<string, unknown> = {
       ...params.contract.successAudit.metadata,
+      ...(params.successAuditMetadata ? params.successAuditMetadata(result) : {}),
       caller: params.contract.identity.caller,
       route: params.context.route,
       action: params.context.action,
