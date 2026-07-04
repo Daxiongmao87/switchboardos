@@ -31,6 +31,10 @@ import {
   validateWorkspaceFilePathInput,
   validateWorkspaceFileRenameInput,
   validateWorkspaceFileTargetPathInput,
+  validateWorkspaceActiveProfileInput,
+  validateWorkspaceProfileCreateInput,
+  validateWorkspaceProfileIdInput,
+  validateWorkspaceProfileUpdateInput,
   validateWorkspaceTrashIdInput,
 } from './runtime-validation';
 import { getHostRouteContract, runHostRouteContract } from './route-access-contracts';
@@ -43,13 +47,11 @@ import type {
   CreateAppPermissionInput,
   CreateCommandHistoryInput,
   CreateAuditEventInput,
-  CreateWorkspaceProfileInput,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
   UpdateAgentEndpointInput,
   UpdateAppManifestInput,
-  UpdateWorkspaceProfileInput,
 } from '../shared/mvp-models';
 
 type TerminalChannel = 'terminal:output' | 'terminal:status' | 'terminal:exit';
@@ -616,7 +618,7 @@ export class HostedServer {
     }
 
     if (resource === 'workspace') {
-      return this.routeWorkspaceApi(method, segments, body);
+      return this.routeWorkspaceApi(method, segments, body, session);
     }
 
     if (resource === 'workspace-files') {
@@ -711,37 +713,126 @@ export class HostedServer {
     throw new HttpError(404, `No hosted API route for ${method} /api/${segments.join('/')}.`);
   }
 
-  private routeWorkspaceApi(method: string, segments: string[], body: unknown): unknown {
+  private routeWorkspaceApi(
+    method: string,
+    segments: string[],
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
     const [, collection, idOrAction] = segments;
     if (collection === 'profiles') {
       if (segments.length === 2 && method === 'GET') {
-        return this.options.store.listWorkspaceProfiles();
+        validateHostedNoRequestBody(body);
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:GET:/api/workspace/profiles',
+          session,
+          route: '/api/workspace/profiles',
+          action: 'GET /api/workspace/profiles',
+          entityType: 'workspace_profile',
+          input: null,
+          execute: () => this.options.store.listWorkspaceProfiles(),
+        });
       }
       if (segments.length === 2 && method === 'POST') {
-        return this.options.store.createWorkspaceProfile(asRecord(body) as CreateWorkspaceProfileInput);
+        const input = validateWorkspaceProfileCreateInput(asRecord(body));
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:POST:/api/workspace/profiles',
+          session,
+          route: '/api/workspace/profiles',
+          action: 'POST /api/workspace/profiles',
+          entityType: 'workspace_profile',
+          input,
+          execute: () => this.options.store.createWorkspaceProfile(input),
+        });
       }
       if (idOrAction && method === 'GET') {
-        return this.options.store.getWorkspaceProfile(decodeURIComponent(idOrAction));
+        validateHostedNoRequestBody(body);
+        const profileId = validateWorkspaceProfileIdInput(decodeURIComponent(idOrAction));
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:GET:/api/workspace/profiles/:id',
+          session,
+          route: `/api/workspace/profiles/${profileId}`,
+          action: 'GET /api/workspace/profiles/:id',
+          entityId: profileId,
+          entityType: 'workspace_profile',
+          input: profileId,
+          execute: () => this.options.store.getWorkspaceProfile(profileId),
+        });
       }
       if (idOrAction && method === 'PATCH') {
-        return this.options.store.updateWorkspaceProfile(
-          decodeURIComponent(idOrAction),
-          asRecord(body) as UpdateWorkspaceProfileInput,
-        );
+        const profileId = validateWorkspaceProfileIdInput(decodeURIComponent(idOrAction));
+        const input = validateWorkspaceProfileUpdateInput(asRecord(body));
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:PATCH:/api/workspace/profiles/:id',
+          session,
+          route: `/api/workspace/profiles/${profileId}`,
+          action: 'PATCH /api/workspace/profiles/:id',
+          entityId: profileId,
+          entityType: 'workspace_profile',
+          input,
+          execute: () => this.options.store.updateWorkspaceProfile(profileId, input),
+        });
       }
       if (idOrAction && method === 'DELETE') {
-        return this.options.store.deleteWorkspaceProfile(decodeURIComponent(idOrAction));
+        validateHostedNoRequestBody(body);
+        const profileId = validateWorkspaceProfileIdInput(decodeURIComponent(idOrAction));
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:DELETE:/api/workspace/profiles/:id',
+          session,
+          route: `/api/workspace/profiles/${profileId}`,
+          action: 'DELETE /api/workspace/profiles/:id',
+          entityId: profileId,
+          entityType: 'workspace_profile',
+          input: profileId,
+          execute: () => this.options.store.deleteWorkspaceProfile(profileId),
+        });
       }
     }
 
     if (collection === 'active-profile-id') {
       if (method === 'GET') {
-        return this.options.store.getActiveWorkspaceProfileId();
+        validateHostedNoRequestBody(body);
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:GET:/api/workspace/active-profile-id',
+          session,
+          route: '/api/workspace/active-profile-id',
+          action: 'GET /api/workspace/active-profile-id',
+          entityType: 'workspace_state',
+          input: null,
+          execute: () => this.options.store.getActiveWorkspaceProfileId(),
+        });
       }
-      if (method === 'PUT' || method === 'POST') {
-        const profileId = stringField(body, 'profileId');
-        this.options.store.setActiveWorkspaceProfileId(profileId);
-        return profileId;
+      if (method === 'PUT') {
+        const profileId = validateWorkspaceActiveProfileInput(body);
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:PUT:/api/workspace/active-profile-id',
+          session,
+          route: '/api/workspace/active-profile-id',
+          action: 'PUT /api/workspace/active-profile-id',
+          entityId: profileId,
+          entityType: 'workspace_state',
+          input: { profileId },
+          execute: () => {
+            this.options.store.setActiveWorkspaceProfileId(profileId);
+            return profileId;
+          },
+        });
+      }
+      if (method === 'POST') {
+        const profileId = validateWorkspaceActiveProfileInput(body);
+        return this.runHostedWorkspaceProfileRoute({
+          contractId: 'hosted:POST:/api/workspace/active-profile-id',
+          session,
+          route: '/api/workspace/active-profile-id',
+          action: 'POST /api/workspace/active-profile-id',
+          entityId: profileId,
+          entityType: 'workspace_state',
+          input: { profileId },
+          execute: () => {
+            this.options.store.setActiveWorkspaceProfileId(profileId);
+            return profileId;
+          },
+        });
       }
     }
 
@@ -754,6 +845,35 @@ export class HostedServer {
       throw new HttpError(500, `Missing route access contract: ${contractId}`);
     }
     return contract;
+  }
+
+  private runHostedWorkspaceProfileRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      entityType: string;
+      input: unknown;
+      execute: () => TResult;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+    });
   }
 
   private runHostedWorkspaceFileRoute<TResult>(
@@ -1447,15 +1567,6 @@ function validateHostedNoRequestBody(value: unknown): void {
     return;
   }
   validateNoInput(value);
-}
-
-function stringField(value: unknown, field: string): string {
-  const record = asRecord(value);
-  const fieldValue = record[field];
-  if (typeof fieldValue !== 'string') {
-    throw new HttpError(400, `Missing string field "${field}".`);
-  }
-  return fieldValue;
 }
 
 function bodyHostId(value: unknown): string | null {

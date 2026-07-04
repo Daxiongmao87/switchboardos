@@ -19,6 +19,9 @@ import type {
   UpdateHostGroupInput,
   UpdateHostInput,
   UpdateHostTagInput,
+  CreateWorkspaceProfileInput,
+  UpdateWorkspaceProfileInput,
+  WorkspaceLayoutSnapshot,
 } from '../shared/mvp-models';
 
 export class RuntimeValidationError extends Error {
@@ -204,6 +207,46 @@ export function validateWorkspaceTrashIdInput(value: unknown): string {
     throw new RuntimeValidationError('id must be a 24-character lowercase hexadecimal trash id.');
   }
   return id;
+}
+
+export function validateWorkspaceProfileIdInput(value: unknown): string {
+  return requireNonEmptyString(value, 'profileId');
+}
+
+export function validateWorkspaceProfileCreateInput(value: unknown): CreateWorkspaceProfileInput {
+  const record = requireRecord(value, 'workspace profile create input');
+  const input: CreateWorkspaceProfileInput = {
+    name: 'New workspace',
+    layout: emptyWorkspaceLayout(),
+  };
+
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.layout !== undefined) {
+    input.layout = validateWorkspaceLayoutInput(record.layout);
+  }
+
+  return input;
+}
+
+export function validateWorkspaceProfileUpdateInput(value: unknown): UpdateWorkspaceProfileInput {
+  const record = requireRecord(value, 'workspace profile update input');
+  const input: UpdateWorkspaceProfileInput = {};
+
+  if (record.name !== undefined) {
+    input.name = sanitizeOptionalString(record.name, 'name');
+  }
+  if (record.layout !== undefined) {
+    input.layout = validateWorkspaceLayoutInput(record.layout);
+  }
+
+  return input;
+}
+
+export function validateWorkspaceActiveProfileInput(value: unknown): string {
+  const record = requireRecord(value, 'active workspace profile input');
+  return validateWorkspaceProfileIdInput(record.profileId);
 }
 
 export function validateHostCreateInput(value: unknown): CreateHostInput {
@@ -513,6 +556,18 @@ function normalizeWorkspaceFileKind(value: unknown): WorkspaceFileKindInput {
   return WORKSPACE_FILE_KINDS.includes(value as WorkspaceFileKindInput)
     ? value as WorkspaceFileKindInput
     : 'note';
+}
+
+function validateWorkspaceLayoutInput(value: unknown): WorkspaceLayoutSnapshot {
+  requireRecord(value, 'layout');
+  return value as WorkspaceLayoutSnapshot;
+}
+
+function emptyWorkspaceLayout(): WorkspaceLayoutSnapshot {
+  return {
+    desktopShortcutIds: [],
+    windows: [],
+  };
 }
 
 function requireRecordArray(value: unknown, label: string): Record<string, unknown>[] {

@@ -66,6 +66,9 @@ import {
   validateWorkspaceFilePathInput,
   validateWorkspaceFileRenameInput,
   validateWorkspaceFileTargetPathInput,
+  validateWorkspaceProfileCreateInput,
+  validateWorkspaceProfileIdInput,
+  validateWorkspaceProfileUpdateInput,
   validateWorkspaceTrashIdInput,
 } from './runtime-validation';
 import type {
@@ -896,6 +899,30 @@ function runWorkspaceFileIpcRoute<TResult>(
   });
 }
 
+function runWorkspaceProfileIpcRoute<TResult>(
+  contractId: string,
+  context: {
+    route: string;
+    action: string;
+    entityId?: string | null;
+    entityType: string;
+  },
+  input: unknown,
+  execute: () => TResult,
+): Promise<TResult> {
+  return runHostRouteContract({
+    contract: requireRouteAccessContract(contractId),
+    policyService,
+    logAuditEvent: (event) => mvpStore.logAuditEvent(event),
+    context: {
+      caller: 'ipc',
+      ...context,
+    },
+    input,
+    execute,
+  });
+}
+
 /**
  * Create the main application window.
  */
@@ -1527,51 +1554,128 @@ ipcMain.handle(
 // Workspace profiles
 ipcMain.handle(
   'workspace:list-profiles',
-  async () => {
-    return mvpStore.listWorkspaceProfiles();
+  async (_event, input?: unknown) => {
+    validateNoInput(input);
+    return runWorkspaceProfileIpcRoute(
+      'ipc:workspace:list-profiles',
+      {
+        route: 'workspace:list-profiles',
+        action: 'workspace:list-profiles',
+        entityType: 'workspace_profile',
+      },
+      null,
+      () => mvpStore.listWorkspaceProfiles(),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace:get-profile',
   async (_event, profileId: string) => {
-    return mvpStore.getWorkspaceProfile(profileId);
+    const validatedProfileId = validateWorkspaceProfileIdInput(profileId);
+    return runWorkspaceProfileIpcRoute(
+      'ipc:workspace:get-profile',
+      {
+        route: 'workspace:get-profile',
+        action: 'workspace:get-profile',
+        entityId: validatedProfileId,
+        entityType: 'workspace_profile',
+      },
+      validatedProfileId,
+      () => mvpStore.getWorkspaceProfile(validatedProfileId),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace:create-profile',
   async (_event, input: CreateWorkspaceProfileInput) => {
-    return mvpStore.createWorkspaceProfile(input);
+    const validatedInput = validateWorkspaceProfileCreateInput(input);
+    return runWorkspaceProfileIpcRoute(
+      'ipc:workspace:create-profile',
+      {
+        route: 'workspace:create-profile',
+        action: 'workspace:create-profile',
+        entityType: 'workspace_profile',
+      },
+      validatedInput,
+      () => mvpStore.createWorkspaceProfile(validatedInput),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace:update-profile',
   async (_event, profileId: string, input: UpdateWorkspaceProfileInput) => {
-    return mvpStore.updateWorkspaceProfile(profileId, input);
+    const validatedProfileId = validateWorkspaceProfileIdInput(profileId);
+    const validatedInput = validateWorkspaceProfileUpdateInput(input);
+    return runWorkspaceProfileIpcRoute(
+      'ipc:workspace:update-profile',
+      {
+        route: 'workspace:update-profile',
+        action: 'workspace:update-profile',
+        entityId: validatedProfileId,
+        entityType: 'workspace_profile',
+      },
+      validatedInput,
+      () => mvpStore.updateWorkspaceProfile(validatedProfileId, validatedInput),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace:delete-profile',
   async (_event, profileId: string) => {
-    return mvpStore.deleteWorkspaceProfile(profileId);
+    const validatedProfileId = validateWorkspaceProfileIdInput(profileId);
+    return runWorkspaceProfileIpcRoute(
+      'ipc:workspace:delete-profile',
+      {
+        route: 'workspace:delete-profile',
+        action: 'workspace:delete-profile',
+        entityId: validatedProfileId,
+        entityType: 'workspace_profile',
+      },
+      validatedProfileId,
+      () => mvpStore.deleteWorkspaceProfile(validatedProfileId),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace:get-active-profile-id',
-  async () => {
-    return mvpStore.getActiveWorkspaceProfileId();
+  async (_event, input?: unknown) => {
+    validateNoInput(input);
+    return runWorkspaceProfileIpcRoute(
+      'ipc:workspace:get-active-profile-id',
+      {
+        route: 'workspace:get-active-profile-id',
+        action: 'workspace:get-active-profile-id',
+        entityType: 'workspace_state',
+      },
+      null,
+      () => mvpStore.getActiveWorkspaceProfileId(),
+    );
   }
 );
 
 ipcMain.handle(
   'workspace:set-active-profile-id',
   async (_event, profileId: string) => {
-    mvpStore.setActiveWorkspaceProfileId(profileId);
-    return profileId;
+    const validatedProfileId = validateWorkspaceProfileIdInput(profileId);
+    return runWorkspaceProfileIpcRoute(
+      'ipc:workspace:set-active-profile-id',
+      {
+        route: 'workspace:set-active-profile-id',
+        action: 'workspace:set-active-profile-id',
+        entityId: validatedProfileId,
+        entityType: 'workspace_state',
+      },
+      validatedProfileId,
+      () => {
+        mvpStore.setActiveWorkspaceProfileId(validatedProfileId);
+        return validatedProfileId;
+      },
+    );
   }
 );
 

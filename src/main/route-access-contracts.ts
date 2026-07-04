@@ -31,6 +31,7 @@ export interface RouteAccessSuccessAudit {
     | 'context-host-id'
     | 'context-entity-id'
     | 'result-host-id'
+    | 'result-profile-id'
     | 'result-id'
     | 'input-host-id'
     | 'result-first-id';
@@ -1200,6 +1201,539 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:workspace:list-profiles',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace:list-profiles',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-profile:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_profile.listed',
+      entityType: 'workspace_profile',
+      entityIdSource: 'none',
+      message: 'Workspace profiles listed.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/workspace/profiles',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:workspace:get-profile',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace:get-profile',
+    },
+    requestValidator: 'validateWorkspaceProfileIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-profile:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_profile.read',
+      entityType: 'workspace_profile',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace profile read.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/workspace/profiles/:id',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:workspace:create-profile',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace:create-profile',
+    },
+    requestValidator: 'validateWorkspaceProfileCreateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.created',
+      entityType: 'workspace_profile',
+      entityIdSource: 'result-profile-id',
+      message: 'Workspace profile created.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/workspace/profiles',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace:update-profile',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace:update-profile',
+    },
+    requestValidator: 'validateWorkspaceProfileUpdateInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.updated',
+      entityType: 'workspace_profile',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace profile updated.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:PATCH:/api/workspace/profiles/:id',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace:delete-profile',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace:delete-profile',
+    },
+    requestValidator: 'validateWorkspaceProfileIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.deleted',
+      entityType: 'workspace_profile',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace profile deleted.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:DELETE:/api/workspace/profiles/:id',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'ipc:workspace:get-active-profile-id',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace:get-active-profile-id',
+    },
+    requestValidator: 'validateNoInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-profile:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_profile.active_read',
+      entityType: 'workspace_state',
+      entityIdSource: 'none',
+      message: 'Active workspace profile read.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/workspace/active-profile-id',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'ipc:workspace:set-active-profile-id',
+    transport: 'ipc',
+    route: {
+      channel: 'workspace:set-active-profile-id',
+    },
+    requestValidator: 'validateWorkspaceProfileIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.active_set',
+      entityType: 'workspace_state',
+      entityIdSource: 'context-entity-id',
+      message: 'Active workspace profile set.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:PUT:/api/workspace/active-profile-id',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/workspace/profiles',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/workspace/profiles',
+    },
+    requestValidator: 'validateHostedNoRequestBody',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_profile.listed',
+      entityType: 'workspace_profile',
+      entityIdSource: 'none',
+      message: 'Workspace profiles listed.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:list-profiles',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'hosted:POST:/api/workspace/profiles',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace/profiles',
+    },
+    requestValidator: 'validateWorkspaceProfileCreateInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.created',
+      entityType: 'workspace_profile',
+      entityIdSource: 'result-profile-id',
+      message: 'Workspace profile created.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:create-profile',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/workspace/profiles/:id',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/workspace/profiles/:id',
+    },
+    requestValidator: 'validateWorkspaceProfileIdInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_profile.read',
+      entityType: 'workspace_profile',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace profile read.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:get-profile',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'hosted:PATCH:/api/workspace/profiles/:id',
+    transport: 'hosted',
+    route: {
+      method: 'PATCH',
+      path: '/api/workspace/profiles/:id',
+    },
+    requestValidator: 'validateWorkspaceProfileUpdateInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.updated',
+      entityType: 'workspace_profile',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace profile updated.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:update-profile',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace/profiles/:id',
+    transport: 'hosted',
+    route: {
+      method: 'DELETE',
+      path: '/api/workspace/profiles/:id',
+    },
+    requestValidator: 'validateWorkspaceProfileIdInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.deleted',
+      entityType: 'workspace_profile',
+      entityIdSource: 'context-entity-id',
+      message: 'Workspace profile deleted.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:delete-profile',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/workspace/active-profile-id',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/workspace/active-profile-id',
+    },
+    requestValidator: 'validateHostedNoRequestBody',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'workspace_profile.active_read',
+      entityType: 'workspace_state',
+      entityIdSource: 'none',
+      message: 'Active workspace profile read.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:get-active-profile-id',
+    },
+    mutatesState: false,
+  },
+  {
+    id: 'hosted:PUT:/api/workspace/active-profile-id',
+    transport: 'hosted',
+    route: {
+      method: 'PUT',
+      path: '/api/workspace/active-profile-id',
+    },
+    requestValidator: 'validateWorkspaceActiveProfileInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.active_set',
+      entityType: 'workspace_state',
+      entityIdSource: 'context-entity-id',
+      message: 'Active workspace profile set.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:set-active-profile-id',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/workspace/active-profile-id',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/workspace/active-profile-id',
+    },
+    requestValidator: 'validateWorkspaceActiveProfileInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'workspace-profile:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'workspace_profile.active_set',
+      entityType: 'workspace_state',
+      entityIdSource: 'context-entity-id',
+      message: 'Active workspace profile set.',
+      metadata: {
+        actionClass: 'workspace-profile-route',
+        mutatingOperation: true,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:workspace:set-active-profile-id',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     transport: 'hosted',
     route: {
@@ -1947,6 +2481,12 @@ function resolveAuditEntityId(
       return null;
     }
     return sanitizeId(requireHostIdField(result.hostId));
+  }
+  if (source === 'result-profile-id') {
+    if (!isRecord(result)) {
+      return null;
+    }
+    return sanitizeId(requireHostIdField(result.profileId));
   }
   if (source === 'result-id') {
     if (!isRecord(result)) {

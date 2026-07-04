@@ -176,6 +176,41 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:workspace:list-profiles',
+    routeMarker: "'workspace:list-profiles'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace:get-profile',
+    routeMarker: "'workspace:get-profile'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace:create-profile',
+    routeMarker: "'workspace:create-profile'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace:update-profile',
+    routeMarker: "'workspace:update-profile'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace:delete-profile',
+    routeMarker: "'workspace:delete-profile'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace:get-active-profile-id',
+    routeMarker: "'workspace:get-active-profile-id'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace:set-active-profile-id',
+    routeMarker: "'workspace:set-active-profile-id'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'hosted:POST:/api/hosts',
     routeMarker: "'/api/hosts'",
     contextFile: 'src/main/hosted-server.ts',
@@ -248,6 +283,38 @@ const REQUIRED_HOST_CONTRACTS = [
     id: 'hosted:DELETE:/api/workspace-files/trash',
     contextFile: 'src/main/hosted-server.ts',
   },
+  {
+    id: 'hosted:GET:/api/workspace/profiles',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace/profiles',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/workspace/profiles/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/workspace/profiles/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/workspace/profiles/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/workspace/active-profile-id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PUT:/api/workspace/active-profile-id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace/active-profile-id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
 ];
 
 const REQUIRED_HOST_CAPABILITIES = [
@@ -270,6 +337,8 @@ const REQUIRED_HOST_CAPABILITIES = [
   'host-operation:run',
   'workspace-file:read',
   'workspace-file:write',
+  'workspace-profile:read',
+  'workspace-profile:write',
 ];
 
 const failures = [];
@@ -531,7 +600,8 @@ function validateIpcHostHandlers() {
           const handlerText = handler.getText();
           handlersByChannel.set(channelArg.text, {
             hasContractCall: handlerText.includes('runHostRouteContract({')
-              || handlerText.includes('runWorkspaceFileIpcRoute('),
+              || handlerText.includes('runWorkspaceFileIpcRoute(')
+              || handlerText.includes('runWorkspaceProfileIpcRoute('),
           });
         }
       }
@@ -580,6 +650,18 @@ function validateHostedDispatches() {
       const helperBody = hostedText.slice(workspaceHelperIndex, workspaceHelperIndex + 1600);
       if (!helperBody.includes('runHostRouteContract({')) {
         fail('Hosted workspace file helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/workspace/'))) {
+    const profileHelperIndex = hostedText.indexOf('private runHostedWorkspaceProfileRoute');
+    if (profileHelperIndex === -1) {
+      fail('Hosted workspace profile routes are not using runHostedWorkspaceProfileRoute.');
+    } else {
+      const helperBody = hostedText.slice(profileHelperIndex, profileHelperIndex + 1600);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted workspace profile helper is not backed by runHostRouteContract.');
       }
     }
   }
