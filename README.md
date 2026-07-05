@@ -91,6 +91,63 @@ npm run electron:package
 | `npm run electron:package` | Build Electron distributables |
 | `npm test` | Run Angular unit tests (Karma) |
 
+### Versioning and Release Workflow
+
+SwitchboardOS follows [Semantic Versioning 2.0.0](https://semver.org/) for
+release decisions. The source-of-truth package version is `package.json`.
+
+Classify every validated change before commit, tag, package, or hosted release:
+
+- **MAJOR**: incompatible changes to a public or persisted contract after
+  `1.0.0`. Before `1.0.0`, record the breaking-change classification in the
+  task/validation report and increment the `0.MINOR.0` line for a release.
+- **MINOR**: backward-compatible capabilities, routes, applet/platform
+  contracts, UI workflows, hosted APIs, IPC/preload API additions, SDK/manifest
+  additions, or other new user-visible functionality.
+- **PATCH**: backward-compatible bug fixes, security hardening that does not
+  remove or break a public contract, documentation corrections, tests, smoke
+  checks, and validation-only changes.
+- **Prerelease/build metadata**: use SemVer prerelease identifiers such as
+  `-alpha.N`, `-beta.N`, or `-rc.N` for release-candidate builds, and build
+  metadata such as `+build.N` only for trace labels that do not change ordering.
+
+Public contracts include Electron IPC channels, hosted HTTP/SSE/WebSocket APIs,
+preload APIs, applet manifests, app/action/context-menu contracts, persisted
+workspace/config/audit shapes, npm scripts used by operators, package outputs,
+and documented user workflows.
+
+Every development or validation closeout must include:
+
+- SemVer classification: `major`, `minor`, `patch`, `prerelease`, or
+  `no-version-change`.
+- Proposed next version when the change is release-bound.
+- The public contract or user workflow that controls the classification.
+- The validation evidence that supports the classification.
+
+Do not bump `package.json` for every internal development slice. Bump it in the
+same change that prepares a release candidate, package, tag, or shipped hosted
+build.
+
+### Hosted LAN Availability Gate
+
+After each validated commit that refreshes the hosted product path, keep the
+latest committed build reachable on the LAN unless a concrete blocker is
+recorded. The active daemon must be identified by tmux session name, port, LAN
+URL, and hosted token location or value.
+
+The availability check must verify:
+
+- A listener on `0.0.0.0:<port>`.
+- `GET /api/auth/session` on the LAN URL returns HTTP 200.
+- The hosted login page or authenticated app shell returns HTTP 200.
+- After token login, `/api/auth/session` returns `authenticated: true`.
+- The hosted `main.js` bundle returns HTTP 200.
+
+If the latest hosted daemon is down and no newer validation daemon is already
+running, start a new daemon for the latest committed build without stopping
+unrelated services. Record the exact tmux session, command environment, port,
+LAN URL, token, and verification results in the task report.
+
 ## License
 
 Private project.
