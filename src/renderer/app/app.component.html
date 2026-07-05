@@ -566,23 +566,44 @@
       <p
         *ngIf="errorMessage"
         class="toast error"
-        (contextmenu)="openNotificationContextMenu($event, errorMessage, 'error')"
+        data-notification-kind="error"
+        data-shell-object-id="shell:notification:error"
+        data-shell-object-kind="notification"
+        data-shell-object-owner="shell"
+        data-shell-object-source="shell"
+        data-shell-object-target-scope="notification"
+        [attr.data-shell-object-action-ids]="notificationActionIds.join(',')"
+        (contextmenu)="openNotificationContextMenu($event, notificationContext('error', errorMessage))"
       >
         {{ errorMessage }}
       </p>
       <p
         *ngIf="statusMessage"
         class="toast"
-        (contextmenu)="openNotificationContextMenu($event, statusMessage, 'status')"
+        data-notification-kind="status"
+        data-shell-object-id="shell:notification:status"
+        data-shell-object-kind="notification"
+        data-shell-object-owner="shell"
+        data-shell-object-source="shell"
+        data-shell-object-target-scope="notification"
+        [attr.data-shell-object-action-ids]="notificationActionIds.join(',')"
+        (contextmenu)="openNotificationContextMenu($event, notificationContext('status', statusMessage))"
       >
         {{ statusMessage }}
       </p>
       <p
-        *ngFor="let toast of toasts; let toastIndex = index"
+        *ngFor="let toast of toasts"
         class="toast"
-        (contextmenu)="openNotificationContextMenu($event, toast, 'toast', toastIndex)"
+        data-notification-kind="toast"
+        data-shell-object-kind="notification"
+        data-shell-object-owner="shell"
+        data-shell-object-source="shell"
+        data-shell-object-target-scope="notification"
+        [attr.data-shell-object-id]="toast.id"
+        [attr.data-shell-object-action-ids]="notificationActionIds.join(',')"
+        (contextmenu)="openNotificationContextMenu($event, notificationContext('toast', toast.message, toast.id))"
       >
-        {{ toast }}
+        {{ toast.message }}
       </p>
     </section>
 
@@ -593,6 +614,16 @@
       [style.left.px]="menu.x"
       [style.top.px]="menu.y"
       [attr.data-context-target]="menu.target"
+      [attr.data-shell-object-id]="menu.object?.id || null"
+      [attr.data-shell-object-kind]="menu.object?.kind || null"
+      [attr.data-shell-object-owner]="menu.object?.owner || null"
+      [attr.data-shell-object-source]="menu.object?.source || null"
+      [attr.data-shell-object-target-scope]="menu.object?.targetScope || null"
+      [attr.data-shell-object-source-app-id]="menu.object?.sourceAppId || null"
+      [attr.data-shell-object-window-id]="menu.object?.windowId || null"
+      [attr.data-shell-object-notification-kind]="menu.object?.notificationKind || null"
+      [attr.data-shell-object-action-ids]="menu.object ? shellPrimitiveActionIds(menu.object) : null"
+      [attr.data-shell-object-capabilities]="menu.object ? shellPrimitiveCapabilities(menu.object) || null : null"
       [attr.aria-label]="menu.label + ' context menu'"
       (click)="$event.stopPropagation()"
       (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
@@ -684,6 +715,12 @@
     class="taskbar"
     aria-label="Taskbar and status panel"
     data-testid="taskbar"
+    [attr.data-shell-object-id]="taskbarPanelObject.id"
+    [attr.data-shell-object-kind]="taskbarPanelObject.kind"
+    [attr.data-shell-object-owner]="taskbarPanelObject.owner"
+    [attr.data-shell-object-source]="taskbarPanelObject.source"
+    [attr.data-shell-object-target-scope]="taskbarPanelObject.targetScope"
+    [attr.data-shell-object-action-ids]="shellPrimitiveActionIds(taskbarPanelObject)"
     (contextmenu)="openTaskbarContextMenu($event)"
   >
     <button
@@ -796,6 +833,15 @@
         class="taskbar-window"
         [class.is-focused]="shellWindow.focused"
         [class.is-minimized]="shellWindow.state === 'minimized'"
+        [attr.data-shell-object-id]="taskbarWindowObject(shellWindow).id"
+        [attr.data-shell-object-kind]="taskbarWindowObject(shellWindow).kind"
+        [attr.data-shell-object-owner]="taskbarWindowObject(shellWindow).owner"
+        [attr.data-shell-object-source]="taskbarWindowObject(shellWindow).source"
+        [attr.data-shell-object-target-scope]="taskbarWindowObject(shellWindow).targetScope"
+        [attr.data-shell-object-source-app-id]="taskbarWindowObject(shellWindow).sourceAppId || null"
+        [attr.data-shell-object-window-id]="taskbarWindowObject(shellWindow).windowId || null"
+        [attr.data-shell-object-action-ids]="shellPrimitiveActionIds(taskbarWindowObject(shellWindow))"
+        [attr.data-shell-object-capabilities]="shellPrimitiveCapabilities(taskbarWindowObject(shellWindow)) || null"
         (click)="shellWindow.state === 'minimized' ? restoreWindow(shellWindow) : focusWindow(shellWindow)"
         (contextmenu)="openTaskbarWindowContextMenu($event, shellWindow)"
       >
@@ -808,6 +854,12 @@
       class="taskbar-tray"
       aria-label="Status and tray area"
       data-testid="taskbar-tray"
+      [attr.data-shell-object-id]="trayStatusObject.id"
+      [attr.data-shell-object-kind]="trayStatusObject.kind"
+      [attr.data-shell-object-owner]="trayStatusObject.owner"
+      [attr.data-shell-object-source]="trayStatusObject.source"
+      [attr.data-shell-object-target-scope]="trayStatusObject.targetScope"
+      [attr.data-shell-object-action-ids]="shellPrimitiveActionIds(trayStatusObject)"
       (contextmenu)="openTrayStatusContextMenu($event)"
     >
       <span *ngIf="appInfo" class="taskbar-muted">v{{ appInfo.version }}</span>

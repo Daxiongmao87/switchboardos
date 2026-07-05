@@ -157,6 +157,21 @@ type LauncherTarget =
 type ShellActionSource = 'shell' | 'app-manifest' | 'window-object' | 'host-object';
 type PaletteTargetScope = 'command-palette' | 'focused-window' | 'global-keyboard';
 type KeyboardShortcutKind = 'shell' | 'app' | 'window-action';
+type ShellPrimitiveKind = 'panel' | 'tray-status' | 'taskbar-window' | 'notification';
+
+interface ShellPrimitiveObject {
+  id: string;
+  kind: ShellPrimitiveKind;
+  owner: 'shell';
+  source: ShellActionSource;
+  targetScope: ContextMenuState['target'];
+  label: string;
+  actionIds: string[];
+  sourceAppId?: ShellAppId;
+  windowId?: string;
+  notificationKind?: ShellNotificationKind;
+  requiredCapabilities?: string[];
+}
 
 interface ShellKeyboardShortcut {
   id: string;
@@ -348,6 +363,36 @@ const SHELL_KEYBOARD_SHORTCUTS: ShellKeyboardShortcut[] = [
     altKey: true,
   },
 ];
+
+const TASKBAR_PANEL_ACTION_IDS = [
+  'open-menu',
+  'close-menu',
+  'panel-settings',
+  'add-applet',
+  'arrange-lock-panel',
+  'show-desktop',
+  'task-manager',
+] as const;
+const TRAY_STATUS_ACTION_IDS = [
+  'status-details',
+  'tray-notification-settings',
+  'tray-panel-settings',
+  'refresh-status',
+] as const;
+const TASKBAR_WINDOW_ACTION_IDS = [
+  'show-taskbar-window',
+  'new-window',
+  'toggle-minimize-window',
+  'pin-app',
+  'unpin-app',
+  'pinned-default-app',
+  'close-window',
+] as const;
+const NOTIFICATION_ACTION_IDS = [
+  'dismiss-notification',
+  'clear-notifications',
+  'open-notification-settings',
+] as const;
 
 function buildSystemAppletManifest(input: {
   appId: ShellAppId;
@@ -595,6 +640,7 @@ interface ContextMenuState {
   windowId?: string;
   workspaceArtifact?: WorkspaceArtifact;
   notification?: ShellNotificationContext;
+  object?: ShellPrimitiveObject;
   items: ContextMenuItem[];
 }
 
@@ -602,9 +648,17 @@ type TerminalContextAction = 'copy' | 'paste' | 'clear';
 type ShellNotificationKind = 'toast' | 'status' | 'error';
 
 interface ShellNotificationContext {
+  id: string;
   kind: ShellNotificationKind;
   message: string;
-  toastIndex?: number;
+  toastId?: string;
+}
+
+interface ShellToastNotification {
+  id: string;
+  kind: 'toast';
+  message: string;
+  createdAt: string;
 }
 
 interface SystemAppletStateDescriptor {
@@ -688,8 +742,24 @@ export class AppComponent implements OnInit, OnDestroy {
   workspaceProfilesLoaded = false;
   statusMessage = '';
   errorMessage = '';
-  toasts: string[] = [];
+  toasts: ShellToastNotification[] = [];
   toastTimers: number[] = [];
+  toastSequence = 0;
+  readonly taskbarPanelObject = this.createShellPrimitiveObject({
+    id: 'shell:panel:primary',
+    kind: 'panel',
+    label: 'Taskbar',
+    targetScope: 'taskbar',
+    actionIds: [...TASKBAR_PANEL_ACTION_IDS],
+  });
+  readonly trayStatusObject = this.createShellPrimitiveObject({
+    id: 'shell:tray:status',
+    kind: 'tray-status',
+    label: 'Status Area',
+    targetScope: 'tray-status',
+    actionIds: [...TRAY_STATUS_ACTION_IDS],
+  });
+  readonly notificationActionIds = [...NOTIFICATION_ACTION_IDS];
   isLoadingHosts = false;
   metricsLoadingHostId: string | null = null;
   hostMetricsById: Record<string, HostMetricsSnapshot> = {};
@@ -1267,6 +1337,53 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this._navHandler) {
       window.removeEventListener('message', this._navHandler);
     }
+  }
+
+  taskbarWindowObject(windowItem: ShellWindow): ShellPrimitiveObject {
+    return this.createShellPrimitiveObject({
+      id: `shell:taskbar-window:${windowItem.windowId}`,
+      kind: 'taskbar-window',
+      source: 'window-object',
+      label: windowItem.title,
+      targetScope: 'taskbar-window',
+      actionIds: [
+        ...TASKBAR_WINDOW_ACTION_IDS,
+        ...windowItem.registeredActions.map((action) => action.id),
+      ],
+      sourceAppId: windowItem.appId,
+      windowId: windowItem.windowId,
+      requiredCapabilities: windowItem.appDefinition.manifest
+        ? [...windowItem.appDefinition.manifest.capabilities]
+        : [],
+    });
+  }
+
+  notificationContext(kind: ShellNotificationKind, message: string, toastId?: string): ShellNotificationContext {
+    return {
+      id: toastId ?? `shell:notification:${kind}`,
+      kind,
+      message,
+      ...(toastId ? { toastId } : {}),
+    };
+  }
+
+  notificationObject(notification: ShellNotificationContext): ShellPrimitiveObject {
+    return this.createShellPrimitiveObject({
+      id: notification.id,
+      kind: 'notification',
+      label: notification.kind === 'toast' ? 'Toast Notification' : `${notification.kind} Notification`,
+      targetScope: 'notification',
+      actionIds: [...NOTIFICATION_ACTION_IDS],
+      notificationKind: notification.kind,
+    });
+  }
+
+  shellPrimitiveActionIds(object: ShellPrimitiveObject): string {
+    return object.actionIds.join(',');
+  }
+
+  shellPrimitiveCapabilities(object: ShellPrimitiveObject): string {
+    return (object.requiredCapabilities ?? []).join(',');
   }
 
   @HostListener('window:keydown', ['$event'])
@@ -1964,14 +2081,39 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   openTaskbarContextMenu(event: MouseEvent): void {
-    this.showContextMenu(event, 'taskbar', 'Taskbar', this.taskbarContextItems());
+    this.showContextMenu(
+      event,
+      'taskbar',
+      this.taskbarPanelObject.label,
+      this.taskbarContextItems(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      this.taskbarPanelObject,
+    );
   }
 
   openTrayStatusContextMenu(event: MouseEvent): void {
-    this.showContextMenu(event, 'tray-status', 'Status Area', this.trayStatusContextItems());
+    this.showContextMenu(
+      event,
+      'tray-status',
+      this.trayStatusObject.label,
+      this.trayStatusContextItems(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      this.trayStatusObject,
+    );
   }
 
   openTaskbarWindowContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
+    const object = this.taskbarWindowObject(windowItem);
     this.showContextMenu(
       event,
       'taskbar-window',
@@ -1980,6 +2122,10 @@ export class AppComponent implements OnInit, OnDestroy {
       windowItem.appId,
       undefined,
       windowItem.windowId,
+      undefined,
+      undefined,
+      undefined,
+      object,
     );
   }
 
@@ -2043,18 +2189,20 @@ export class AppComponent implements OnInit, OnDestroy {
     );
   }
 
-  openNotificationContextMenu(event: MouseEvent, message: string, kind: ShellNotificationKind, toastIndex?: number): void {
+  openNotificationContextMenu(event: MouseEvent, notification: ShellNotificationContext): void {
+    const object = this.notificationObject(notification);
     this.showContextMenu(
       event,
       'notification',
-      'Notification',
+      object.label,
       this.notificationContextItems(),
       undefined,
       undefined,
       undefined,
       undefined,
       undefined,
-      { kind, message, toastIndex },
+      notification,
+      object,
     );
   }
 
@@ -3709,6 +3857,7 @@ export class AppComponent implements OnInit, OnDestroy {
     workspaceArtifact?: WorkspaceArtifact,
     hostId?: string,
     notification?: ShellNotificationContext,
+    object?: ShellPrimitiveObject,
   ): void {
     event.preventDefault();
     event.stopPropagation();
@@ -3723,8 +3872,50 @@ export class AppComponent implements OnInit, OnDestroy {
       windowId,
       workspaceArtifact,
       notification,
+      object,
       items,
     };
+  }
+
+  private createShellPrimitiveObject(input: {
+    id: string;
+    kind: ShellPrimitiveKind;
+    label: string;
+    targetScope: ContextMenuState['target'];
+    actionIds: string[];
+    source?: ShellActionSource;
+    sourceAppId?: ShellAppId;
+    windowId?: string;
+    notificationKind?: ShellNotificationKind;
+    requiredCapabilities?: string[];
+  }): ShellPrimitiveObject {
+    return {
+      id: input.id,
+      kind: input.kind,
+      owner: 'shell',
+      source: input.source ?? 'shell',
+      targetScope: input.targetScope,
+      label: input.label,
+      actionIds: [...input.actionIds],
+      ...(input.sourceAppId ? { sourceAppId: input.sourceAppId } : {}),
+      ...(input.windowId ? { windowId: input.windowId } : {}),
+      ...(input.notificationKind ? { notificationKind: input.notificationKind } : {}),
+      ...(input.requiredCapabilities ? { requiredCapabilities: [...input.requiredCapabilities] } : {}),
+    };
+  }
+
+  private shellContextItem(target: ContextMenuState['target'], item: ContextMenuItem): ContextMenuItem {
+    return {
+      ...item,
+      source: item.source ?? 'shell',
+      targetScope: item.targetScope ?? target,
+      actionId: item.actionId ?? item.id,
+      submenu: item.submenu?.map((subItem) => this.shellContextItem(target, subItem)),
+    };
+  }
+
+  private shellContextItems(target: ContextMenuState['target'], items: ContextMenuItem[]): ContextMenuItem[] {
+    return items.map((item) => this.shellContextItem(target, item));
   }
 
   private contextHost(menu: ContextMenuState | null | undefined): HostRecord | null {
@@ -3945,35 +4136,38 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private taskbarContextItems(): ContextMenuItem[] {
-    return [
+    return this.shellContextItems('taskbar', [
       { id: this.launcherOpen ? 'close-menu' : 'open-menu', label: this.launcherOpen ? 'Close Menu' : 'Open Menu' },
       { id: 'panel-settings', label: 'Panel Settings' },
       { id: 'add-applet', label: 'Add Applet' },
       { id: 'arrange-lock-panel', label: 'Arrange/Lock Panel' },
       { id: 'show-desktop', label: 'Show Desktop' },
       { id: 'task-manager', label: 'Task Manager / Running Windows' },
-    ];
+    ]);
   }
 
   private trayStatusContextItems(): ContextMenuItem[] {
-    return [
+    return this.shellContextItems('tray-status', [
       { id: 'status-details', label: 'Status Details', detail: this.appInfo ? `SwitchboardOS ${this.appInfo.version}` : 'SwitchboardOS is ready.' },
       { id: 'tray-notification-settings', label: 'Notification Settings' },
       { id: 'tray-panel-settings', label: 'Panel Settings' },
       { id: 'refresh-status', label: 'Refresh Status' },
-    ];
+    ]);
   }
 
   private taskbarWindowContextItems(windowItem: ShellWindow): ContextMenuItem[] {
     const appActions = this.windowAppActionContextItems(windowItem, 'taskbar-window');
-    const pinItem = this.appPinContextItem(windowItem.appDefinition, 'taskbar-window') ?? this.pinContextItem(windowItem.appId);
+    const pinItem = this.appPinContextItem(windowItem.appDefinition, 'taskbar-window')
+      ?? this.shellContextItem('taskbar-window', this.pinContextItem(windowItem.appId));
     return [
-      { id: 'show-taskbar-window', label: windowItem.state === 'minimized' ? 'Restore' : 'Show' },
-      { id: 'new-window', label: 'New Window' },
-      { id: 'toggle-minimize-window', label: windowItem.state === 'minimized' ? 'Restore Window' : 'Minimize' },
+      this.shellContextItem('taskbar-window', { id: 'show-taskbar-window', label: windowItem.state === 'minimized' ? 'Restore' : 'Show' }),
+      this.shellContextItem('taskbar-window', { id: 'new-window', label: 'New Window' }),
+      this.shellContextItem('taskbar-window', { id: 'toggle-minimize-window', label: windowItem.state === 'minimized' ? 'Restore Window' : 'Minimize' }),
       pinItem,
-      ...(appActions.length > 0 ? [{ id: 'taskbar-app-actions', label: 'App Actions', submenu: appActions }] : []),
-      { id: 'close-window', label: 'Close Window', danger: true },
+      ...(appActions.length > 0
+        ? [this.shellContextItem('taskbar-window', { id: 'taskbar-app-actions', label: 'App Actions', submenu: appActions })]
+        : []),
+      this.shellContextItem('taskbar-window', { id: 'close-window', label: 'Close Window', danger: true }),
     ];
   }
 
@@ -4026,11 +4220,11 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private notificationContextItems(): ContextMenuItem[] {
-    return [
+    return this.shellContextItems('notification', [
       { id: 'dismiss-notification', label: 'Dismiss Notification' },
       { id: 'clear-notifications', label: 'Clear All Notifications' },
       { id: 'open-notification-settings', label: 'Notification Settings' },
-    ];
+    ]);
   }
 
   private dispatchTerminalContextAction(windowId: string | undefined, action: TerminalContextAction): void {
@@ -4060,12 +4254,12 @@ export class AppComponent implements OnInit, OnDestroy {
       this.statusMessage = '';
       return;
     }
-    if (typeof notification.toastIndex === 'number') {
-      this.toasts = this.toasts.filter((_toast, index) => index !== notification.toastIndex);
+    if (notification.toastId) {
+      this.toasts = this.toasts.filter((toast) => toast.id !== notification.toastId);
       return;
     }
 
-    this.toasts = this.toasts.filter((toast) => toast !== notification.message);
+    this.toasts = this.toasts.filter((toast) => toast.message !== notification.message);
   }
 
   private clearNotifications(): void {
@@ -5315,15 +5509,26 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private notify(message: string): void {
     this.statusMessage = message;
-    this.toasts = [message, ...this.toasts].slice(0, 3);
+    const toast = this.createToastNotification(message);
+    this.toasts = [toast, ...this.toasts].slice(0, 3);
     const timerId = window.setTimeout(() => {
       if (this.statusMessage === message) {
         this.statusMessage = '';
       }
-      this.toasts = this.toasts.filter((toast) => toast !== message);
+      this.toasts = this.toasts.filter((candidate) => candidate.id !== toast.id);
       this.toastTimers = this.toastTimers.filter((candidate) => candidate !== timerId);
     }, 3500);
     this.toastTimers = [...this.toastTimers, timerId];
+  }
+
+  private createToastNotification(message: string): ShellToastNotification {
+    this.toastSequence += 1;
+    return {
+      id: `shell:notification:toast:${this.toastSequence}`,
+      kind: 'toast',
+      message,
+      createdAt: new Date().toISOString(),
+    };
   }
 
   private clearToastTimers(): void {

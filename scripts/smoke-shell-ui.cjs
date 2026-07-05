@@ -403,6 +403,30 @@ async function browserSmoke() {
         .filter(Boolean),
       disabled: item instanceof HTMLButtonElement ? item.disabled : false,
     }));
+  const shellObjectMetadata = (element) => {
+    if (!element) {
+      return null;
+    }
+    return {
+      objectId: element.getAttribute('data-shell-object-id') || '',
+      objectKind: element.getAttribute('data-shell-object-kind') || '',
+      owner: element.getAttribute('data-shell-object-owner') || '',
+      source: element.getAttribute('data-shell-object-source') || '',
+      targetScope: element.getAttribute('data-shell-object-target-scope') || '',
+      sourceAppId: element.getAttribute('data-shell-object-source-app-id') || '',
+      windowId: element.getAttribute('data-shell-object-window-id') || '',
+      notificationKind: element.getAttribute('data-shell-object-notification-kind') || element.getAttribute('data-notification-kind') || '',
+      actionIds: (element.getAttribute('data-shell-object-action-ids') || '')
+        .split(',')
+        .map((actionId) => actionId.trim())
+        .filter(Boolean),
+      capabilities: (element.getAttribute('data-shell-object-capabilities') || '')
+        .split(',')
+        .map((capability) => capability.trim())
+        .filter(Boolean),
+    };
+  };
+  const contextShellObjectMetadata = () => shellObjectMetadata(document.querySelector('[data-testid="context-menu"]'));
   const paletteResultMetadata = () => [...document.querySelectorAll('[data-testid="command-palette"] .palette-result')]
     .map((item) => ({
       text: (item.textContent || '').trim(),
@@ -648,6 +672,8 @@ async function browserSmoke() {
   const iconLabels = desktopIconLabels();
   const desktop = document.querySelector('.desktop-surface');
   const firstRunPanel = document.querySelector('[data-testid="first-run-panel"]');
+  const taskbarPanelObject = shellObjectMetadata(document.querySelector('[data-testid="taskbar"]'));
+  const trayStatusObject = shellObjectMetadata(document.querySelector('[data-testid="taskbar-tray"]'));
   const desktopStyles = desktop ? getComputedStyle(desktop) : null;
   const fileExplorerIconChrome = desktopIconChrome('File Explorer');
   const initial = {
@@ -936,6 +962,7 @@ async function browserSmoke() {
       .find((button) => textIncludes(button, 'File Explorer')),
     'File Explorer taskbar item',
   );
+  const fileExplorerTaskbarObject = shellObjectMetadata(fileExplorerTaskbarItem);
   rightClick(fileExplorerTaskbarItem);
   await waitFor(
     () => document.querySelector('[data-testid="context-menu"][data-context-target="taskbar-window"]'),
@@ -943,16 +970,21 @@ async function browserSmoke() {
   );
   const taskbarWindowMenu = menuLabels();
   const taskbarWindowContributionMetadata = menuContributionMetadata();
+  const taskbarWindowContextObject = contextShellObjectMetadata();
   click(document.body);
 
   rightClick(document.querySelector('[data-testid="taskbar"]'));
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="taskbar"]'), 'taskbar context menu');
   const taskbarMenu = menuLabels();
+  const taskbarMenuContributionMetadata = menuContributionMetadata();
+  const taskbarContextObject = contextShellObjectMetadata();
   click(document.body);
 
   rightClick(document.querySelector('[data-testid="taskbar-tray"]'));
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="tray-status"]'), 'tray status context menu');
   const trayStatusMenu = menuLabels();
+  const trayStatusContributionMetadata = menuContributionMetadata();
+  const trayStatusContextObject = contextShellObjectMetadata();
   click(document.body);
 
   click(document.querySelector('[data-testid="app-launcher-button"]'));
@@ -1135,15 +1167,21 @@ async function browserSmoke() {
     };
   })();
 
-  const toastForContext = await waitFor(() => document.querySelector('.toast:not(.error)') || document.querySelector('.toast'), 'toast after opening windows');
+  const toastForContext = await waitFor(
+    () => document.querySelector('.toast[data-notification-kind="toast"]'),
+    'toast after opening windows',
+  );
+  const notificationToastObject = shellObjectMetadata(toastForContext);
   rightClick(toastForContext);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="notification"]'), 'notification context menu');
   const notificationMenu = menuLabels();
+  const notificationContributionMetadata = menuContributionMetadata();
+  const notificationContextObject = contextShellObjectMetadata();
   clickMenuItem('Dismiss Notification');
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'notification context menu closed');
   await waitFor(
-    () => document.querySelectorAll('.toast:not(.error)').length === 0,
-    'ordinary toasts auto-dismiss',
+    () => document.querySelectorAll('.toast[data-notification-kind="toast"]').length === 0,
+    'toast notification dismissed',
     6000,
   );
 
@@ -1268,9 +1306,22 @@ async function browserSmoke() {
       iconMenu: iconMenuContributionMetadata,
       windowMenu: windowMenuContributionMetadata,
       taskbarWindowMenu: taskbarWindowContributionMetadata,
+      taskbarMenu: taskbarMenuContributionMetadata,
+      trayStatusMenu: trayStatusContributionMetadata,
+      notificationMenu: notificationContributionMetadata,
       launcherRowMenu: launcherRowContributionMetadata,
       hostsTaskbarPinMenu: hostsTaskbarPinContributionMetadata,
       hostsTaskbarUnpinMenu: hostsTaskbarUnpinContributionMetadata,
+    },
+    shellObjects: {
+      taskbarPanelObject,
+      trayStatusObject,
+      fileExplorerTaskbarObject,
+      taskbarWindowContextObject,
+      taskbarContextObject,
+      trayStatusContextObject,
+      notificationToastObject,
+      notificationContextObject,
     },
     commandPalette: {
       opened: Boolean(commandPalette),
@@ -1375,6 +1426,28 @@ async function main() {
         return item[key] === value;
       }));
   };
+  const shellObjectMatches = (object, expected) => {
+    return Boolean(object) && Object.entries(expected).every(([key, value]) => {
+      if (Array.isArray(value)) {
+        return Array.isArray(object[key]) && value.every((entry) => object[key].includes(entry));
+      }
+      return object[key] === value;
+    });
+  };
+  const sameShellObject = (first, second) => Boolean(first)
+    && Boolean(second)
+    && first.objectId === second.objectId
+    && first.objectKind === second.objectKind
+    && first.owner === second.owner
+    && first.source === second.source
+    && first.targetScope === second.targetScope;
+  const shellOwnedMenuForTarget = (items, targetScope) => items.length > 0
+    && items.every((item) => item.source === 'shell'
+      && item.targetScope === targetScope
+      && Boolean(item.actionId)
+      && !item.sourceAppId);
+  const labelsHaveNoAppActionLeak = (labels) => labels.every((label) => !label.includes('App Actions')
+    && !label.includes('Refresh workspace context'));
   const terminalBridgeActionsReady = ['Copy', 'Paste', 'Clear'].every((label) => {
     const item = terminalActionMenuItem(label);
     return Boolean(item) && !item.disabled && !item.text.includes('Requires the terminal applet action bridge');
@@ -1584,6 +1657,21 @@ async function main() {
       targetScope: 'taskbar-window',
       actionId: 'refresh-hosts',
     }),
+    shellObjectMatches(report.shellObjects.fileExplorerTaskbarObject, {
+      objectKind: 'taskbar-window',
+      owner: 'shell',
+      source: 'window-object',
+      targetScope: 'taskbar-window',
+      sourceAppId: 'workspace-files',
+    }),
+    sameShellObject(report.shellObjects.fileExplorerTaskbarObject, report.shellObjects.taskbarWindowContextObject),
+    report.shellObjects.fileExplorerTaskbarObject?.objectId.startsWith('shell:taskbar-window:'),
+    report.shellObjects.fileExplorerTaskbarObject?.windowId,
+    report.shellObjects.fileExplorerTaskbarObject?.actionIds.includes('show-taskbar-window'),
+    report.shellObjects.fileExplorerTaskbarObject?.actionIds.includes('new-window'),
+    report.shellObjects.fileExplorerTaskbarObject?.actionIds.includes('toggle-minimize-window'),
+    report.shellObjects.fileExplorerTaskbarObject?.actionIds.includes('close-window'),
+    report.shellObjects.fileExplorerTaskbarObject?.actionIds.includes('refresh-hosts'),
     report.menus.hostsTaskbarPinMenu.some((label) => label.includes('Pin to Desktop')),
     report.menus.hostsTaskbarPinMenu.every((label) => !label.includes('Unpin from Desktop')),
     contributionMatches(report.menuContributions.hostsTaskbarPinMenu, 'Pin to Desktop', {
@@ -1626,11 +1714,51 @@ async function main() {
     report.menus.notificationMenu.some((label) => label.includes('Dismiss Notification')),
     report.menus.notificationMenu.some((label) => label.includes('Clear All Notifications')),
     report.menus.notificationMenu.some((label) => label.includes('Notification Settings')),
+    shellObjectMatches(report.shellObjects.notificationToastObject, {
+      objectKind: 'notification',
+      owner: 'shell',
+      source: 'shell',
+      targetScope: 'notification',
+      notificationKind: 'toast',
+    }),
+    report.shellObjects.notificationToastObject?.objectId.startsWith('shell:notification:toast:'),
+    report.shellObjects.notificationToastObject?.actionIds.includes('dismiss-notification'),
+    report.shellObjects.notificationToastObject?.actionIds.includes('clear-notifications'),
+    report.shellObjects.notificationToastObject?.actionIds.includes('open-notification-settings'),
+    sameShellObject(report.shellObjects.notificationToastObject, report.shellObjects.notificationContextObject),
+    report.shellObjects.notificationContextObject?.notificationKind === 'toast',
+    shellOwnedMenuForTarget(report.menuContributions.notificationMenu, 'notification'),
+    labelsHaveNoAppActionLeak(report.menus.notificationMenu),
     report.menus.taskbarMenu.some((label) => label.includes('Show Desktop')),
+    shellObjectMatches(report.shellObjects.taskbarPanelObject, {
+      objectId: 'shell:panel:primary',
+      objectKind: 'panel',
+      owner: 'shell',
+      source: 'shell',
+      targetScope: 'taskbar',
+    }),
+    sameShellObject(report.shellObjects.taskbarPanelObject, report.shellObjects.taskbarContextObject),
+    report.shellObjects.taskbarPanelObject?.actionIds.includes('panel-settings'),
+    report.shellObjects.taskbarPanelObject?.actionIds.includes('show-desktop'),
+    report.shellObjects.taskbarPanelObject?.actionIds.includes('task-manager'),
+    shellOwnedMenuForTarget(report.menuContributions.taskbarMenu, 'taskbar'),
+    labelsHaveNoAppActionLeak(report.menus.taskbarMenu),
     report.menus.trayStatusMenu.some((label) => label.includes('Status Details')),
     report.menus.trayStatusMenu.some((label) => label.includes('Notification Settings')),
     report.menus.trayStatusMenu.some((label) => label.includes('Panel Settings')),
     report.menus.trayStatusMenu.some((label) => label.includes('Refresh Status')),
+    shellObjectMatches(report.shellObjects.trayStatusObject, {
+      objectId: 'shell:tray:status',
+      objectKind: 'tray-status',
+      owner: 'shell',
+      source: 'shell',
+      targetScope: 'tray-status',
+    }),
+    sameShellObject(report.shellObjects.trayStatusObject, report.shellObjects.trayStatusContextObject),
+    report.shellObjects.trayStatusObject?.actionIds.includes('status-details'),
+    report.shellObjects.trayStatusObject?.actionIds.includes('refresh-status'),
+    shellOwnedMenuForTarget(report.menuContributions.trayStatusMenu, 'tray-status'),
+    labelsHaveNoAppActionLeak(report.menus.trayStatusMenu),
     report.menus.launcherRowMenu.some((label) => label.includes('Pin to Desktop')),
     contributionMatches(report.menuContributions.launcherRowMenu, 'Open', {
       source: 'app-manifest',
