@@ -154,6 +154,201 @@ type LauncherTarget =
   | 'launcher-row'
   | 'workspace-file';
 
+type ShellActionSource = 'shell' | 'app-manifest' | 'window-object' | 'host-object';
+type PaletteTargetScope = 'command-palette' | 'focused-window' | 'global-keyboard';
+type KeyboardShortcutKind = 'shell' | 'app' | 'window-action';
+
+interface ShellKeyboardShortcut {
+  id: string;
+  label: string;
+  shortcut: string;
+  key: string;
+  kind: KeyboardShortcutKind;
+  actionId: string;
+  source: ShellActionSource;
+  targetScope: PaletteTargetScope;
+  appId?: ShellAppId;
+  ctrlOrMeta?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+}
+
+const SHELL_KEYBOARD_SHORTCUTS: ShellKeyboardShortcut[] = [
+  {
+    id: 'open-command-palette',
+    label: 'Open command palette',
+    shortcut: 'Ctrl+K',
+    key: 'k',
+    kind: 'shell',
+    actionId: 'open-command-palette',
+    source: 'shell',
+    targetScope: 'global-keyboard',
+    ctrlOrMeta: true,
+  },
+  {
+    id: 'close-shell-overlays',
+    label: 'Close active shell overlay',
+    shortcut: 'Escape',
+    key: 'Escape',
+    kind: 'shell',
+    actionId: 'close-shell-overlays',
+    source: 'shell',
+    targetScope: 'global-keyboard',
+  },
+  {
+    id: 'open-workspace-files',
+    label: 'Open File Explorer',
+    shortcut: 'Meta+E',
+    key: 'e',
+    kind: 'app',
+    actionId: 'open-app',
+    source: 'app-manifest',
+    targetScope: 'global-keyboard',
+    appId: 'workspace-files',
+    metaKey: true,
+  },
+  {
+    id: 'minimize-focused-window',
+    label: 'Minimize focused window',
+    shortcut: 'Meta+M',
+    key: 'm',
+    kind: 'window-action',
+    actionId: 'minimize-window',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    metaKey: true,
+  },
+  {
+    id: 'maximize-focused-window',
+    label: 'Maximize focused window',
+    shortcut: 'Meta+Up',
+    key: 'ArrowUp',
+    kind: 'window-action',
+    actionId: 'maximize-window',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    metaKey: true,
+  },
+  {
+    id: 'fullscreen-focused-window',
+    label: 'Toggle focused window fullscreen',
+    shortcut: 'F11',
+    key: 'F11',
+    kind: 'window-action',
+    actionId: 'toggle-fullscreen',
+    source: 'window-object',
+    targetScope: 'focused-window',
+  },
+  {
+    id: 'tile-focused-window-left',
+    label: 'Tile focused window left',
+    shortcut: 'Alt+Shift+Left',
+    key: 'ArrowLeft',
+    kind: 'window-action',
+    actionId: 'tile-left',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'tile-focused-window-right',
+    label: 'Tile focused window right',
+    shortcut: 'Alt+Shift+Right',
+    key: 'ArrowRight',
+    kind: 'window-action',
+    actionId: 'tile-right',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'tile-focused-window-top',
+    label: 'Tile focused window top',
+    shortcut: 'Alt+Shift+Up',
+    key: 'ArrowUp',
+    kind: 'window-action',
+    actionId: 'tile-top',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'tile-focused-window-bottom',
+    label: 'Tile focused window bottom',
+    shortcut: 'Alt+Shift+Down',
+    key: 'ArrowDown',
+    kind: 'window-action',
+    actionId: 'tile-bottom',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'tile-focused-window-top-left',
+    label: 'Tile focused window top left',
+    shortcut: 'Alt+Shift+1',
+    key: '1',
+    kind: 'window-action',
+    actionId: 'tile-top-left',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'tile-focused-window-top-right',
+    label: 'Tile focused window top right',
+    shortcut: 'Alt+Shift+2',
+    key: '2',
+    kind: 'window-action',
+    actionId: 'tile-top-right',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'tile-focused-window-bottom-left',
+    label: 'Tile focused window bottom left',
+    shortcut: 'Alt+Shift+3',
+    key: '3',
+    kind: 'window-action',
+    actionId: 'tile-bottom-left',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'tile-focused-window-bottom-right',
+    label: 'Tile focused window bottom right',
+    shortcut: 'Alt+Shift+4',
+    key: '4',
+    kind: 'window-action',
+    actionId: 'tile-bottom-right',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+    shiftKey: true,
+  },
+  {
+    id: 'close-focused-window',
+    label: 'Close focused window',
+    shortcut: 'Alt+F4',
+    key: 'F4',
+    kind: 'window-action',
+    actionId: 'close-window',
+    source: 'window-object',
+    targetScope: 'focused-window',
+    altKey: true,
+  },
+];
+
 function buildSystemAppletManifest(input: {
   appId: ShellAppId;
   name: string;
@@ -434,6 +629,15 @@ interface PaletteResult {
   hostId?: string;
   windowId?: string;
   actionId?: string;
+  source?: ShellActionSource;
+  sourceAppId?: ShellAppId;
+  targetScope?: PaletteTargetScope;
+  requiredCapabilities?: string[];
+  capabilities?: string[];
+  shortcut?: string;
+  isSystemApplet?: boolean;
+  launcherCategory?: LauncherCategory;
+  defaultLauncherRow?: boolean;
 }
 
 interface DragState {
@@ -1067,39 +1271,74 @@ export class AppComponent implements OnInit, OnDestroy {
 
   @HostListener('window:keydown', ['$event'])
   handleKeyboard(event: KeyboardEvent): void {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    const keyboardShortcut = this.keyboardShortcutForEvent(event);
+    if (!keyboardShortcut) {
+      return;
+    }
+
+    if (keyboardShortcut.kind === 'shell' && keyboardShortcut.actionId === 'open-command-palette') {
       this.commandPaletteOpen = true;
       this.paletteQuery = '';
       event.preventDefault();
       return;
     }
 
-    if (event.key === 'Escape') {
+    if (keyboardShortcut.kind === 'shell' && keyboardShortcut.actionId === 'close-shell-overlays') {
       this.commandPaletteOpen = false;
       this.launcherOpen = false;
+      event.preventDefault();
+      return;
+    }
+
+    if (keyboardShortcut.kind === 'app' && keyboardShortcut.appId) {
+      this.openApp(keyboardShortcut.appId);
+      event.preventDefault();
       return;
     }
 
     const focused = this.focusedWindow;
-    if (!focused || !(event.altKey && event.shiftKey)) {
-      return;
-    }
-
-    const shortcutMap: Record<string, ShellTilePosition> = {
-      ArrowLeft: 'left',
-      ArrowRight: 'right',
-      ArrowUp: 'top',
-      ArrowDown: 'bottom',
-      '1': 'top-left',
-      '2': 'top-right',
-      '3': 'bottom-left',
-      '4': 'bottom-right',
-    };
-    const tilePosition = shortcutMap[event.key];
-    if (tilePosition) {
-      this.tileWindow(focused, tilePosition);
+    if (keyboardShortcut.kind === 'window-action' && focused) {
+      void this.runWindowAction(focused, keyboardShortcut.actionId);
       event.preventDefault();
     }
+  }
+
+  private keyboardShortcutForEvent(event: KeyboardEvent): ShellKeyboardShortcut | null {
+    return SHELL_KEYBOARD_SHORTCUTS.find((shortcut) => this.keyboardShortcutMatches(shortcut, event)) ?? null;
+  }
+
+  private keyboardShortcutMatches(shortcut: ShellKeyboardShortcut, event: KeyboardEvent): boolean {
+    const eventKey = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    const shortcutKey = shortcut.key.length === 1 ? shortcut.key.toLowerCase() : shortcut.key;
+    if (eventKey !== shortcutKey) {
+      return false;
+    }
+
+    if (shortcut.ctrlOrMeta) {
+      if (!event.ctrlKey && !event.metaKey) {
+        return false;
+      }
+    } else {
+      if (event.ctrlKey) {
+        return false;
+      }
+      if (Boolean(shortcut.metaKey) !== event.metaKey) {
+        return false;
+      }
+    }
+
+    return Boolean(shortcut.altKey) === event.altKey
+      && Boolean(shortcut.shiftKey) === event.shiftKey;
+  }
+
+  private keyboardShortcutForAction(actionId: string, kind?: KeyboardShortcutKind): ShellKeyboardShortcut | null {
+    return SHELL_KEYBOARD_SHORTCUTS.find((shortcut) =>
+      shortcut.actionId === actionId && (!kind || shortcut.kind === kind)) ?? null;
+  }
+
+  private keyboardShortcutForApp(appId: ShellAppId): ShellKeyboardShortcut | null {
+    return SHELL_KEYBOARD_SHORTCUTS.find((shortcut) =>
+      shortcut.kind === 'app' && shortcut.appId === appId) ?? null;
   }
 
   @HostListener('document:click', ['$event'])
@@ -1237,13 +1476,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const results: PaletteResult[] = [];
 
     for (const app of this.searchableApps) {
-      results.push({
-        id: `app:${app.appId}`,
-        label: app.title,
-        detail: app.detail,
-        kind: 'app',
-        appId: app.appId,
-      });
+      results.push(this.appPaletteResult(app));
     }
 
     for (const host of this.hosts) {
@@ -1276,16 +1509,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
     const focused = this.focusedWindow;
     if (focused) {
-      for (const action of focused.registeredActions) {
-        results.push({
-          id: `action:${focused.windowId}:${action.id}`,
-          label: action.label,
-          detail: action.description,
-          kind: 'window-action',
-          windowId: focused.windowId,
-          actionId: action.id,
-        });
-      }
+      results.push(...this.windowActionPaletteResults(focused));
     }
 
     if (!query) {
@@ -1295,6 +1519,63 @@ export class AppComponent implements OnInit, OnDestroy {
     return results
       .filter((result) => `${result.label} ${result.detail}`.toLowerCase().includes(query))
       .slice(0, 12);
+  }
+
+  private appPaletteResult(app: ShellAppDefinition): PaletteResult {
+    const shortcut = this.keyboardShortcutForApp(app.appId);
+    const manifest = app.manifest;
+    return {
+      id: `app:${app.appId}`,
+      label: app.title,
+      detail: app.detail,
+      kind: 'app',
+      appId: app.appId,
+      source: manifest ? 'app-manifest' : 'shell',
+      sourceAppId: app.appId,
+      targetScope: 'command-palette',
+      actionId: 'open-app',
+      requiredCapabilities: [],
+      capabilities: manifest ? [...manifest.capabilities] : [],
+      shortcut: shortcut?.shortcut,
+      isSystemApplet: Boolean(manifest?.packageMetadata['systemApplet']),
+      launcherCategory: app.launcherCategory,
+      defaultLauncherRow: this.isDefaultLauncherRow(app),
+    };
+  }
+
+  private windowActionPaletteResults(windowItem: ShellWindow): PaletteResult[] {
+    const definition = windowItem.appDefinition;
+    const contributionId = 'windowActions';
+    const contributionCapabilities = this.requiredCapabilitiesForContextContribution(definition, contributionId);
+    if (!this.appManifestContextContributionAllowed(definition, 'window', contributionId, ['taskbar-window', 'window'], contributionCapabilities)) {
+      return [];
+    }
+
+    return windowItem.registeredActions
+      .filter((action) => this.contextMenuActionCapabilitiesAllowed(definition, [
+        ...contributionCapabilities,
+        ...(action.capability ? [action.capability] : []),
+      ]))
+      .map((action) => {
+        const requiredCapabilities = [
+          ...contributionCapabilities,
+          ...(action.capability ? [action.capability] : []),
+        ];
+        return {
+          id: `action:${windowItem.windowId}:${action.id}`,
+          label: action.label,
+          detail: action.description,
+          kind: 'window-action' as const,
+          windowId: windowItem.windowId,
+          actionId: action.id,
+          source: 'window-object' as const,
+          sourceAppId: definition.appId,
+          targetScope: 'focused-window' as const,
+          requiredCapabilities,
+          capabilities: definition.manifest ? [...definition.manifest.capabilities] : [],
+          shortcut: action.shortcut ?? this.keyboardShortcutForAction(action.id, 'window-action')?.shortcut,
+        };
+      });
   }
 
   async loadWorkspaceContext(): Promise<void> {
@@ -2867,6 +3148,14 @@ export class AppComponent implements OnInit, OnDestroy {
       this.openApp('apps');
       return;
     }
+    if (actionId === 'minimize-window') {
+      this.minimizeWindow(windowItem);
+      return;
+    }
+    if (actionId === 'maximize-window') {
+      this.toggleMaximize(windowItem);
+      return;
+    }
     if (actionId === 'tile-left') {
       this.tileWindow(windowItem, 'left');
       return;
@@ -3847,7 +4136,20 @@ export class AppComponent implements OnInit, OnDestroy {
       return [];
     }
 
-    const shellOwnedActions = new Set(['tile-left', 'tile-right', 'close-window']);
+    const shellOwnedActions = new Set([
+      'minimize-window',
+      'maximize-window',
+      'tile-left',
+      'tile-right',
+      'tile-top',
+      'tile-bottom',
+      'tile-top-left',
+      'tile-top-right',
+      'tile-bottom-left',
+      'tile-bottom-right',
+      'toggle-fullscreen',
+      'close-window',
+    ]);
     return windowItem.registeredActions
       .filter((action) => !shellOwnedActions.has(action.id))
       .filter((action) => this.contextMenuActionCapabilitiesAllowed(definition, [
@@ -3858,6 +4160,7 @@ export class AppComponent implements OnInit, OnDestroy {
         id: `window-action:${action.id}`,
         label: action.label,
         detail: action.description,
+        shortcut: action.shortcut,
         source: 'window-object' as const,
         sourceAppId: definition.appId,
         targetScope: target,
@@ -4433,9 +4736,18 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private layoutActions(): ShellWindowAction[] {
     return [
-      { id: 'tile-left', label: 'Tile left', description: 'Snap this shell window to the left half.' },
-      { id: 'tile-right', label: 'Tile right', description: 'Snap this shell window to the right half.' },
-      { id: 'close-window', label: 'Close window', description: 'Close this shell window.' },
+      { id: 'minimize-window', label: 'Minimize window', description: 'Minimize this shell window.', shortcut: 'Meta+M' },
+      { id: 'maximize-window', label: 'Maximize or restore window', description: 'Toggle the maximized state for this shell window.', shortcut: 'Meta+Up' },
+      { id: 'tile-left', label: 'Tile left', description: 'Snap this shell window to the left half.', shortcut: 'Alt+Shift+Left' },
+      { id: 'tile-right', label: 'Tile right', description: 'Snap this shell window to the right half.', shortcut: 'Alt+Shift+Right' },
+      { id: 'tile-top', label: 'Tile top', description: 'Snap this shell window to the top half.', shortcut: 'Alt+Shift+Up' },
+      { id: 'tile-bottom', label: 'Tile bottom', description: 'Snap this shell window to the bottom half.', shortcut: 'Alt+Shift+Down' },
+      { id: 'tile-top-left', label: 'Tile top left', description: 'Snap this shell window to the top-left quadrant.', shortcut: 'Alt+Shift+1' },
+      { id: 'tile-top-right', label: 'Tile top right', description: 'Snap this shell window to the top-right quadrant.', shortcut: 'Alt+Shift+2' },
+      { id: 'tile-bottom-left', label: 'Tile bottom left', description: 'Snap this shell window to the bottom-left quadrant.', shortcut: 'Alt+Shift+3' },
+      { id: 'tile-bottom-right', label: 'Tile bottom right', description: 'Snap this shell window to the bottom-right quadrant.', shortcut: 'Alt+Shift+4' },
+      { id: 'toggle-fullscreen', label: 'Toggle fullscreen', description: 'Toggle fullscreen mode for this shell window.', shortcut: 'F11' },
+      { id: 'close-window', label: 'Close window', description: 'Close this shell window.', shortcut: 'Alt+F4' },
     ];
   }
 
@@ -5041,6 +5353,9 @@ function actionRegistryFromManifest(manifest: AppManifest): ShellWindowAction[] 
       const capability = typeof item['capability'] === 'string' && item['capability'].trim()
         ? item['capability'].trim()
         : undefined;
+      const shortcut = typeof item['shortcut'] === 'string' && item['shortcut'].trim()
+        ? item['shortcut'].trim()
+        : undefined;
       return {
         id: typeof item['id'] === 'string' && item['id'].trim() ? item['id'].trim() : 'generated-action',
         label: typeof item['label'] === 'string' && item['label'].trim() ? item['label'].trim() : 'Generated action',
@@ -5048,6 +5363,7 @@ function actionRegistryFromManifest(manifest: AppManifest): ShellWindowAction[] 
           ? item['description'].trim()
           : 'Generated app registered this action through its manifest.',
         ...(capability ? { capability } : {}),
+        ...(shortcut ? { shortcut } : {}),
       };
     })
     .filter((action) => !action.capability || grantedCapabilities.has(action.capability));

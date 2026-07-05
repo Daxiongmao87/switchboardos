@@ -403,8 +403,35 @@ async function browserSmoke() {
         .filter(Boolean),
       disabled: item instanceof HTMLButtonElement ? item.disabled : false,
     }));
+  const paletteResultMetadata = () => [...document.querySelectorAll('[data-testid="command-palette"] .palette-result')]
+    .map((item) => ({
+      text: (item.textContent || '').trim(),
+      source: item.getAttribute('data-palette-source') || '',
+      sourceAppId: item.getAttribute('data-palette-source-app-id') || '',
+      targetScope: item.getAttribute('data-palette-target-scope') || '',
+      actionId: item.getAttribute('data-palette-action-id') || '',
+      shortcut: item.getAttribute('data-palette-shortcut') || '',
+      isSystemApplet: item.getAttribute('data-palette-system-applet') || '',
+      launcherCategory: item.getAttribute('data-palette-launcher-category') || '',
+      defaultLauncherRow: item.getAttribute('data-palette-default-launcher-row') || '',
+      requiredCapabilities: (item.getAttribute('data-palette-required-capabilities') || '')
+        .split(',')
+        .map((capability) => capability.trim())
+        .filter(Boolean),
+      capabilities: (item.getAttribute('data-palette-capabilities') || '')
+        .split(',')
+        .map((capability) => capability.trim())
+        .filter(Boolean),
+    }));
   const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
     .find((button) => textIncludes(button, text)));
+  const setInputValue = (input, value) => {
+    if (!input) {
+      throw new Error(`Unable to set missing input to ${value}.`);
+    }
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
   const withPrompt = (value, action) => {
     const originalPrompt = window.prompt;
     Object.defineProperty(window, 'prompt', {
@@ -668,6 +695,7 @@ async function browserSmoke() {
   const commandPalette = await waitFor(() => document.querySelector('[data-testid="command-palette"]'), 'command palette');
   const commandPaletteLabels = [...commandPalette.querySelectorAll('.palette-result span')]
     .map((node) => (node.textContent || '').trim());
+  const commandPaletteMetadata = paletteResultMetadata();
   const commandPaletteText = commandPalette.textContent || '';
   keydown('Escape');
   await waitFor(() => !document.querySelector('[data-testid="command-palette"]'), 'command palette closed');
@@ -791,7 +819,7 @@ async function browserSmoke() {
   rightClick(stableFileExplorerIcon);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="desktop-icon"]'), 'icon context menu for File Explorer open');
   clickMenuItem('Open');
-  const fileWindow = await waitFor(
+  let fileWindow = await waitFor(
     () => document.querySelector('.desktop-window[data-app-id="workspace-files"]'),
     'workspace file explorer window',
   );
@@ -799,6 +827,80 @@ async function browserSmoke() {
   const openWindowLegacyControlText = [...fileWindow.querySelectorAll('.window-chrome .window-controls .window-btn')]
     .map((button) => (button.textContent || '').trim())
     .filter((label) => forbiddenWindowControlText.includes(label));
+  keydown('k', { ctrlKey: true });
+  const focusedWindowCommandPalette = await waitFor(
+    () => document.querySelector('[data-testid="command-palette"]'),
+    'focused window command palette',
+  );
+  const focusedWindowPaletteInput = focusedWindowCommandPalette.querySelector('input[name="paletteQuery"]');
+  setInputValue(focusedWindowPaletteInput, 'Refresh workspace context');
+  const focusedWindowPaletteActionMetadata = await waitFor(() => {
+    const rows = paletteResultMetadata();
+    return rows.some((row) => row.text.includes('Refresh workspace context')) ? rows : null;
+  }, 'focused window palette action metadata');
+  setInputValue(focusedWindowPaletteInput, 'Minimize window');
+  const focusedWindowKeyboardActionMetadata = await waitFor(() => {
+    const rows = paletteResultMetadata();
+    return rows.some((row) => row.text.includes('Minimize window')) ? rows : null;
+  }, 'focused window keyboard action palette metadata');
+  keydown('Escape');
+  await waitFor(() => !document.querySelector('[data-testid="command-palette"]'), 'focused window command palette closed');
+
+  const keyboardShortcutReport = {
+    metaMMinimized: false,
+    metaUpMaximized: false,
+    f11FullscreenClass: false,
+    altShiftLeftTiled: false,
+  };
+  keydown('m', { metaKey: true });
+  await waitFor(() => {
+    const taskbarItem = [...document.querySelectorAll('.taskbar-window')]
+      .find((button) => textIncludes(button, 'File Explorer'));
+    return taskbarItem?.classList.contains('is-minimized') ? taskbarItem : null;
+  }, 'Meta+M minimized File Explorer');
+  keyboardShortcutReport.metaMMinimized = true;
+  const minimizedFileExplorerTaskbarItem = [...document.querySelectorAll('.taskbar-window')]
+    .find((button) => textIncludes(button, 'File Explorer'));
+  click(minimizedFileExplorerTaskbarItem);
+  fileWindow = await waitFor(
+    () => document.querySelector('.desktop-window[data-app-id="workspace-files"]'),
+    'File Explorer restored after Meta+M',
+  );
+  keydown('ArrowUp', { metaKey: true });
+  await waitFor(
+    () => document.querySelector('.desktop-window[data-app-id="workspace-files"].is-maximized'),
+    'Meta+Up maximized File Explorer',
+  );
+  keyboardShortcutReport.metaUpMaximized = true;
+  keydown('ArrowUp', { metaKey: true });
+  await waitFor(
+    () => {
+      const windowElement = document.querySelector('.desktop-window[data-app-id="workspace-files"]');
+      return windowElement && !windowElement.classList.contains('is-maximized') ? windowElement : null;
+    },
+    'Meta+Up restored File Explorer',
+  );
+  keydown('F11');
+  await waitFor(
+    () => document.querySelector('.desktop-window[data-app-id="workspace-files"].is-maximized'),
+    'F11 fullscreen class applied to File Explorer',
+  );
+  keyboardShortcutReport.f11FullscreenClass = true;
+  keydown('F11');
+  await waitFor(
+    () => {
+      const windowElement = document.querySelector('.desktop-window[data-app-id="workspace-files"]');
+      return windowElement && !windowElement.classList.contains('is-maximized') ? windowElement : null;
+    },
+    'F11 restored File Explorer',
+  );
+  keydown('ArrowLeft', { altKey: true, shiftKey: true });
+  await waitFor(
+    () => document.querySelector('.desktop-window[data-app-id="workspace-files"].is-tiled'),
+    'Alt+Shift+Left tiled File Explorer',
+  );
+  keyboardShortcutReport.altShiftLeftTiled = true;
+
   await waitFor(() => fileWindow.querySelector('[data-testid="workspace-file-list"]'), 'workspace file list');
   const workspaceFileText = fileWindow.textContent || '';
   const newFolderRow = await waitFor(
@@ -1045,6 +1147,95 @@ async function browserSmoke() {
     6000,
   );
 
+  const generatedPaletteCapability = await (async () => {
+    const api = window.sb?.appManifest;
+    if (!api) {
+      return { available: false, error: 'app manifest API unavailable' };
+    }
+
+    let manifest = null;
+    const appId = `smoke-palette-capability-${Date.now()}`;
+    try {
+      manifest = await api.create({
+        appId,
+        name: 'Smoke Palette Capability',
+        version: '1.0.0',
+        entrypoint: 'generated://smoke-palette-capability',
+        description: 'Smoke generated app for command palette capability filtering.',
+        author: 'SwitchboardOS Smoke',
+        icon: 'SP',
+        category: 'smoke',
+        capabilities: ['palette:allowed'],
+        sourceCode: "document.getElementById('app-root').textContent = 'Smoke palette capability app';",
+        packageMetadata: {
+          actionRegistry: [
+            {
+              id: 'allowed-smoke-palette-action',
+              label: 'Allowed smoke palette action',
+              description: 'Allowed action declared with a manifest capability.',
+              capability: 'palette:allowed',
+              shortcut: 'Ctrl+Alt+A',
+            },
+            {
+              id: 'blocked-smoke-palette-action',
+              label: 'Blocked smoke palette action',
+              description: 'Blocked action declares a capability absent from the manifest.',
+              capability: 'palette:missing',
+              shortcut: 'Ctrl+Alt+B',
+            },
+          ],
+        },
+        enabled: true,
+        installedAt: new Date().toISOString(),
+      });
+
+      window.postMessage({ type: 'sb:app-open', appId }, '*');
+      const generatedWindow = await waitFor(
+        () => document.querySelector(`.desktop-window[data-app-id="${appId}"]`),
+        'generated palette smoke app window',
+        20000,
+      );
+      await waitFor(
+        () => generatedWindow.querySelector('[data-testid="generated-app-runtime"][data-semantic-status="ready"]'),
+        'generated palette smoke runtime ready',
+        20000,
+      );
+
+      keydown('k', { ctrlKey: true });
+      const generatedPalette = await waitFor(
+        () => document.querySelector('[data-testid="command-palette"]'),
+        'generated app command palette',
+      );
+      setInputValue(generatedPalette.querySelector('input[name="paletteQuery"]'), 'smoke palette action');
+      const metadata = await waitFor(() => {
+        const rows = paletteResultMetadata();
+        return rows.some((row) => row.text.includes('Allowed smoke palette action')) ? rows : null;
+      }, 'generated app palette capability rows');
+      const allowedAction = metadata.find((row) => row.text.includes('Allowed smoke palette action')) || null;
+      const blockedActionVisible = metadata.some((row) => row.text.includes('Blocked smoke palette action'));
+      keydown('Escape');
+      await waitFor(() => !document.querySelector('[data-testid="command-palette"]'), 'generated app command palette closed');
+      keydown('F4', { altKey: true });
+      await waitFor(
+        () => !document.querySelector(`.desktop-window[data-app-id="${appId}"]`),
+        'Alt+F4 closed generated palette smoke app',
+      );
+
+      return {
+        available: true,
+        appId,
+        allowedActionVisible: Boolean(allowedAction),
+        blockedActionVisible,
+        altF4Closed: true,
+        allowedActionMetadata: allowedAction,
+      };
+    } finally {
+      if (manifest) {
+        await api.remove(manifest.id).catch(() => false);
+      }
+    }
+  })();
+
   return {
     initial,
     menus: {
@@ -1085,7 +1276,12 @@ async function browserSmoke() {
       opened: Boolean(commandPalette),
       rowLabels: commandPaletteLabels,
       text: commandPaletteText,
+      metadata: commandPaletteMetadata,
+      focusedWindowActionMetadata: focusedWindowPaletteActionMetadata,
+      focusedWindowKeyboardActionMetadata,
     },
+    keyboardShortcuts: keyboardShortcutReport,
+    generatedPaletteCapability,
     windows: {
       fileExplorerOpen: Boolean(fileWindow),
       hostsOpen: Boolean(hostsWindow),
@@ -1172,7 +1368,12 @@ async function main() {
   const contributionMatches = (items, label, expected) => {
     return items
       .filter((item) => item.text.includes(label))
-      .some((item) => Object.entries(expected).every(([key, value]) => item[key] === value));
+      .some((item) => Object.entries(expected).every(([key, value]) => {
+        if (Array.isArray(value)) {
+          return Array.isArray(item[key]) && value.every((entry) => item[key].includes(entry));
+        }
+        return item[key] === value;
+      }));
   };
   const terminalBridgeActionsReady = ['Copy', 'Paste', 'Clear'].every((label) => {
     const item = terminalActionMenuItem(label);
@@ -1239,6 +1440,55 @@ async function main() {
     report.commandPalette.rowLabels.includes('App Studio'),
     report.commandPalette.rowLabels.includes('Operator') === false,
     report.commandPalette.text.includes('Agent endpoint and approvals') === false,
+    contributionMatches(report.commandPalette.metadata, 'File Explorer', {
+      source: 'app-manifest',
+      sourceAppId: 'workspace-files',
+      targetScope: 'command-palette',
+      actionId: 'open-app',
+      shortcut: 'Meta+E',
+      isSystemApplet: 'true',
+      launcherCategory: 'core-launcher-system',
+      defaultLauncherRow: 'true',
+      capabilities: ['files:read', 'storage:scoped', 'local:config:read'],
+    }),
+    contributionMatches(report.commandPalette.metadata, 'Hosts', {
+      source: 'app-manifest',
+      sourceAppId: 'hosts',
+      targetScope: 'command-palette',
+      actionId: 'open-app',
+      isSystemApplet: 'true',
+      launcherCategory: 'core-launcher-system',
+      defaultLauncherRow: 'true',
+      capabilities: ['host:read', 'host:actions'],
+    }),
+    contributionMatches(report.commandPalette.focusedWindowActionMetadata, 'Refresh workspace context', {
+      source: 'window-object',
+      sourceAppId: 'workspace-files',
+      targetScope: 'focused-window',
+      actionId: 'refresh-hosts',
+    }),
+    contributionMatches(report.commandPalette.focusedWindowKeyboardActionMetadata, 'Minimize window', {
+      source: 'window-object',
+      sourceAppId: 'workspace-files',
+      targetScope: 'focused-window',
+      actionId: 'minimize-window',
+      shortcut: 'Meta+M',
+    }),
+    report.keyboardShortcuts.metaMMinimized,
+    report.keyboardShortcuts.metaUpMaximized,
+    report.keyboardShortcuts.f11FullscreenClass,
+    report.keyboardShortcuts.altShiftLeftTiled,
+    report.generatedPaletteCapability.available,
+    report.generatedPaletteCapability.allowedActionVisible,
+    !report.generatedPaletteCapability.blockedActionVisible,
+    report.generatedPaletteCapability.altF4Closed,
+    report.generatedPaletteCapability.allowedActionMetadata?.source === 'window-object',
+    report.generatedPaletteCapability.allowedActionMetadata?.sourceAppId === report.generatedPaletteCapability.appId,
+    report.generatedPaletteCapability.allowedActionMetadata?.targetScope === 'focused-window',
+    report.generatedPaletteCapability.allowedActionMetadata?.actionId === 'allowed-smoke-palette-action',
+    report.generatedPaletteCapability.allowedActionMetadata?.shortcut === 'Ctrl+Alt+A',
+    report.generatedPaletteCapability.allowedActionMetadata?.requiredCapabilities.includes('palette:allowed'),
+    report.generatedPaletteCapability.allowedActionMetadata?.capabilities.includes('palette:allowed'),
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
     report.menuAffordances.desktopMenu.iconCount >= 6,

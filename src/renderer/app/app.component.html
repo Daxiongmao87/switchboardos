@@ -521,9 +521,20 @@
           *ngFor="let result of paletteResults; trackBy: trackPaletteResult"
           type="button"
           class="palette-result"
+          [attr.data-palette-source]="result.source || null"
+          [attr.data-palette-source-app-id]="result.sourceAppId || null"
+          [attr.data-palette-target-scope]="result.targetScope || null"
+          [attr.data-palette-action-id]="result.actionId || null"
+          [attr.data-palette-required-capabilities]="(result.requiredCapabilities || []).join(',') || null"
+          [attr.data-palette-capabilities]="(result.capabilities || []).join(',') || null"
+          [attr.data-palette-shortcut]="result.shortcut || null"
+          [attr.data-palette-system-applet]="result.isSystemApplet === undefined ? null : result.isSystemApplet"
+          [attr.data-palette-launcher-category]="result.launcherCategory || null"
+          [attr.data-palette-default-launcher-row]="result.defaultLauncherRow === undefined ? null : result.defaultLauncherRow"
           (click)="runPaletteResult(result)"
         >
           <span>{{ result.label }}</span>
+          <kbd *ngIf="result.shortcut" class="palette-shortcut">{{ result.shortcut }}</kbd>
           <small>{{ result.detail }}</small>
         </button>
         <p *ngIf="paletteResults.length === 0">No matching commands.</p>

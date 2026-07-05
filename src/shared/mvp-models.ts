@@ -232,6 +232,7 @@ export interface ShellWindowAction {
   label: string;
   description: string;
   capability?: string;
+  shortcut?: string;
 }
 
 export interface ShellWindowSemanticState {
