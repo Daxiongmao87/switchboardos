@@ -20,6 +20,8 @@ import type {
   HostRecord,
   MvpSettings,
   MvpSettingsUpdate,
+  OperatorActionExecuteInput,
+  OperatorActionExecuteResult,
   OperatorProposeInput,
   OperatorProposeResult,
   SshExecInput,
@@ -176,6 +178,7 @@ interface HostedSwitchboardApi {
   };
   agent: {
     propose: (input: OperatorProposeInput) => Promise<OperatorProposeResult>;
+    executeAction: (input: OperatorActionExecuteInput) => Promise<OperatorActionExecuteResult>;
   };
   ssh: {
     exec: (input: SshExecInput) => Promise<SshExecResult>;
@@ -347,6 +350,8 @@ function createHostedApi(): HostedSwitchboardApi {
     agent: {
       propose: (input: OperatorProposeInput) =>
         request('/api/agent/propose', { method: 'POST', body: input }),
+      executeAction: (input: OperatorActionExecuteInput): Promise<OperatorActionExecuteResult> =>
+        request('/api/agent/execute-action', { method: 'POST', body: input }),
     },
     ssh: {
       exec: (input: SshExecInput) =>

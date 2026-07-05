@@ -43,6 +43,7 @@ export type PolicyCapability =
   | 'agent-endpoint:update'
   | 'agent-endpoint:delete'
   | 'agent:propose'
+  | 'agent:execute-action'
   | 'app-manifest:read'
   | 'app-manifest:create'
   | 'app-manifest:update'
@@ -130,6 +131,7 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'agent-endpoint:update',
   'agent-endpoint:delete',
   'agent:propose',
+  'agent:execute-action',
   'app-manifest:read',
   'app-manifest:create',
   'app-manifest:update',

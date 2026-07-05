@@ -13,6 +13,7 @@ const mainText = read('src/main/main.ts');
 const hostedText = read('src/main/hosted-server.ts');
 const contractText = read('src/main/route-access-contracts.ts');
 const policyText = read('src/main/policy-service.ts');
+const agentsText = read('src/renderer/app/agents/agents.component.ts');
 
 const REQUIRED_HOST_CONTRACTS = [
   {
@@ -163,6 +164,11 @@ const REQUIRED_HOST_CONTRACTS = [
   {
     id: 'ipc:agent:propose',
     routeMarker: "'agent:propose'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:agent:execute-action',
+    routeMarker: "'agent:execute-action'",
     contextFile: 'src/main/main.ts',
   },
   {
@@ -518,6 +524,10 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:POST:/api/agent/execute-action',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/app-manifests',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -693,6 +703,7 @@ const REQUIRED_HOST_CAPABILITIES = [
   'agent-endpoint:update',
   'agent-endpoint:delete',
   'agent:propose',
+  'agent:execute-action',
   'app-manifest:read',
   'app-manifest:create',
   'app-manifest:update',
@@ -1113,7 +1124,7 @@ function validateHostedDispatches() {
     }
   }
 
-  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/agent/propose'))) {
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/agent/'))) {
     const agentOperatorHelperIndex = hostedText.indexOf('private runHostedAgentOperatorRoute');
     if (agentOperatorHelperIndex === -1) {
       fail('Hosted agent operator routes are not using runHostedAgentOperatorRoute.');
@@ -1236,6 +1247,32 @@ function validateHostedDispatches() {
 
   if (mainText.includes('agentOperator.propose(validateOperatorProposeInput(input))')) {
     fail('Direct IPC agent operator fallback detected in main.ts.');
+  }
+
+  if (hostedText.includes('this.options.agentOperator.executeApprovedAction(validateOperatorActionExecuteInput(body)')) {
+    fail('Direct hosted agent operator execution fallback detected in hosted-server.ts.');
+  }
+
+  if (mainText.includes('agentOperator.executeApprovedAction(validateOperatorActionExecuteInput(input)')) {
+    fail('Direct IPC agent operator execution fallback detected in main.ts.');
+  }
+
+  const approveStart = agentsText.indexOf('async approveAndDispatch');
+  const approveEnd = approveStart === -1 ? -1 : agentsText.indexOf('\n  formatDate', approveStart);
+  const approveBody = approveStart === -1 || approveEnd === -1 ? '' : agentsText.slice(approveStart, approveEnd);
+
+  if (!approveBody.includes('api.agent.executeAction')) {
+    fail('Agents approved Operator flow must call the structured agent execution API.');
+  }
+
+  if (approveBody.includes('api.terminal.write(')) {
+    fail('Agents approved Operator flow must not dispatch proposals through api.terminal.write.');
+  }
+
+  if (approveBody.includes('api.audit.log(')
+    || approveBody.includes('agent.command.dispatched')
+    || approveBody.includes('${proposal.command}')) {
+    fail('Agents approved Operator flow must not client-audit raw proposed command strings.');
   }
 
   if (hostedText.includes('return this.options.store.listAppManifests();')

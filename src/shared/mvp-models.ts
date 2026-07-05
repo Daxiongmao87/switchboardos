@@ -470,6 +470,37 @@ export interface OperatorProposeResult {
   warnings: string[];
 }
 
+export type OperatorActionKind = 'ssh-command';
+export type OperatorActionExecutionStatus = 'dispatched' | 'failed' | 'unsupported';
+
+export interface OperatorActionDescriptor {
+  kind: OperatorActionKind;
+  command: string;
+}
+
+export interface OperatorActionExecuteInput {
+  hostId: string;
+  proposal: OperatorProposal;
+  action: OperatorActionDescriptor;
+  approved: boolean;
+}
+
+export interface OperatorActionExecuteResult {
+  hostId: string;
+  proposalId: string;
+  proposalSource: OperatorProposalSource;
+  proposalRisk: OperatorProposalRisk;
+  actionKind: OperatorActionKind;
+  status: OperatorActionExecutionStatus;
+  message: string;
+  requiresApproval: true;
+  approved: boolean;
+  terminalSessionId: string | null;
+  terminalStartStatus: TerminalStartResult['status'] | null;
+  terminalWriteAccepted: boolean;
+  executedAt: string;
+}
+
 // ============================================================
 // Bootstrap Presets (persisted)
 // ============================================================

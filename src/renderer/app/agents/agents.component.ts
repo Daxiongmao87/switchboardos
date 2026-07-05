@@ -1,5 +1,13 @@
 import { Component, OnInit } from '@angular/core';
-import type { AgentEndpoint, AuditEvent, HostRecord, MvpSettings, OperatorProposal, OperatorProposeResult } from '../../../shared/mvp-models';
+import type {
+  AgentEndpoint,
+  AuditEvent,
+  HostRecord,
+  MvpSettings,
+  OperatorActionExecuteInput,
+  OperatorProposal,
+  OperatorProposeResult,
+} from '../../../shared/mvp-models';
 import { getSwitchboardApi } from '../switchboard-api';
 
 type DiagnosticProposal = OperatorProposal;
@@ -12,7 +20,7 @@ type DiagnosticProposal = OperatorProposal;
       <header class="page-header">
         <div>
           <h1>Agents</h1>
-          <p>Provider-backed Operator proposals with explicit approval before SSH command dispatch.</p>
+          <p>Provider-backed Operator proposals with explicit approval before structured backend execution.</p>
         </div>
         <div class="header-actions">
           <span class="status-pill" [class.is-disabled]="executionDisabled">{{ policyLabel }}</span>
@@ -198,7 +206,7 @@ type DiagnosticProposal = OperatorProposal;
 
           <div *ngIf="auditEvents.length === 0" class="empty-state">
             <strong>No recent audit events</strong>
-            <p>Proposal generation and approved dispatches will appear here.</p>
+            <p>Proposal generation and approved executions will appear here.</p>
           </div>
 
           <ol *ngIf="auditEvents.length > 0" class="audit-list">
@@ -666,6 +674,10 @@ export class AgentsComponent implements OnInit {
       this.errorMessage = 'Operator execution is disabled by local policy.';
       return;
     }
+    if (!api.agent?.executeAction) {
+      this.errorMessage = 'Structured Operator action execution API is unavailable.';
+      return;
+    }
 
     this.dispatchingProposalId = proposal.id;
     this.errorMessage = '';
@@ -674,32 +686,30 @@ export class AgentsComponent implements OnInit {
     proposal.message = 'Approved by user.';
 
     try {
-      const sessionId = await this.ensureTerminalSession(api, host);
-      const writeResult = await api.terminal.write(sessionId, `${proposal.command}\n`);
-      if (!writeResult.success) {
-        throw new Error(writeResult.message);
-      }
-      proposal.status = 'dispatched';
-      proposal.message = 'Command sent to approved SSH terminal session.';
-      await api.audit.log({
-        type: 'agent.command.dispatched',
-        entityType: 'host',
-        entityId: host.id,
-        message: `Approved and dispatched local Operator command for ${host.name}: ${proposal.command}`,
-        metadata: {
-          workflow: proposal.source === 'provider' ? 'provider-backed-operator' : 'local-fallback-operator',
-          hostId: host.id,
-          terminalSessionId: sessionId,
-          command: proposal.command,
-          proposalSource: proposal.source,
-          requiresApproval: true,
-          approved: true,
-          autonomous: false,
-          untrustedHostOutputSeparated: true,
-          secretsLogged: false,
+      const input: OperatorActionExecuteInput = {
+        hostId: host.id,
+        proposal: {
+          ...proposal,
+          status: 'approved',
+          message: proposal.message,
         },
-      });
-      this.statusMessage = `Approved command dispatched to ${host.name}.`;
+        action: {
+          kind: 'ssh-command',
+          command: proposal.command,
+        },
+        approved: true,
+      };
+      const result = await api.agent.executeAction(input);
+      if (result.terminalSessionId) {
+        this.terminalSessionId = result.terminalSessionId;
+        this.terminalHostId = host.id;
+      }
+      if (result.status !== 'dispatched') {
+        throw new Error(result.message);
+      }
+      proposal.status = result.status;
+      proposal.message = result.message;
+      this.statusMessage = `Approved action dispatched to ${host.name}.`;
       await this.refreshAuditEvents(api);
     } catch (error) {
       proposal.status = 'failed';
@@ -780,21 +790,6 @@ export class AgentsComponent implements OnInit {
         source: 'fallback',
       },
     ];
-  }
-
-  private async ensureTerminalSession(api: NonNullable<ReturnType<typeof getSwitchboardApi>>, host: HostRecord): Promise<string> {
-    if (this.terminalSessionId && this.terminalHostId === host.id) {
-      return this.terminalSessionId;
-    }
-
-    const startResult = await api.terminal.start(host.id);
-    if (startResult.status !== 'started' || !startResult.sessionId) {
-      throw new Error(startResult.message);
-    }
-
-    this.terminalSessionId = startResult.sessionId;
-    this.terminalHostId = host.id;
-    return startResult.sessionId;
   }
 
   private async refreshAuditEvents(api: NonNullable<ReturnType<typeof getSwitchboardApi>>): Promise<void> {

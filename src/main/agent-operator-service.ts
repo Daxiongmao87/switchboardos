@@ -3,10 +3,14 @@ import type {
   AuditEvent,
   CreateAuditEventInput,
   HostRecord,
+  OperatorActionExecuteInput,
+  OperatorActionExecuteResult,
   OperatorContextSnapshot,
   OperatorProposal,
   OperatorProposeInput,
   OperatorProposeResult,
+  TerminalStartResult,
+  TerminalWriteResult,
 } from '../shared/mvp-models';
 import type { MvpSqliteStore } from './mvp-sqlite-store';
 import { SecretVaultUnavailableError, type SecretVault } from './secret-vault';
@@ -19,6 +23,11 @@ interface AgentOperatorServiceDeps {
 
 interface ProviderProposalPayload {
   proposals?: Array<Partial<OperatorProposal>>;
+}
+
+export interface OperatorActionRuntime {
+  start(hostId: string): TerminalStartResult;
+  write(sessionId: string, input: string): TerminalWriteResult;
 }
 
 export class AgentOperatorService {
@@ -66,6 +75,85 @@ export class AgentOperatorService {
       context,
       warnings,
     };
+  }
+
+  async executeApprovedAction(
+    input: OperatorActionExecuteInput,
+    runtime: OperatorActionRuntime,
+  ): Promise<OperatorActionExecuteResult> {
+    const hostId = String(input.hostId ?? '').trim();
+    const executedAt = new Date().toISOString();
+    const baseResult = (): Omit<
+      OperatorActionExecuteResult,
+      'status' | 'message' | 'terminalSessionId' | 'terminalStartStatus' | 'terminalWriteAccepted'
+    > => ({
+      hostId,
+      proposalId: input.proposal.id,
+      proposalSource: input.proposal.source,
+      proposalRisk: input.proposal.risk,
+      actionKind: input.action.kind,
+      requiresApproval: true,
+      approved: input.approved,
+      executedAt,
+    });
+
+    const host = this.deps.store.getHost(hostId);
+    if (!host) {
+      return this.auditExecuted({
+        ...baseResult(),
+        status: 'failed',
+        message: 'Operator target host was not found.',
+        terminalSessionId: null,
+        terminalStartStatus: null,
+        terminalWriteAccepted: false,
+      });
+    }
+
+    if (!input.approved) {
+      return this.auditExecuted({
+        ...baseResult(),
+        status: 'failed',
+        message: 'Operator action execution requires explicit user approval.',
+        terminalSessionId: null,
+        terminalStartStatus: null,
+        terminalWriteAccepted: false,
+      });
+    }
+
+    if (input.action.kind !== 'ssh-command') {
+      return this.auditExecuted({
+        ...baseResult(),
+        status: 'unsupported',
+        message: 'Operator action kind is not supported by this runtime.',
+        terminalSessionId: null,
+        terminalStartStatus: null,
+        terminalWriteAccepted: false,
+      });
+    }
+
+    const startResult = runtime.start(host.id);
+    if (startResult.status !== 'started' || !startResult.sessionId) {
+      return this.auditExecuted({
+        ...baseResult(),
+        status: 'failed',
+        message: startResult.message,
+        terminalSessionId: startResult.sessionId,
+        terminalStartStatus: startResult.status,
+        terminalWriteAccepted: false,
+      });
+    }
+
+    const writeResult = runtime.write(startResult.sessionId, `${input.action.command}\n`);
+    return this.auditExecuted({
+      ...baseResult(),
+      status: writeResult.success ? 'dispatched' : 'failed',
+      message: writeResult.success
+        ? 'Approved Operator action dispatched to the backend terminal runtime.'
+        : writeResult.message,
+      terminalSessionId: startResult.sessionId,
+      terminalStartStatus: startResult.status,
+      terminalWriteAccepted: writeResult.success,
+    });
   }
 
   private buildContext(host: HostRecord, request: string): OperatorContextSnapshot {
@@ -330,6 +418,43 @@ export class AgentOperatorService {
         secretsLogged: false,
       },
     });
+  }
+
+  private auditExecuted(result: OperatorActionExecuteResult): OperatorActionExecuteResult {
+    const succeeded = result.status === 'dispatched';
+    this.deps.audit({
+      type: succeeded ? 'agent.action.execution_succeeded' : 'agent.action.execution_failed',
+      entityType: 'host',
+      entityId: result.hostId,
+      message: succeeded
+        ? 'Approved Operator action was dispatched through the backend runtime.'
+        : 'Approved Operator action execution failed before dispatch completion.',
+      metadata: {
+        workflow: 'structured-operator-action',
+        hostId: result.hostId,
+        proposalId: result.proposalId,
+        proposalSource: result.proposalSource,
+        proposalRisk: result.proposalRisk,
+        actionKind: result.actionKind,
+        executionStatus: result.status,
+        terminalSessionId: result.terminalSessionId,
+        terminalStartStatus: result.terminalStartStatus,
+        terminalWriteAccepted: result.terminalWriteAccepted,
+        requiresApproval: result.requiresApproval,
+        approved: result.approved,
+        autonomous: false,
+        structuredActionExecution: true,
+        operatorRequestLogged: false,
+        requestLogged: false,
+        proposedCommandsLogged: false,
+        commandLogged: false,
+        terminalInputLogged: false,
+        commandOutputLogged: false,
+        providerPayloadLogged: false,
+        secretsLogged: false,
+      },
+    });
+    return result;
   }
 
   private providerWarning(endpoint: AgentEndpoint, error: unknown): string {

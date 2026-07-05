@@ -44,6 +44,8 @@ import type {
   HostTag,
   MvpSettings,
   MvpSettingsUpdate,
+  OperatorActionExecuteInput,
+  OperatorActionExecuteResult,
   OperatorProposeInput,
   OperatorProposeResult,
   SshExecInput,
@@ -332,6 +334,8 @@ contextBridge.exposeInMainWorld('sb', {
   agent: {
     propose: (input: OperatorProposeInput): Promise<OperatorProposeResult> =>
       invoke('agent:propose', input),
+    executeAction: (input: OperatorActionExecuteInput): Promise<OperatorActionExecuteResult> =>
+      invoke('agent:execute-action', input),
   },
 
   // --- Bootstrap Presets ---
@@ -495,6 +499,7 @@ declare global {
       };
       agent: {
         propose: (input: OperatorProposeInput) => Promise<OperatorProposeResult>;
+        executeAction: (input: OperatorActionExecuteInput) => Promise<OperatorActionExecuteResult>;
       };
       bootstrapPreset: {
         list: () => Promise<BootstrapPresetRecord[]>;

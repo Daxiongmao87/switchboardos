@@ -22,7 +22,11 @@ import type {
   HostRecord,
   MvpSettings,
   MvpSettingsUpdate,
+  OperatorActionExecuteInput,
   OperatorProposeInput,
+  OperatorProposalRisk,
+  OperatorProposalSource,
+  OperatorProposalStatus,
   SshFileListInput,
   SshFileStatInput,
   SshFileTransferInput,
@@ -80,9 +84,14 @@ const AUTH_MODES: readonly MvpSettings['sshDefaults']['authMode'][] = ['placehol
 const HOST_AUTH_MODES: readonly HostAuthMode[] = ['placeholder', 'password', 'key', 'agent'];
 const HOST_BOOTSTRAP_STATUSES: readonly HostBootstrapStatus[] = ['unknown', 'not_started', 'pending', 'ready', 'failed'];
 const OPERATOR_POLICIES: readonly MvpSettings['operator']['policy'][] = ['manual-approval', 'disabled'];
+const OPERATOR_ACTION_KINDS = ['ssh-command'] as const;
+const OPERATOR_PROPOSAL_RISKS: readonly OperatorProposalRisk[] = ['low', 'medium', 'high'];
+const OPERATOR_PROPOSAL_SOURCES: readonly OperatorProposalSource[] = ['provider', 'fallback'];
+const OPERATOR_PROPOSAL_STATUSES: readonly OperatorProposalStatus[] = ['pending', 'approved', 'dispatched', 'failed'];
 const AGENT_ENDPOINT_POLICIES: readonly AgentEndpoint['policy'][] = ['safe', 'balanced', 'permissive', 'full-trust'];
 const WORKSPACE_FILE_KINDS = ['applet', 'scriptlet', 'note'] as const;
 const CREDENTIAL_TYPES: readonly CredentialType[] = ['keychain_ref', 'file_path', 'ssh_agent', 'env_var'];
+const MAX_OPERATOR_ACTION_COMMAND_LENGTH = 4000;
 
 export type WorkspaceFileKindInput = typeof WORKSPACE_FILE_KINDS[number];
 
@@ -162,6 +171,50 @@ export function validateOperatorProposeInput(value: unknown): OperatorProposeInp
     request: record.request === undefined
       ? 'Generate safe diagnostic proposals for this host.'
       : requireString(record.request, 'request').slice(0, 4000),
+  };
+}
+
+export function validateOperatorActionExecuteInput(value: unknown): OperatorActionExecuteInput {
+  const record = requireRecord(value, 'Operator action execution input');
+  const proposalRecord = requireRecord(record.proposal, 'proposal');
+  const actionRecord = requireRecord(record.action, 'action');
+  const hostId = requireNonEmptyString(record.hostId, 'hostId');
+  const approved = requireBoolean(record.approved, 'approved');
+  if (!approved) {
+    throw new RuntimeValidationError('Operator action execution requires approved to be true.');
+  }
+
+  const proposalCommand = requireNonEmptyString(proposalRecord.command, 'proposal.command');
+  const actionCommand = requireNonEmptyString(actionRecord.command, 'action.command');
+  if (proposalCommand.length > MAX_OPERATOR_ACTION_COMMAND_LENGTH || actionCommand.length > MAX_OPERATOR_ACTION_COMMAND_LENGTH) {
+    throw new RuntimeValidationError(`Operator action command must be ${MAX_OPERATOR_ACTION_COMMAND_LENGTH} characters or fewer.`);
+  }
+  if (proposalCommand !== actionCommand) {
+    throw new RuntimeValidationError('Operator action command must match the approved proposal command.');
+  }
+
+  const proposalStatus = requireEnum(proposalRecord.status, OPERATOR_PROPOSAL_STATUSES, 'proposal.status');
+  if (proposalStatus !== 'approved') {
+    throw new RuntimeValidationError('Operator proposal status must be approved before execution.');
+  }
+
+  return {
+    hostId,
+    approved,
+    proposal: {
+      id: requireNonEmptyString(proposalRecord.id, 'proposal.id'),
+      title: requireNonEmptyString(proposalRecord.title, 'proposal.title'),
+      command: proposalCommand,
+      rationale: requireNonEmptyString(proposalRecord.rationale, 'proposal.rationale'),
+      risk: requireEnum(proposalRecord.risk, OPERATOR_PROPOSAL_RISKS, 'proposal.risk'),
+      status: proposalStatus,
+      message: proposalRecord.message === undefined ? '' : requireString(proposalRecord.message, 'proposal.message'),
+      source: requireEnum(proposalRecord.source, OPERATOR_PROPOSAL_SOURCES, 'proposal.source'),
+    },
+    action: {
+      kind: requireEnum(actionRecord.kind, OPERATOR_ACTION_KINDS, 'action.kind'),
+      command: actionCommand,
+    },
   };
 }
 

@@ -26,6 +26,7 @@ import {
   validateHostIdInput,
   validateHostUpdateInput,
   validateHostOperationInput,
+  validateOperatorActionExecuteInput,
   validateOperatorProposeInput,
   validateSettingsUpdate,
   validateSshExecInput,
@@ -60,6 +61,7 @@ import type {
   BootstrapGenerateResult,
   CommandHistoryEntry,
   MvpSettingsUpdate,
+  OperatorActionExecuteResult,
   OperatorProposeResult,
   SshExecResult,
   TerminalResizeResult,
@@ -1787,6 +1789,21 @@ export class HostedServer {
       });
     }
 
+    if (action === 'execute-action' && method === 'POST') {
+      const validatedInput = validateOperatorActionExecuteInput(body);
+      return this.runHostedAgentOperatorRoute({
+        contractId: 'hosted:POST:/api/agent/execute-action',
+        session,
+        route: '/api/agent/execute-action',
+        action: 'POST /api/agent/execute-action',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.agentOperator.executeApprovedAction(validatedInput, this.options.terminalSessions),
+        successAuditMetadata: operatorActionRouteSuccessMetadata,
+      });
+    }
+
     throw new HttpError(404, `No hosted agent route for ${method}.`);
   }
 
@@ -2325,6 +2342,31 @@ function operatorProposeRouteSuccessMetadata(result: OperatorProposeResult): Rec
     proposalOnly: true,
     structuredActionExecution: false,
     operatorRequestLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function operatorActionRouteSuccessMetadata(result: OperatorActionExecuteResult): Record<string, unknown> {
+  return {
+    proposalId: result.proposalId,
+    proposalSource: result.proposalSource,
+    proposalRisk: result.proposalRisk,
+    actionKind: result.actionKind,
+    executionStatus: result.status,
+    terminalSessionId: result.terminalSessionId,
+    terminalStartStatus: result.terminalStartStatus,
+    terminalWriteAccepted: result.terminalWriteAccepted,
+    requiresApproval: result.requiresApproval,
+    approved: result.approved,
+    proposalOnly: false,
+    structuredActionExecution: true,
+    operatorRequestLogged: false,
+    requestLogged: false,
+    proposedCommandsLogged: false,
+    commandLogged: false,
+    terminalInputLogged: false,
+    commandOutputLogged: false,
     providerPayloadLogged: false,
     secretsLogged: false,
   };

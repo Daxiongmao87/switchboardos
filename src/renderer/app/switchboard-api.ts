@@ -20,6 +20,8 @@ import type {
   HostRecord,
   MvpSettings,
   MvpSettingsUpdate,
+  OperatorActionExecuteInput,
+  OperatorActionExecuteResult,
   OperatorProposeInput,
   OperatorProposeResult,
   SshExecInput,
@@ -188,6 +190,7 @@ export interface SwitchboardApi {
   };
   agent: {
     propose: (input: OperatorProposeInput) => Promise<OperatorProposeResult>;
+    executeAction: (input: OperatorActionExecuteInput) => Promise<OperatorActionExecuteResult>;
   };
   ssh: {
     exec: (input: SshExecInput) => Promise<SshExecResult>;

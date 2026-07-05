@@ -70,6 +70,7 @@ import {
   validateHostTagUpdateInput,
   validateHostUpdateInput,
   validateNoInput,
+  validateOperatorActionExecuteInput,
   validateOperatorProposeInput,
   validateSecretKeyInput,
   validateSecretStoreInput,
@@ -116,6 +117,8 @@ import type {
   HostOperationInput,
   CreateWorkspaceProfileInput,
   MvpSettingsUpdate,
+  OperatorActionExecuteInput,
+  OperatorActionExecuteResult,
   OperatorProposeInput,
   OperatorProposeResult,
   SshExecInput,
@@ -1418,6 +1421,31 @@ function operatorProposeRouteSuccessMetadata(result: OperatorProposeResult): Rec
     proposalOnly: true,
     structuredActionExecution: false,
     operatorRequestLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function operatorActionRouteSuccessMetadata(result: OperatorActionExecuteResult): Record<string, unknown> {
+  return {
+    proposalId: result.proposalId,
+    proposalSource: result.proposalSource,
+    proposalRisk: result.proposalRisk,
+    actionKind: result.actionKind,
+    executionStatus: result.status,
+    terminalSessionId: result.terminalSessionId,
+    terminalStartStatus: result.terminalStartStatus,
+    terminalWriteAccepted: result.terminalWriteAccepted,
+    requiresApproval: result.requiresApproval,
+    approved: result.approved,
+    proposalOnly: false,
+    structuredActionExecution: true,
+    operatorRequestLogged: false,
+    requestLogged: false,
+    proposedCommandsLogged: false,
+    commandLogged: false,
+    terminalInputLogged: false,
+    commandOutputLogged: false,
     providerPayloadLogged: false,
     secretsLogged: false,
   };
@@ -2993,6 +3021,22 @@ ipcMain.handle('agent:propose', async (_event, input: OperatorProposeInput) => {
     validatedInput,
     () => agentOperator.propose(validatedInput),
     operatorProposeRouteSuccessMetadata,
+  );
+});
+
+ipcMain.handle('agent:execute-action', async (_event, input: OperatorActionExecuteInput) => {
+  const validatedInput = validateOperatorActionExecuteInput(input);
+  return runAgentOperatorIpcRoute(
+    'ipc:agent:execute-action',
+    {
+      route: 'agent:execute-action',
+      action: 'agent:execute-action',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => agentOperator.executeApprovedAction(validatedInput, terminalSessions),
+    operatorActionRouteSuccessMetadata,
   );
 });
 

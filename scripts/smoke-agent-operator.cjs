@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { AgentOperatorService } = require('../dist/src/main/agent-operator-service.js');
+const { validateOperatorActionExecuteInput } = require('../dist/src/main/runtime-validation.js');
 
 const host = {
   id: 'operator-host',
@@ -108,6 +109,30 @@ function assertOperatorGeneratedAuditIsSanitized(event, options) {
     assert.equal(serializedEvent.includes(warning), false);
   }
   for (const forbiddenFragment of options.forbiddenFragments ?? []) {
+    assert.equal(serializedEvent.includes(forbiddenFragment), false);
+  }
+}
+
+function assertOperatorExecutionAuditIsSanitized(event, options) {
+  const metadata = event.metadata;
+  assert.equal(event.type, options.eventType);
+  assert.equal(metadata.structuredActionExecution, true);
+  assert.equal(metadata.requiresApproval, true);
+  assert.equal(metadata.approved, true);
+  assert.equal(metadata.commandLogged, false);
+  assert.equal(metadata.terminalInputLogged, false);
+  assert.equal(metadata.commandOutputLogged, false);
+  assert.equal(metadata.proposedCommandsLogged, false);
+  assert.equal(metadata.providerPayloadLogged, false);
+  assert.equal(metadata.secretsLogged, false);
+  assert.equal(Object.hasOwn(metadata, 'command'), false);
+  assert.equal(Object.hasOwn(metadata, 'commands'), false);
+  assert.equal(Object.hasOwn(metadata, 'terminalInput'), false);
+  assert.equal(Object.hasOwn(metadata, 'stdout'), false);
+  assert.equal(Object.hasOwn(metadata, 'stderr'), false);
+
+  const serializedEvent = JSON.stringify(event);
+  for (const forbiddenFragment of options.forbiddenFragments) {
     assert.equal(serializedEvent.includes(forbiddenFragment), false);
   }
 }
@@ -227,7 +252,93 @@ async function main() {
     global.fetch = originalFetch;
   }
 
-  console.log('agent operator smoke: provider invocation, fallback, context, untrusted output, and audit passed');
+  const executionStore = createStore(null);
+  const executionService = new AgentOperatorService({
+    store: executionStore,
+    secretVault: {
+      retrieveForMain: () => null,
+    },
+    audit: (event) => executionStore.logAuditEvent(event),
+  });
+  const secretCommand = 'echo operator-execution-secret-command-marker';
+  const approvedProposal = {
+    id: 'proposal-execution-marker',
+    title: 'Approved diagnostic',
+    command: secretCommand,
+    rationale: 'Exercise the approved action execution contract.',
+    risk: 'low',
+    status: 'approved',
+    message: 'Approved by smoke.',
+    source: 'fallback',
+  };
+
+  assert.throws(
+    () => validateOperatorActionExecuteInput({
+      hostId: host.id,
+      proposal: { ...approvedProposal, status: 'pending' },
+      action: { kind: 'ssh-command', command: secretCommand },
+      approved: true,
+    }),
+    /proposal status must be approved/i,
+  );
+  assert.throws(
+    () => validateOperatorActionExecuteInput({
+      hostId: host.id,
+      proposal: approvedProposal,
+      action: { kind: 'ssh-command', command: 'echo mismatched-command-marker' },
+      approved: true,
+    }),
+    /must match the approved proposal command/i,
+  );
+  assert.throws(
+    () => validateOperatorActionExecuteInput({
+      hostId: host.id,
+      proposal: approvedProposal,
+      action: { kind: 'ssh-command', command: secretCommand },
+      approved: false,
+    }),
+    /requires approved to be true/i,
+  );
+
+  let terminalWriteInput = '';
+  const executionInput = validateOperatorActionExecuteInput({
+    hostId: host.id,
+    proposal: approvedProposal,
+    action: { kind: 'ssh-command', command: secretCommand },
+    approved: true,
+  });
+  const executionResult = await executionService.executeApprovedAction(executionInput, {
+    start: (hostId) => ({
+      sessionId: 'operator-terminal-session',
+      status: 'started',
+      message: 'Terminal session started by smoke runtime.',
+      hostId,
+    }),
+    write: (sessionId, input) => {
+      assert.equal(sessionId, 'operator-terminal-session');
+      terminalWriteInput = input;
+      return {
+        sessionId,
+        success: true,
+        message: 'Input written to terminal session.',
+      };
+    },
+  });
+
+  assert.equal(terminalWriteInput, `${secretCommand}\n`);
+  assert.equal(executionResult.status, 'dispatched');
+  assert.equal(executionResult.terminalSessionId, 'operator-terminal-session');
+  assert.equal(JSON.stringify(executionResult).includes(secretCommand), false);
+  assertOperatorExecutionAuditIsSanitized(executionStore.auditEvents[0], {
+    eventType: 'agent.action.execution_succeeded',
+    forbiddenFragments: [
+      secretCommand,
+      'operator-execution-secret-command-marker',
+      'mismatched-command-marker',
+    ],
+  });
+
+  console.log('agent operator smoke: provider invocation, fallback, context, approval execution, and audit sanitization passed');
 }
 
 main().catch((error) => {
