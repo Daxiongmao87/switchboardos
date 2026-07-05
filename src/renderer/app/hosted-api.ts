@@ -3,6 +3,9 @@ import type {
   AgentEndpoint,
   AppManifest,
   AppPermission,
+  AppScopedStorageDeleteResult,
+  AppScopedStorageGetResult,
+  AppScopedStorageRecord,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
   BootstrapPreset,
@@ -168,6 +171,11 @@ interface HostedSwitchboardApi {
     list: (appId?: string) => Promise<AppPermission[]>;
     create: (input: CreateAppPermissionInput) => Promise<AppPermission>;
     remove: (id: string) => Promise<boolean>;
+  };
+  appStorage: {
+    get: (appId: string, key: string) => Promise<AppScopedStorageGetResult>;
+    set: (appId: string, key: string, value: string) => Promise<AppScopedStorageRecord>;
+    remove: (appId: string, key: string) => Promise<AppScopedStorageDeleteResult>;
   };
   agentEndpoint: {
     list: () => Promise<AgentEndpoint[]>;
@@ -336,6 +344,17 @@ function createHostedApi(): HostedSwitchboardApi {
         request('/api/app-permissions', { method: 'POST', body: input }),
       remove: (id: string) =>
         request(`/api/app-permissions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    },
+    appStorage: {
+      get: (appId: string, key: string) =>
+        request(`/api/app-storage/${encodeURIComponent(appId)}/${encodeURIComponent(key)}`),
+      set: (appId: string, key: string, value: string) =>
+        request(`/api/app-storage/${encodeURIComponent(appId)}/${encodeURIComponent(key)}`, {
+          method: 'PUT',
+          body: { value },
+        }),
+      remove: (appId: string, key: string) =>
+        request(`/api/app-storage/${encodeURIComponent(appId)}/${encodeURIComponent(key)}`, { method: 'DELETE' }),
     },
     agentEndpoint: {
       list: () => request('/api/agent-endpoints'),

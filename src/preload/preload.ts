@@ -16,6 +16,9 @@ import type {
   AgentEndpoint,
   AppManifest,
   AppPermission,
+  AppScopedStorageDeleteResult,
+  AppScopedStorageGetResult,
+  AppScopedStorageRecord,
   AuditEvent,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
@@ -321,6 +324,16 @@ contextBridge.exposeInMainWorld('sb', {
     remove: (id: string): Promise<boolean> => invoke('app-permission:delete', id),
   },
 
+  // --- App Scoped Storage ---
+  appStorage: {
+    get: (appId: string, key: string): Promise<AppScopedStorageGetResult> =>
+      invoke('app-storage:get', { appId, key }),
+    set: (appId: string, key: string, value: string): Promise<AppScopedStorageRecord> =>
+      invoke('app-storage:set', { appId, key, value }),
+    remove: (appId: string, key: string): Promise<AppScopedStorageDeleteResult> =>
+      invoke('app-storage:delete', { appId, key }),
+  },
+
   // --- Agent Endpoints ---
   agentEndpoint: {
     list: (): Promise<AgentEndpoint[]> => invoke('agent-endpoint:list'),
@@ -489,6 +502,11 @@ declare global {
         list: (appId?: string) => Promise<AppPermission[]>;
         create: (input: CreateAppPermissionInput) => Promise<AppPermission>;
         remove: (id: string) => Promise<boolean>;
+      };
+      appStorage: {
+        get: (appId: string, key: string) => Promise<AppScopedStorageGetResult>;
+        set: (appId: string, key: string, value: string) => Promise<AppScopedStorageRecord>;
+        remove: (appId: string, key: string) => Promise<AppScopedStorageDeleteResult>;
       };
       agentEndpoint: {
         list: () => Promise<AgentEndpoint[]>;

@@ -382,6 +382,40 @@ export interface AppPermission {
 export type CreateAppPermissionInput = Pick<AppPermission, 'appId' | 'capability' | 'granted'>;
 
 // ============================================================
+// App Scoped Storage
+// ============================================================
+
+export interface AppScopedStorageRecord {
+  appId: string;
+  key: string;
+  value: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppScopedStorageGetInput {
+  appId: string;
+  key: string;
+}
+
+export interface AppScopedStorageSetInput extends AppScopedStorageGetInput {
+  value: string;
+}
+
+export type AppScopedStorageDeleteInput = AppScopedStorageGetInput;
+
+export interface AppScopedStorageGetResult extends AppScopedStorageGetInput {
+  found: boolean;
+  value: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface AppScopedStorageDeleteResult extends AppScopedStorageGetInput {
+  deleted: boolean;
+}
+
+// ============================================================
 // Agent Endpoints
 // API key is stored as a credential reference ID, never raw.
 // ============================================================

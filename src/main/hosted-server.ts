@@ -6,7 +6,7 @@ import { generateBootstrapScript, listBootstrapPresets } from './bootstrap-gener
 import type { AgentOperatorService } from './agent-operator-service';
 import type { HostOperationRunner } from './host-operation-runner';
 import type { MvpSqliteStore } from './mvp-sqlite-store';
-import { PolicyDeniedError, type PolicyCapability, type PolicyService } from './policy-service';
+import { AppCapabilityDeniedError, PolicyDeniedError, type PolicyCapability, type PolicyService } from './policy-service';
 import {
   RuntimeValidationError,
   validateAgentEndpointCreateInput,
@@ -18,6 +18,9 @@ import {
   validateAppPermissionCreateInput,
   validateAppPermissionIdInput,
   validateAppPermissionListInput,
+  validateAppScopedStorageDeleteInput,
+  validateAppScopedStorageGetInput,
+  validateAppScopedStorageSetInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateCommandHistoryCreateInput,
@@ -57,6 +60,10 @@ import type {
   AgentEndpoint,
   AppManifest,
   AppPermission,
+  AppScopedStorageDeleteResult,
+  AppScopedStorageGetInput,
+  AppScopedStorageGetResult,
+  AppScopedStorageRecord,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
   CommandHistoryEntry,
@@ -341,7 +348,7 @@ export class HostedServer {
         this.sendJson(response, error.statusCode, { error: error.message });
         return;
       }
-      if (error instanceof PolicyDeniedError || error instanceof RuntimeValidationError) {
+      if (error instanceof PolicyDeniedError || error instanceof AppCapabilityDeniedError || error instanceof RuntimeValidationError) {
         this.sendJson(response, error.statusCode, { error: error.message });
         return;
       }
@@ -706,6 +713,10 @@ export class HostedServer {
 
     if (resource === 'app-permissions') {
       return this.routeAppPermissionApi(method, actionOrId, body, url, session);
+    }
+
+    if (resource === 'app-storage') {
+      return this.routeAppStorageApi(method, segments, body, session);
     }
 
     if (resource === 'agent-endpoints') {
@@ -1692,6 +1703,114 @@ export class HostedServer {
     throw new HttpError(404, `No hosted app permission route for ${method}.`);
   }
 
+  private routeAppStorageApi(
+    method: string,
+    segments: string[],
+    body: unknown,
+    session: HostedSession | null,
+  ): Promise<unknown> {
+    const appIdSegment = segments[1];
+    const keySegment = segments[2];
+    if (!appIdSegment || !keySegment || segments.length !== 3) {
+      throw new HttpError(404, `No hosted app storage route for ${method}.`);
+    }
+
+    const appId = decodeURIComponent(appIdSegment);
+    const key = decodeURIComponent(keySegment);
+    if (method === 'GET') {
+      validateHostedNoRequestBody(body);
+      const input = validateAppScopedStorageGetInput({ appId, key });
+      return this.runHostedAppRoute({
+        contractId: 'hosted:GET:/api/app-storage/:appId/:key',
+        session,
+        route: `/api/app-storage/${input.appId}/${appScopedStorageKeyHash(input.key)}`,
+        action: 'GET /api/app-storage/:appId/:key',
+        entityId: appScopedStorageEntityId(input.appId, input.key),
+        entityType: 'app_scoped_storage',
+        appId: input.appId,
+        input,
+        execute: () => {
+          this.assertAppScopedStorageGranted(input, 'GET /api/app-storage/:appId/:key');
+          return this.options.store.getAppScopedStorage(input);
+        },
+        successAuditMetadata: appScopedStorageRouteSuccessMetadata,
+      });
+    }
+
+    if (method === 'PUT') {
+      const input = validateAppScopedStorageSetInput({
+        appId,
+        key,
+        value: asRecord(body).value,
+      });
+      return this.runHostedAppRoute({
+        contractId: 'hosted:PUT:/api/app-storage/:appId/:key',
+        session,
+        route: `/api/app-storage/${input.appId}/${appScopedStorageKeyHash(input.key)}`,
+        action: 'PUT /api/app-storage/:appId/:key',
+        entityId: appScopedStorageEntityId(input.appId, input.key),
+        entityType: 'app_scoped_storage',
+        appId: input.appId,
+        input,
+        execute: () => {
+          this.assertAppScopedStorageGranted(input, 'PUT /api/app-storage/:appId/:key');
+          return this.options.store.setAppScopedStorage(input);
+        },
+        successAuditMetadata: appScopedStorageRouteSuccessMetadata,
+      });
+    }
+
+    if (method === 'DELETE') {
+      validateHostedNoRequestBody(body);
+      const input = validateAppScopedStorageDeleteInput({ appId, key });
+      return this.runHostedAppRoute({
+        contractId: 'hosted:DELETE:/api/app-storage/:appId/:key',
+        session,
+        route: `/api/app-storage/${input.appId}/${appScopedStorageKeyHash(input.key)}`,
+        action: 'DELETE /api/app-storage/:appId/:key',
+        entityId: appScopedStorageEntityId(input.appId, input.key),
+        entityType: 'app_scoped_storage',
+        appId: input.appId,
+        input,
+        execute: () => {
+          this.assertAppScopedStorageGranted(input, 'DELETE /api/app-storage/:appId/:key');
+          return this.options.store.deleteAppScopedStorage(input);
+        },
+        successAuditMetadata: appScopedStorageRouteSuccessMetadata,
+      });
+    }
+
+    throw new HttpError(404, `No hosted app storage route for ${method}.`);
+  }
+
+  private assertAppScopedStorageGranted(input: AppScopedStorageGetInput, action: string): void {
+    if (this.options.store.hasGrantedAppPermission(input.appId, 'storage:scoped')) {
+      return;
+    }
+
+    this.options.store.logAuditEvent({
+      type: 'app_storage.denied',
+      entityType: 'app',
+      entityId: input.appId,
+      message: 'Generated app scoped storage request denied.',
+      metadata: {
+        actionClass: 'app-storage-route',
+        action,
+        appId: input.appId,
+        capability: 'storage:scoped',
+        granted: false,
+        keyHash: appScopedStorageKeyHash(input.key),
+        keyLength: input.key.length,
+        storageValueLogged: false,
+        sourceCodeLogged: false,
+        packageMetadataLogged: false,
+        providerPayloadLogged: false,
+        secretsLogged: false,
+      },
+    });
+    throw new AppCapabilityDeniedError(input.appId, 'storage:scoped', action);
+  }
+
   private routeAgentEndpointApi(
     method: string,
     action: string | undefined,
@@ -2314,6 +2433,34 @@ function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | nul
     appId: result.appId,
     capability: result.capability,
     granted: result.granted,
+  };
+}
+
+type AppScopedStorageResult = AppScopedStorageGetResult | AppScopedStorageRecord | AppScopedStorageDeleteResult;
+
+function appScopedStorageEntityId(appId: string, key: string): string {
+  return `${appId}:${appScopedStorageKeyHash(key)}`;
+}
+
+function appScopedStorageKeyHash(key: string): string {
+  return createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
+
+function appScopedStorageRouteSuccessMetadata(result: AppScopedStorageResult): Record<string, unknown> {
+  const value = 'value' in result ? result.value : null;
+  return {
+    appId: result.appId,
+    keyHash: appScopedStorageKeyHash(result.key),
+    keyLength: result.key.length,
+    valuePresent: value !== null,
+    valueLength: typeof value === 'string' ? value.length : 0,
+    deleted: 'deleted' in result ? result.deleted : false,
+    found: 'found' in result ? result.found : true,
+    storageValueLogged: false,
+    sourceCodeLogged: false,
+    packageMetadataLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
   };
 }
 

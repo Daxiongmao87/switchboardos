@@ -16,7 +16,7 @@
 import { app, BrowserWindow, ipcMain, dialog, safeStorage } from 'electron';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { basename, dirname, extname, join, isAbsolute, relative, resolve } from 'path';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { networkInterfaces } from 'os';
 import { MvpSqliteStore } from './mvp-sqlite-store';
 import type { HostRecord } from '../shared/mvp-models';
@@ -26,7 +26,7 @@ import { HostedServer, type HostedServerAppInfo } from './hosted-server';
 import { HostOperationRunner } from './host-operation-runner';
 import { SecretVault, SecretVaultUnavailableError, type SecretMetadata } from './secret-vault';
 import { SshService } from './ssh-service';
-import { PolicyService } from './policy-service';
+import { AppCapabilityDeniedError, PolicyService } from './policy-service';
 import { AgentOperatorService } from './agent-operator-service';
 import {
   getHostRouteContract,
@@ -42,6 +42,9 @@ import {
   validateAppPermissionCreateInput,
   validateAppPermissionIdInput,
   validateAppPermissionListInput,
+  validateAppScopedStorageDeleteInput,
+  validateAppScopedStorageGetInput,
+  validateAppScopedStorageSetInput,
   validateAuditEventInput,
   validateBootstrapGenerateInput,
   validateBootstrapPresetCreateInput,
@@ -98,6 +101,11 @@ import type {
   AgentEndpoint,
   AppManifest,
   AppPermission,
+  AppScopedStorageDeleteResult,
+  AppScopedStorageGetInput,
+  AppScopedStorageGetResult,
+  AppScopedStorageRecord,
+  AppScopedStorageSetInput,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
   BootstrapPresetRecord,
@@ -1360,6 +1368,62 @@ function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | nul
     capability: result.capability,
     granted: result.granted,
   };
+}
+
+type AppScopedStorageResult = AppScopedStorageGetResult | AppScopedStorageRecord | AppScopedStorageDeleteResult;
+
+function appScopedStorageEntityId(appId: string, key: string): string {
+  return `${appId}:${appScopedStorageKeyHash(key)}`;
+}
+
+function appScopedStorageKeyHash(key: string): string {
+  return createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
+
+function appScopedStorageRouteSuccessMetadata(result: AppScopedStorageResult): Record<string, unknown> {
+  const value = 'value' in result ? result.value : null;
+  return {
+    appId: result.appId,
+    keyHash: appScopedStorageKeyHash(result.key),
+    keyLength: result.key.length,
+    valuePresent: value !== null,
+    valueLength: typeof value === 'string' ? value.length : 0,
+    deleted: 'deleted' in result ? result.deleted : false,
+    found: 'found' in result ? result.found : true,
+    storageValueLogged: false,
+    sourceCodeLogged: false,
+    packageMetadataLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function assertAppScopedStorageGranted(input: AppScopedStorageGetInput, action: string): void {
+  if (mvpStore.hasGrantedAppPermission(input.appId, 'storage:scoped')) {
+    return;
+  }
+
+  mvpStore.logAuditEvent({
+    type: 'app_storage.denied',
+    entityType: 'app',
+    entityId: input.appId,
+    message: 'Generated app scoped storage request denied.',
+    metadata: {
+      actionClass: 'app-storage-route',
+      action,
+      appId: input.appId,
+      capability: 'storage:scoped',
+      granted: false,
+      keyHash: appScopedStorageKeyHash(input.key),
+      keyLength: input.key.length,
+      storageValueLogged: false,
+      sourceCodeLogged: false,
+      packageMetadataLogged: false,
+      providerPayloadLogged: false,
+      secretsLogged: false,
+    },
+  });
+  throw new AppCapabilityDeniedError(input.appId, 'storage:scoped', action);
 }
 
 function bootstrapPresetRouteSuccessMetadata(result: BootstrapPresetRecord | boolean | null): Record<string, unknown> {
@@ -2931,6 +2995,65 @@ ipcMain.handle('app-permission:create', async (_event, input: CreateAppPermissio
     validatedInput,
     () => mvpStore.createAppPermission(validatedInput),
     appPermissionRouteSuccessMetadata,
+  );
+});
+
+// App Scoped Storage
+ipcMain.handle('app-storage:get', async (_event, input: AppScopedStorageGetInput) => {
+  const validatedInput = validateAppScopedStorageGetInput(input);
+  return runAppRouteIpc(
+    'ipc:app-storage:get',
+    {
+      route: 'app-storage:get',
+      action: 'app-storage:get',
+      entityId: appScopedStorageEntityId(validatedInput.appId, validatedInput.key),
+      entityType: 'app_scoped_storage',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertAppScopedStorageGranted(validatedInput, 'app-storage:get');
+      return mvpStore.getAppScopedStorage(validatedInput);
+    },
+    appScopedStorageRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-storage:set', async (_event, input: AppScopedStorageSetInput) => {
+  const validatedInput = validateAppScopedStorageSetInput(input);
+  return runAppRouteIpc(
+    'ipc:app-storage:set',
+    {
+      route: 'app-storage:set',
+      action: 'app-storage:set',
+      entityId: appScopedStorageEntityId(validatedInput.appId, validatedInput.key),
+      entityType: 'app_scoped_storage',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertAppScopedStorageGranted(validatedInput, 'app-storage:set');
+      return mvpStore.setAppScopedStorage(validatedInput);
+    },
+    appScopedStorageRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-storage:delete', async (_event, input: AppScopedStorageGetInput) => {
+  const validatedInput = validateAppScopedStorageDeleteInput(input);
+  return runAppRouteIpc(
+    'ipc:app-storage:delete',
+    {
+      route: 'app-storage:delete',
+      action: 'app-storage:delete',
+      entityId: appScopedStorageEntityId(validatedInput.appId, validatedInput.key),
+      entityType: 'app_scoped_storage',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertAppScopedStorageGranted(validatedInput, 'app-storage:delete');
+      return mvpStore.deleteAppScopedStorage(validatedInput);
+    },
+    appScopedStorageRouteSuccessMetadata,
   );
 });
 

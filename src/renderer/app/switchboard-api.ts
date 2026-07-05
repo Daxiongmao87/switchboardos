@@ -8,6 +8,9 @@ import type {
   ConnectionTestResult,
   AppManifest,
   AppPermission,
+  AppScopedStorageDeleteResult,
+  AppScopedStorageGetResult,
+  AppScopedStorageRecord,
   CreateAppManifestInput,
   CreateAppPermissionInput,
   CreateAuditEventInput,
@@ -180,6 +183,11 @@ export interface SwitchboardApi {
     list: (appId?: string) => Promise<AppPermission[]>;
     create: (input: CreateAppPermissionInput) => Promise<AppPermission>;
     remove: (id: string) => Promise<boolean>;
+  };
+  appStorage: {
+    get: (appId: string, key: string) => Promise<AppScopedStorageGetResult>;
+    set: (appId: string, key: string, value: string) => Promise<AppScopedStorageRecord>;
+    remove: (appId: string, key: string) => Promise<AppScopedStorageDeleteResult>;
   };
   agentEndpoint: {
     list: () => Promise<AgentEndpoint[]>;

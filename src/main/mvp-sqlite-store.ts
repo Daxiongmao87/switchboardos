@@ -6,6 +6,12 @@ import type {
   AgentEndpoint,
   AppManifest,
   AppPermission,
+  AppScopedStorageDeleteInput,
+  AppScopedStorageDeleteResult,
+  AppScopedStorageGetInput,
+  AppScopedStorageGetResult,
+  AppScopedStorageRecord,
+  AppScopedStorageSetInput,
   AuditEvent,
   BootstrapPresetRecord,
   BootstrapRun,
@@ -1169,6 +1175,85 @@ export class MvpSqliteStore {
     return result.changes > 0;
   }
 
+  hasGrantedAppPermission(appId: string, capability: string): boolean {
+    this.ensureDb();
+    const row = this.db!
+      .prepare('SELECT granted FROM app_permissions WHERE app_id = ? AND capability = ?')
+      .get(appId, capability) as Record<string, unknown> | undefined;
+    return Number(row?.granted) === 1;
+  }
+
+  getAppScopedStorage(input: AppScopedStorageGetInput): AppScopedStorageGetResult {
+    this.ensureDb();
+    const appId = stringValue(input.appId, '').trim();
+    const key = stringValue(input.key, '').trim();
+    const row = this.db!
+      .prepare('SELECT * FROM app_scoped_storage WHERE app_id = ? AND storage_key = ?')
+      .get(appId, key) as Record<string, unknown> | undefined;
+
+    if (!row) {
+      return {
+        appId,
+        key,
+        found: false,
+        value: null,
+        createdAt: null,
+        updatedAt: null,
+      };
+    }
+
+    const record = this.rowToAppScopedStorage(row);
+    return {
+      ...record,
+      found: true,
+    };
+  }
+
+  setAppScopedStorage(input: AppScopedStorageSetInput): AppScopedStorageRecord {
+    this.ensureDb();
+    const appId = stringValue(input.appId, '').trim();
+    const key = stringValue(input.key, '').trim();
+    const value = stringValue(input.value, '');
+    const existing = this.getAppScopedStorage({ appId, key });
+    const now = new Date().toISOString();
+    const createdAt = existing.found && existing.createdAt ? existing.createdAt : now;
+
+    this.db!
+      .prepare(`
+        INSERT INTO app_scoped_storage (app_id, storage_key, storage_value, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(app_id, storage_key) DO UPDATE SET
+          storage_value = excluded.storage_value,
+          updated_at = excluded.updated_at
+      `)
+      .run(appId, key, value, createdAt, now);
+
+    const row = this.db!
+      .prepare('SELECT * FROM app_scoped_storage WHERE app_id = ? AND storage_key = ?')
+      .get(appId, key) as Record<string, unknown> | undefined;
+    return this.rowToAppScopedStorage(row ?? {
+      app_id: appId,
+      storage_key: key,
+      storage_value: value,
+      created_at: createdAt,
+      updated_at: now,
+    });
+  }
+
+  deleteAppScopedStorage(input: AppScopedStorageDeleteInput): AppScopedStorageDeleteResult {
+    this.ensureDb();
+    const appId = stringValue(input.appId, '').trim();
+    const key = stringValue(input.key, '').trim();
+    const result = this.db!
+      .prepare('DELETE FROM app_scoped_storage WHERE app_id = ? AND storage_key = ?')
+      .run(appId, key);
+    return {
+      appId,
+      key,
+      deleted: result.changes > 0,
+    };
+  }
+
   // ============================================================
   // Agent Endpoints
   // API key is never stored here; use credential_ref_id only.
@@ -1512,6 +1597,16 @@ export class MvpSqliteStore {
     };
   }
 
+  private rowToAppScopedStorage(row: Record<string, unknown>): AppScopedStorageRecord {
+    return {
+      appId: stringValue(row.app_id, ''),
+      key: stringValue(row.storage_key, ''),
+      value: stringValue(row.storage_value, ''),
+      createdAt: stringValue(row.created_at, ''),
+      updatedAt: stringValue(row.updated_at, ''),
+    };
+  }
+
   private rowToAgentEndpoint(row: Record<string, unknown>): AgentEndpoint {
     return {
       id: stringValue(row.id, ''),
@@ -1726,6 +1821,15 @@ export class MvpSqliteStore {
         UNIQUE(app_id, capability)
       );
 
+      CREATE TABLE IF NOT EXISTS app_scoped_storage (
+        app_id TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        storage_value TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (app_id, storage_key)
+      );
+
       CREATE TABLE IF NOT EXISTS agent_endpoints (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL DEFAULT '',
@@ -1785,7 +1889,7 @@ export class MvpSqliteStore {
 
     this.db!
       .prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)')
-      .run('schema_version', '4');
+      .run('schema_version', '5');
   }
 
   private ensureSettingsTable(): void {

@@ -14,6 +14,7 @@ const hostedText = read('src/main/hosted-server.ts');
 const contractText = read('src/main/route-access-contracts.ts');
 const policyText = read('src/main/policy-service.ts');
 const agentsText = read('src/renderer/app/agents/agents.component.ts');
+const generatedRuntimeText = read('src/renderer/app/generated-app-runtime/generated-app-runtime.component.ts');
 
 const REQUIRED_HOST_CONTRACTS = [
   {
@@ -209,6 +210,21 @@ const REQUIRED_HOST_CONTRACTS = [
   {
     id: 'ipc:app-permission:delete',
     routeMarker: "'app-permission:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-storage:get',
+    routeMarker: "'app-storage:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-storage:set',
+    routeMarker: "'app-storage:set'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-storage:delete',
+    routeMarker: "'app-storage:delete'",
     contextFile: 'src/main/main.ts',
   },
   {
@@ -560,6 +576,18 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/app-storage/:appId/:key',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PUT:/api/app-storage/:appId/:key',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/app-storage/:appId/:key',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/bootstrap/presets',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -711,6 +739,7 @@ const REQUIRED_HOST_CAPABILITIES = [
   'app-permission:read',
   'app-permission:grant',
   'app-permission:revoke',
+  'storage:scoped',
   'bootstrap:preset:read',
   'bootstrap:preset:create',
   'bootstrap:preset:update',
@@ -1136,10 +1165,10 @@ function validateHostedDispatches() {
     }
   }
 
-  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/app-manifests') || entry.id.includes('/api/app-permissions'))) {
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/app-manifests') || entry.id.includes('/api/app-permissions') || entry.id.includes('/api/app-storage'))) {
     const appHelperIndex = hostedText.indexOf('private runHostedAppRoute');
     if (appHelperIndex === -1) {
-      fail('Hosted app manifest/permission routes are not using runHostedAppRoute.');
+      fail('Hosted app manifest/permission/storage routes are not using runHostedAppRoute.');
     } else {
       const helperBody = hostedText.slice(appHelperIndex, appHelperIndex + 1800);
       if (!helperBody.includes('runHostRouteContract({')) {
@@ -1299,6 +1328,32 @@ function validateHostedDispatches() {
     || mainText.includes('return mvpStore.createAppPermission(input);')
     || mainText.includes('return mvpStore.deleteAppPermission(permissionId);')) {
     fail('Direct IPC app manifest/permission fallback detected in main.ts.');
+  }
+
+  if (hostedText.includes("if (resource === 'app-storage') {\n      return this.options.store.")) {
+    fail('Direct hosted app scoped storage fallback detected in hosted-server.ts.');
+  }
+
+  if (mainText.includes("ipcMain.handle('app-storage:get', async (_event, input) => mvpStore.getAppScopedStorage(input))")
+    || mainText.includes("ipcMain.handle('app-storage:set', async (_event, input) => mvpStore.setAppScopedStorage(input))")
+    || mainText.includes("ipcMain.handle('app-storage:delete', async (_event, input) => mvpStore.deleteAppScopedStorage(input))")) {
+    fail('Direct IPC app scoped storage fallback detected in main.ts.');
+  }
+
+  if (!mainText.includes('assertAppScopedStorageGranted(validatedInput')) {
+    fail('IPC app scoped storage routes must enforce granted storage:scoped capability in main.ts.');
+  }
+
+  if (!hostedText.includes('this.assertAppScopedStorageGranted(input')) {
+    fail('Hosted app scoped storage routes must enforce granted storage:scoped capability in hosted-server.ts.');
+  }
+
+  if (generatedRuntimeText.includes('switchboardos.generated-app') || generatedRuntimeText.includes('localStorage')) {
+    fail('Generated app runtime must not persist SwitchboardOS.storage through renderer localStorage.');
+  }
+
+  if (!generatedRuntimeText.includes('api.appStorage.get') || !generatedRuntimeText.includes('api.appStorage.set')) {
+    fail('Generated app runtime must call structured appStorage API for SDK storage get/set.');
   }
 
   if (hostedText.includes("if (actionOrId === 'presets' && method === 'GET') {\n        return listBootstrapPresets();")

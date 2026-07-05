@@ -23,6 +23,17 @@ function assertEqual(label, actual, expected) {
   assert(label, actual === expected, `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 
+function assertWorkspaceShortcutObjects(label, shortcuts, expectedAppIds) {
+  const appIds = Array.isArray(shortcuts) ? shortcuts.map((shortcut) => shortcut && shortcut.appId) : [];
+  assertEqual(`${label} app ids`, JSON.stringify(appIds), JSON.stringify(expectedAppIds));
+  const shellOwned = Array.isArray(shortcuts) && shortcuts.every((shortcut) => shortcut && shortcut.shellOwned === true);
+  assert(`${label} shell-owned metadata`, shellOwned, JSON.stringify(shortcuts));
+  const stableIds = Array.isArray(shortcuts) && shortcuts.every((shortcut) => (
+    shortcut && shortcut.id === `shortcut-${shortcut.appId}`
+  ));
+  assert(`${label} stable ids`, stableIds, JSON.stringify(shortcuts));
+}
+
 function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'switchboardos-sqlite-smoke-'));
   return Promise.resolve()
@@ -39,7 +50,7 @@ function assertSchemaTables(dir) {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all()
       .map((row) => row.name);
-    for (const table of ['audit_events', 'hosts', 'meta', 'settings', 'host_groups', 'host_tags', 'host_tag_assignments', 'credential_refs', 'app_manifests', 'app_permissions', 'agent_endpoints', 'bootstrap_presets', 'bootstrap_runs', 'command_history', 'workspace_profiles', 'workspace_state']) {
+    for (const table of ['audit_events', 'hosts', 'meta', 'settings', 'host_groups', 'host_tags', 'host_tag_assignments', 'credential_refs', 'app_manifests', 'app_permissions', 'app_scoped_storage', 'agent_endpoints', 'bootstrap_presets', 'bootstrap_runs', 'command_history', 'workspace_profiles', 'workspace_state']) {
       assert(`schema has ${table}`, rows.includes(table), JSON.stringify(rows));
     }
     const hostColumns = db.pragma('table_info(hosts)').map((row) => row.name);
@@ -384,7 +395,7 @@ async function caseWorkspaceProfiles() {
 
     assert('profile1 id assigned', typeof profile1.profileId === 'string' && profile1.profileId.length > 0);
     assertEqual('profile1 name', profile1.name, 'Dev workspace');
-    assertEqual('profile1 shortcuts', JSON.stringify(profile1.layout.desktopShortcutIds), '["hosts","terminal"]');
+    assertWorkspaceShortcutObjects('profile1 shortcuts', profile1.layout.desktopShortcutIds, ['hosts', 'terminal']);
     assertEqual('profile1 windows count', profile1.layout.windows.length, 1);
     assertEqual('listed after create', store.listWorkspaceProfiles().length, 1);
 
@@ -418,7 +429,7 @@ async function caseWorkspaceProfiles() {
     });
 
     assertEqual('updated name', updated && updated.name, 'Dev workspace updated');
-    assertEqual('updated shortcuts', updated && JSON.stringify(updated.layout.desktopShortcutIds), '["hosts","terminal","settings"]');
+    assertWorkspaceShortcutObjects('updated shortcuts', updated && updated.layout.desktopShortcutIds, ['hosts', 'terminal', 'settings']);
 
     const fetched = store.getWorkspaceProfile(profile1.profileId);
     assertEqual('fetched name', fetched && fetched.name, 'Dev workspace updated');
@@ -435,7 +446,7 @@ async function caseWorkspaceProfiles() {
     assertEqual('reopened active profile', reopened.getActiveWorkspaceProfileId(), profile1.profileId);
     const reopenedProfile = reopened.getWorkspaceProfile(profile1.profileId);
     assertEqual('reopened profile name', reopenedProfile && reopenedProfile.name, 'Dev workspace updated');
-    assertEqual('reopened layout shortcuts', reopenedProfile && JSON.stringify(reopenedProfile.layout.desktopShortcutIds), '["hosts","terminal","settings"]');
+    assertWorkspaceShortcutObjects('reopened layout shortcuts', reopenedProfile && reopenedProfile.layout.desktopShortcutIds, ['hosts', 'terminal', 'settings']);
     reopened.close();
   });
 }
@@ -478,10 +489,26 @@ async function caseNewEntityTables() {
     assertEqual('list app manifests', store.listAppManifests().length, 1);
 
     // ---- App Permissions ----
-    const perm1 = store.createAppPermission({ appId: 'app-1', capability: 'network', granted: true });
-    assert('app permission created', perm1.id && perm1.capability === 'network');
+    const perm1 = store.createAppPermission({ appId: 'app-1', capability: 'storage:scoped', granted: true });
+    assert('app permission created', perm1.id && perm1.capability === 'storage:scoped');
     assertEqual('app permission granted', store.getAppPermission(perm1.id).granted, true);
     assertEqual('list app permissions', store.listAppPermissions('app-1').length, 1);
+    assertEqual('app storage permission granted helper', store.hasGrantedAppPermission('app-1', 'storage:scoped'), true);
+    assertEqual('app missing permission denied helper', store.hasGrantedAppPermission('app-1', 'host:read'), false);
+
+    // ---- App Scoped Storage ----
+    const missingStorage = store.getAppScopedStorage({ appId: 'app-1', key: 'theme' });
+    assertEqual('app scoped storage missing', missingStorage.found, false);
+    const storedTheme = store.setAppScopedStorage({ appId: 'app-1', key: 'theme', value: 'dark' });
+    assertEqual('app scoped storage set value', storedTheme.value, 'dark');
+    const updatedTheme = store.setAppScopedStorage({ appId: 'app-1', key: 'theme', value: 'light' });
+    assertEqual('app scoped storage update value', updatedTheme.value, 'light');
+    assertEqual('app scoped storage stable createdAt', updatedTheme.createdAt, storedTheme.createdAt);
+    assert('app scoped storage updatedAt advances or remains stable ISO', updatedTheme.updatedAt >= storedTheme.updatedAt);
+    const transientStorage = store.setAppScopedStorage({ appId: 'app-1', key: 'transient', value: 'remove-me' });
+    assertEqual('app scoped storage second key', transientStorage.value, 'remove-me');
+    assertEqual('app scoped storage delete', store.deleteAppScopedStorage({ appId: 'app-1', key: 'transient' }).deleted, true);
+    assertEqual('app scoped storage deleted missing on read', store.getAppScopedStorage({ appId: 'app-1', key: 'transient' }).found, false);
 
     // ---- Agent Endpoints ----
     const ep1 = store.createAgentEndpoint({ name: 'OpenAI', provider: 'openai', baseUrl: 'https://api.openai.com', model: 'gpt-4' });
@@ -531,6 +558,9 @@ async function caseNewEntityTables() {
     assertEqual('reopened credential refs', reopened.listCredentialRefs().length, 1);
     assertEqual('reopened app manifests', reopened.listAppManifests().length, 1);
     assertEqual('reopened app permissions', reopened.listAppPermissions().length, 1);
+    const reopenedStorage = reopened.getAppScopedStorage({ appId: 'app-1', key: 'theme' });
+    assertEqual('reopened app scoped storage found', reopenedStorage.found, true);
+    assertEqual('reopened app scoped storage value', reopenedStorage.value, 'light');
     assertEqual('reopened agent endpoints', reopened.listAgentEndpoints().length, 1);
     assertEqual('reopened bootstrap presets', reopened.listBootstrapPresets().length, 1);
     assertEqual('reopened bootstrap runs', reopened.listBootstrapRuns().length, 1);
@@ -577,6 +607,7 @@ async function main() {
   }
 
   console.log('\nAll SQLite store smoke assertions passed.');
+  process.exit(0);
 }
 
 main().catch((err) => {

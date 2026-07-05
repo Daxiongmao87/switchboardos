@@ -5,6 +5,9 @@ import type {
   BootstrapRun,
   CreateAppManifestInput,
   CreateAppPermissionInput,
+  AppScopedStorageDeleteInput,
+  AppScopedStorageGetInput,
+  AppScopedStorageSetInput,
   CreateAgentEndpointInput,
   CreateAuditEventInput,
   CreateBootstrapPresetInput,
@@ -417,6 +420,35 @@ export function validateAppPermissionCreateInput(value: unknown): CreateAppPermi
 
 export function validateAppPermissionIdInput(value: unknown): string {
   return requireNonEmptyString(value, 'permissionId');
+}
+
+export function validateAppScopedStorageGetInput(value: unknown): AppScopedStorageGetInput {
+  const record = requireRecord(value, 'app scoped storage get input');
+  return {
+    appId: validateAppScopedStorageAppId(record.appId),
+    key: validateAppScopedStorageKey(record.key),
+  };
+}
+
+export function validateAppScopedStorageSetInput(value: unknown): AppScopedStorageSetInput {
+  const record = requireRecord(value, 'app scoped storage set input');
+  const valueText = requireString(record.value, 'value');
+  if (valueText.length > 65536) {
+    throw new RuntimeValidationError('value must be 65536 characters or fewer.');
+  }
+  return {
+    appId: validateAppScopedStorageAppId(record.appId),
+    key: validateAppScopedStorageKey(record.key),
+    value: valueText,
+  };
+}
+
+export function validateAppScopedStorageDeleteInput(value: unknown): AppScopedStorageDeleteInput {
+  const record = requireRecord(value, 'app scoped storage delete input');
+  return {
+    appId: validateAppScopedStorageAppId(record.appId),
+    key: validateAppScopedStorageKey(record.key),
+  };
 }
 
 export function validateHostOperationInput(value: unknown): HostOperationInput {
@@ -966,6 +998,22 @@ export function validateTerminalResizeInput(sessionId: unknown, cols: unknown, r
 
 export function validateTerminalStopInput(sessionId: unknown): string {
   return requireNonEmptyString(sessionId, 'sessionId');
+}
+
+function validateAppScopedStorageAppId(value: unknown): string {
+  const appId = requireNonEmptyString(value, 'appId');
+  if (appId.length > 128) {
+    throw new RuntimeValidationError('appId must be 128 characters or fewer.');
+  }
+  return appId;
+}
+
+function validateAppScopedStorageKey(value: unknown): string {
+  const key = requireNonEmptyString(value, 'key');
+  if (key.length > 256) {
+    throw new RuntimeValidationError('key must be 256 characters or fewer.');
+  }
+  return key;
 }
 
 export function requireRecord(value: unknown, label: string): Record<string, unknown> {

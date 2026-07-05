@@ -15,10 +15,16 @@ if (typeof WebSocket !== 'function') {
 const repoRoot = join(__dirname, '..');
 const electronBin = join(repoRoot, 'node_modules', '.bin', 'electron');
 const port = 9400 + Math.floor(Math.random() * 400);
-const cdpCommandTimeoutMs = 60000;
+const cdpCommandTimeoutMs = 180000;
 const configDir = mkdtempSync(join(tmpdir(), 'switchboardos-shell-ui-'));
 const screenshotPath = join(tmpdir(), 'switchboardos-shell-ui-smoke.png');
-const electron = spawn(electronBin, ['.', '--no-sandbox', `--remote-debugging-port=${port}`], {
+const electronUserDataDir = join(configDir, 'electron-user-data');
+const electron = spawn(electronBin, [
+  '.',
+  '--no-sandbox',
+  `--remote-debugging-port=${port}`,
+  `--user-data-dir=${electronUserDataDir}`,
+], {
   cwd: repoRoot,
   env: {
     ...process.env,
@@ -72,7 +78,7 @@ function getJson(path) {
 }
 
 async function waitForRendererPage() {
-  const deadline = Date.now() + 20000;
+  const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
     try {
       const targets = await getJson('/json/list');
@@ -1274,6 +1280,257 @@ async function browserSmoke() {
     }
   })();
 
+  const generatedScopedStorage = await (async () => {
+    const api = window.sb;
+    if (!api?.appManifest || !api.appPermission || !api.appStorage || !api.audit) {
+      return { available: false, error: 'generated app storage APIs unavailable' };
+    }
+
+    const semanticEvents = [];
+    const handleSemantic = (event) => {
+      semanticEvents.push(event.detail);
+    };
+    window.addEventListener('switchboard-generated-app-semantic', handleSemantic);
+
+    let allowedManifest = null;
+    let deniedManifest = null;
+    let allowedPermission = null;
+    const allowedAppId = `smoke-storage-allowed-${Date.now()}`;
+    const deniedAppId = `smoke-storage-denied-${Date.now()}`;
+    const storageKey = 'scoped-storage-smoke';
+    const storageValue = 'storage-smoke-value-from-sdk';
+
+    const runtimeStorageDiagnostics = (appId) => {
+      const runtime = document.querySelector(`.desktop-window[data-app-id="${appId}"] [data-testid="generated-app-runtime"]`);
+      const srcdoc = runtime?.querySelector('iframe')?.getAttribute('srcdoc') || '';
+      return {
+        runtimePresent: Boolean(runtime),
+        runtimeStatus: runtime?.getAttribute('data-semantic-status') || null,
+        runtimeAppId: runtime?.getAttribute('data-app-id') || null,
+        runtimeWindowIdPresent: Boolean(runtime?.getAttribute('data-window-id')),
+        runtimeCapabilities: runtime?.getAttribute('data-granted-capabilities') || null,
+        srcdocHasSdkBootstrap: srcdoc.includes('switchboard-sdk-request'),
+        srcdocHasStorageCall: srcdoc.includes('SwitchboardOS.storage.set'),
+        semanticStatuses: semanticEvents
+          .filter((entry) => entry?.semanticState?.metadata?.appId === appId)
+          .map((entry) => entry.semanticState.status),
+      };
+    };
+
+    const waitForGeneratedStorageState = async (appId) => {
+      try {
+        return await waitFor(() => {
+          return semanticEvents.find((entry) => {
+            const state = entry?.semanticState;
+            return state?.metadata?.appId === appId && typeof state.status === 'string' && state.status.startsWith('storage-');
+          }) || null;
+        }, `generated storage state ${appId}`, 20000);
+      } catch (error) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(runtimeStorageDiagnostics(appId))}`);
+      }
+    };
+
+    try {
+      allowedManifest = await api.appManifest.create({
+        appId: allowedAppId,
+        name: 'Smoke Storage Allowed',
+        version: '1.0.0',
+        entrypoint: 'generated://smoke-storage-allowed',
+        description: 'Smoke generated app for scoped storage backend contract.',
+        author: 'SwitchboardOS Smoke',
+        icon: 'SA',
+        category: 'smoke',
+        capabilities: ['storage:scoped'],
+        sourceCode: `
+          (async () => {
+            try {
+              await SwitchboardOS.storage.set(${JSON.stringify(storageKey)}, ${JSON.stringify(storageValue)});
+              const storedValue = await SwitchboardOS.storage.get(${JSON.stringify(storageKey)});
+              SwitchboardOS.agent.setState({
+                status: storedValue === ${JSON.stringify(storageValue)} ? 'storage-ok' : 'storage-mismatch',
+                summary: 'Scoped storage smoke completed through SwitchboardOS.storage.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  storageSet: true,
+                  storageGetMatches: storedValue === ${JSON.stringify(storageValue)},
+                  storageValueLogged: false
+                }
+              });
+            } catch (error) {
+              SwitchboardOS.agent.setState({
+                status: 'storage-error',
+                summary: 'Scoped storage smoke failed.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  error: error instanceof Error ? error.message : String(error),
+                  storageValueLogged: false
+                }
+              });
+            }
+          })();
+        `,
+        packageMetadata: {
+          smoke: 'generated-app-scoped-storage',
+        },
+        enabled: true,
+        installedAt: new Date().toISOString(),
+      });
+      const allowedManifestReadback = await api.appManifest.get(allowedManifest.id);
+      if (!allowedManifestReadback?.sourceCode.includes('SwitchboardOS.storage.set')) {
+        throw new Error('Generated scoped storage manifest source did not persist for allowed app.');
+      }
+      allowedPermission = await api.appPermission.create({
+        appId: allowedAppId,
+        capability: 'storage:scoped',
+        granted: true,
+      });
+
+      window.postMessage({ type: 'sb:app-open', appId: allowedAppId }, '*');
+      const allowedWindow = await waitFor(
+        () => document.querySelector(`.desktop-window[data-app-id="${allowedAppId}"]`),
+        'generated scoped storage allowed window',
+        20000,
+      );
+      const allowedRuntime = await waitFor(
+        () => allowedWindow.querySelector('[data-testid="generated-app-runtime"]'),
+        `generated scoped storage allowed runtime mounted ${JSON.stringify(runtimeStorageDiagnostics(allowedAppId))}`,
+        20000,
+      );
+      await waitFor(
+        () => (allowedRuntime.querySelector('iframe')?.getAttribute('srcdoc') || '').includes('SwitchboardOS.storage.set'),
+        `generated scoped storage allowed iframe source installed ${JSON.stringify(runtimeStorageDiagnostics(allowedAppId))}`,
+        20000,
+      );
+      const allowedState = await waitForGeneratedStorageState(allowedAppId);
+      const backendRead = await api.appStorage.get(allowedAppId, storageKey);
+      const auditAfterAllowed = await api.audit.list();
+      const allowedAuditJson = JSON.stringify(auditAfterAllowed.filter((event) => event.entityId === `${allowedAppId}:${event.metadata?.keyHash}` || event.metadata?.appId === allowedAppId));
+
+      keydown('F4', { altKey: true });
+      await waitFor(
+        () => !document.querySelector(`.desktop-window[data-app-id="${allowedAppId}"]`),
+        'Alt+F4 closed generated scoped storage allowed app',
+      );
+
+      deniedManifest = await api.appManifest.create({
+        appId: deniedAppId,
+        name: 'Smoke Storage Denied',
+        version: '1.0.0',
+        entrypoint: 'generated://smoke-storage-denied',
+        description: 'Smoke generated app without scoped storage permission.',
+        author: 'SwitchboardOS Smoke',
+        icon: 'SD',
+        category: 'smoke',
+        capabilities: [],
+        sourceCode: `
+          (async () => {
+            try {
+              await SwitchboardOS.storage.set(${JSON.stringify(storageKey)}, ${JSON.stringify(storageValue)});
+              SwitchboardOS.agent.setState({
+                status: 'storage-denial-missed',
+                summary: 'Scoped storage unexpectedly succeeded.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  denied: false,
+                  storageValueLogged: false
+                }
+              });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              SwitchboardOS.agent.setState({
+                status: 'storage-denied',
+                summary: 'Scoped storage denied without permission.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  denied: true,
+                  mentionsCapability: message.includes('storage:scoped'),
+                  storageValueLogged: false
+                }
+              });
+            }
+          })();
+        `,
+        packageMetadata: {
+          smoke: 'generated-app-scoped-storage-denied',
+        },
+        enabled: true,
+        installedAt: new Date().toISOString(),
+      });
+      const deniedManifestReadback = await api.appManifest.get(deniedManifest.id);
+      if (!deniedManifestReadback?.sourceCode.includes('SwitchboardOS.storage.set')) {
+        throw new Error('Generated scoped storage manifest source did not persist for denied app.');
+      }
+
+      window.postMessage({ type: 'sb:app-open', appId: deniedAppId }, '*');
+      const deniedWindow = await waitFor(
+        () => document.querySelector(`.desktop-window[data-app-id="${deniedAppId}"]`),
+        'generated scoped storage denied window',
+        20000,
+      );
+      const deniedRuntime = await waitFor(
+        () => deniedWindow.querySelector('[data-testid="generated-app-runtime"]'),
+        `generated scoped storage denied runtime mounted ${JSON.stringify(runtimeStorageDiagnostics(deniedAppId))}`,
+        20000,
+      );
+      await waitFor(
+        () => (deniedRuntime.querySelector('iframe')?.getAttribute('srcdoc') || '').includes('SwitchboardOS.storage.set'),
+        `generated scoped storage denied iframe source installed ${JSON.stringify(runtimeStorageDiagnostics(deniedAppId))}`,
+        20000,
+      );
+      const deniedState = await waitForGeneratedStorageState(deniedAppId);
+      const deniedBackendRead = await api.appStorage.get(deniedAppId, storageKey).then(
+        () => ({ denied: false, error: '' }),
+        (error) => ({ denied: true, error: error instanceof Error ? error.message : String(error) }),
+      );
+      const auditAfterDenied = await api.audit.list();
+      const deniedAuditEvents = auditAfterDenied.filter((event) => event.entityId === deniedAppId || event.metadata?.appId === deniedAppId);
+      const deniedAuditJson = JSON.stringify(deniedAuditEvents);
+      const generatedLocalStorageKeys = Object.keys(window.localStorage)
+        .filter((key) => key.startsWith('switchboardos.generated-app.'));
+
+      keydown('F4', { altKey: true });
+      await waitFor(
+        () => !document.querySelector(`.desktop-window[data-app-id="${deniedAppId}"]`),
+        'Alt+F4 closed generated scoped storage denied app',
+      );
+
+      return {
+        available: true,
+        allowedAppId,
+        deniedAppId,
+        allowedStateStatus: allowedState.semanticState.status,
+        allowedStateStorageMatches: allowedState.semanticState.metadata.storageGetMatches === true,
+        backendFound: backendRead.found,
+        backendValueMatches: backendRead.value === storageValue,
+        allowedAuditHasUpdate: auditAfterAllowed.some((event) => event.type === 'app_storage.updated' && event.metadata?.appId === allowedAppId),
+        allowedAuditHasRead: auditAfterAllowed.some((event) => event.type === 'app_storage.read' && event.metadata?.appId === allowedAppId),
+        allowedAuditOmitsValue: !allowedAuditJson.includes(storageValue),
+        deniedStateStatus: deniedState.semanticState.status,
+        deniedStateMentionsCapability: deniedState.semanticState.metadata.mentionsCapability === true,
+        deniedBackendReadDenied: deniedBackendRead.denied,
+        deniedAuditHasBackendDenial: deniedAuditEvents.some((event) => event.type === 'app_storage.denied' && event.metadata?.capability === 'storage:scoped'),
+        deniedAuditHasSdkDenial: deniedAuditEvents.some((event) => event.type === 'app.sdk_capability_denied'),
+        deniedAuditOmitsValue: !deniedAuditJson.includes(storageValue),
+        noGeneratedLocalStorageKeys: generatedLocalStorageKeys.length === 0,
+        generatedLocalStorageKeys,
+      };
+    } finally {
+      window.removeEventListener('switchboard-generated-app-semantic', handleSemantic);
+      if (allowedManifest) {
+        await api.appStorage.remove(allowedAppId, storageKey).catch(() => ({ deleted: false }));
+      }
+      if (allowedPermission) {
+        await api.appPermission.remove(allowedPermission.id).catch(() => false);
+      }
+      if (allowedManifest) {
+        await api.appManifest.remove(allowedManifest.id).catch(() => false);
+      }
+      if (deniedManifest) {
+        await api.appManifest.remove(deniedManifest.id).catch(() => false);
+      }
+    }
+  })();
+
   return {
     initial,
     menus: {
@@ -1333,6 +1590,7 @@ async function browserSmoke() {
     },
     keyboardShortcuts: keyboardShortcutReport,
     generatedPaletteCapability,
+    generatedScopedStorage,
     windows: {
       fileExplorerOpen: Boolean(fileWindow),
       hostsOpen: Boolean(hostsWindow),
@@ -1562,6 +1820,21 @@ async function main() {
     report.generatedPaletteCapability.allowedActionMetadata?.shortcut === 'Ctrl+Alt+A',
     report.generatedPaletteCapability.allowedActionMetadata?.requiredCapabilities.includes('palette:allowed'),
     report.generatedPaletteCapability.allowedActionMetadata?.capabilities.includes('palette:allowed'),
+    report.generatedScopedStorage.available,
+    report.generatedScopedStorage.allowedStateStatus === 'storage-ok',
+    report.generatedScopedStorage.allowedStateStorageMatches,
+    report.generatedScopedStorage.backendFound,
+    report.generatedScopedStorage.backendValueMatches,
+    report.generatedScopedStorage.allowedAuditHasUpdate,
+    report.generatedScopedStorage.allowedAuditHasRead,
+    report.generatedScopedStorage.allowedAuditOmitsValue,
+    report.generatedScopedStorage.deniedStateStatus === 'storage-denied',
+    report.generatedScopedStorage.deniedStateMentionsCapability,
+    report.generatedScopedStorage.deniedBackendReadDenied,
+    report.generatedScopedStorage.deniedAuditHasBackendDenial,
+    report.generatedScopedStorage.deniedAuditHasSdkDenial,
+    report.generatedScopedStorage.deniedAuditOmitsValue,
+    report.generatedScopedStorage.noGeneratedLocalStorageKeys,
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
     report.menuAffordances.desktopMenu.iconCount >= 6,

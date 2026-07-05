@@ -51,6 +51,7 @@ export type PolicyCapability =
   | 'app-permission:read'
   | 'app-permission:grant'
   | 'app-permission:revoke'
+  | 'storage:scoped'
   | 'bootstrap:preset:read'
   | 'bootstrap:preset:create'
   | 'bootstrap:preset:update'
@@ -139,6 +140,7 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'app-permission:read',
   'app-permission:grant',
   'app-permission:revoke',
+  'storage:scoped',
   'bootstrap:preset:read',
   'bootstrap:preset:create',
   'bootstrap:preset:update',
@@ -182,6 +184,15 @@ export class PolicyDeniedError extends Error {
   constructor(readonly decision: PolicyDecision) {
     super(`Policy denied ${decision.capability}: ${decision.reason}`);
     this.name = 'PolicyDeniedError';
+  }
+}
+
+export class AppCapabilityDeniedError extends Error {
+  readonly statusCode = 403;
+
+  constructor(readonly appId: string, readonly capability: string, readonly action: string) {
+    super(`App ${appId} is not granted capability ${capability} for ${action}.`);
+    this.name = 'AppCapabilityDeniedError';
   }
 }
 

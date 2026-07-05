@@ -1,4 +1,5 @@
 import {
+  AfterViewInit,
   Component,
   ElementRef,
   Input,
@@ -66,7 +67,6 @@ type SdkMessage = SdkRequestMessage | SdkStateMessage;
         class="generated-frame"
         title="Generated app sandbox"
         sandbox="allow-scripts"
-        [attr.srcdoc]="srcdoc"
       ></iframe>
     </section>
   `,
@@ -124,7 +124,7 @@ type SdkMessage = SdkRequestMessage | SdkStateMessage;
     }
   `],
 })
-export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestroy {
+export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnChanges, OnDestroy {
   @Input() manifest: AppManifest | null = null;
   @Input() windowId = '';
   @Input() hosts: HostRecord[] = [];
@@ -145,6 +145,11 @@ export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestro
   private readonly messageHandler = (event: MessageEvent<unknown>): void => {
     void this.handleMessage(event);
   };
+  private reloadGeneration = 0;
+
+  ngAfterViewInit(): void {
+    this.applySrcdocToFrame();
+  }
 
   ngOnInit(): void {
     window.addEventListener('message', this.messageHandler);
@@ -164,8 +169,13 @@ export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestro
   }
 
   private reloadRuntime(): void {
+    const generation = ++this.reloadGeneration;
     void this.loadPermissions().finally(() => {
+      if (generation !== this.reloadGeneration) {
+        return;
+      }
       this.rebuildSrcdoc();
+      this.publishReadyState();
     });
   }
 
@@ -185,21 +195,28 @@ export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestro
           .map((permission) => permission.capability),
       );
       this.permissionStatus = `${this.grantedCapabilities.size} capabilities approved`;
-      this.publishSemanticState({
-        kind: 'generated-app',
-        status: 'ready',
-        summary: `${this.manifest.name} running in sandboxed iframe.`,
-        metadata: {
-          appId: this.manifest.appId,
-          isolation: this.sandboxLabel,
-          nodeAccess: false,
-          grantedCapabilities: Array.from(this.grantedCapabilities),
-          requestedCapabilities: this.manifest.capabilities,
-        },
-      });
     } catch {
       this.permissionStatus = 'Permission load failed';
     }
+  }
+
+  private publishReadyState(): void {
+    if (!this.manifest) {
+      return;
+    }
+
+    this.publishSemanticState({
+      kind: 'generated-app',
+      status: 'ready',
+      summary: `${this.manifest.name} running in sandboxed iframe.`,
+      metadata: {
+        appId: this.manifest.appId,
+        isolation: this.sandboxLabel,
+        nodeAccess: false,
+        grantedCapabilities: Array.from(this.grantedCapabilities),
+        requestedCapabilities: this.manifest.capabilities,
+      },
+    });
   }
 
   private rebuildSrcdoc(): void {
@@ -235,6 +252,8 @@ export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestro
         storage: Object.freeze({
           get: (key) => __sdkRequest('storage:get', { key }),
           set: (key, value) => __sdkRequest('storage:set', { key, value }),
+          delete: (key) => __sdkRequest('storage:delete', { key }),
+          remove: (key) => __sdkRequest('storage:delete', { key }),
         }),
         agent: Object.freeze({
           setState: (state) => parent.postMessage({ type: 'switchboard-sdk-state', appId: __appId, windowId: __windowId, state }, '*'),
@@ -259,12 +278,18 @@ export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestro
   <script>${escapeScript(this.manifest.sourceCode || generatedAppFallbackCode(this.manifest.name))}</script>
 </body>
 </html>`;
+    this.applySrcdocToFrame();
+  }
+
+  private applySrcdocToFrame(): void {
+    if (!this.frame?.nativeElement || this.frame.nativeElement.srcdoc === this.srcdoc) {
+      return;
+    }
+
+    this.frame.nativeElement.srcdoc = this.srcdoc;
   }
 
   private async handleMessage(event: MessageEvent<unknown>): Promise<void> {
-    if (this.frame?.nativeElement.contentWindow && event.source !== this.frame.nativeElement.contentWindow) {
-      return;
-    }
     const message = event.data;
     if (!isSdkMessage(message) || message.appId !== this.manifest?.appId || message.windowId !== this.windowId) {
       return;
@@ -330,17 +355,31 @@ export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestro
     }
 
     if (message.method === 'storage:get') {
-      this.requireCapability('storage:scoped', message.method);
-      const key = scopedStorageKey(this.manifest!.appId, message.payload);
-      return window.localStorage.getItem(key);
+      if (!api?.appStorage) {
+        throw new Error('App scoped storage API is unavailable.');
+      }
+      const key = sdkStorageKey(message.payload);
+      const result = await api.appStorage.get(this.manifest!.appId, key);
+      return result.value;
     }
 
     if (message.method === 'storage:set') {
-      this.requireCapability('storage:scoped', message.method);
+      if (!api?.appStorage) {
+        throw new Error('App scoped storage API is unavailable.');
+      }
       const payload = isRecord(message.payload) ? message.payload : {};
-      const key = scopedStorageKey(this.manifest!.appId, payload);
-      window.localStorage.setItem(key, String(payload.value ?? ''));
+      const key = sdkStorageKey(payload);
+      await api.appStorage.set(this.manifest!.appId, key, String(payload.value ?? ''));
       return true;
+    }
+
+    if (message.method === 'storage:delete') {
+      if (!api?.appStorage) {
+        throw new Error('App scoped storage API is unavailable.');
+      }
+      const key = sdkStorageKey(message.payload);
+      const result = await api.appStorage.remove(this.manifest!.appId, key);
+      return result.deleted;
     }
 
     throw new Error(`Unsupported SwitchboardOS SDK method: ${message.method}`);
@@ -384,6 +423,10 @@ export class GeneratedAppRuntimeComponent implements OnInit, OnChanges, OnDestro
         method: message.method,
         reason,
         sandbox: this.sandboxLabel,
+        storageValueLogged: false,
+        sourceCodeLogged: false,
+        packageMetadataLogged: false,
+        providerPayloadLogged: false,
         secretsLogged: false,
       },
     }).catch(() => undefined);
@@ -405,10 +448,10 @@ function escapeScript(value: string): string {
   return value.replace(/<\/script/gi, '<\\/script');
 }
 
-function scopedStorageKey(appId: string, payload: unknown): string {
+function sdkStorageKey(payload: unknown): string {
   const record = isRecord(payload) ? payload : {};
   const key = typeof record.key === 'string' && record.key.trim() ? record.key.trim() : 'default';
-  return `switchboardos.generated-app.${appId}.${key}`;
+  return key;
 }
 
 function generatedAppFallbackCode(name: string): string {
