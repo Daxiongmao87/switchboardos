@@ -6,6 +6,11 @@ import type {
   AppScopedStorageDeleteResult,
   AppScopedStorageGetResult,
   AppScopedStorageRecord,
+  GeneratedAppHostCapabilitiesResult,
+  GeneratedAppHostGetResult,
+  GeneratedAppHostListResult,
+  GeneratedAppHostStatusResult,
+  GeneratedAppHostTestConnectionResult,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
   BootstrapPreset,
@@ -176,6 +181,13 @@ interface HostedSwitchboardApi {
     get: (appId: string, key: string) => Promise<AppScopedStorageGetResult>;
     set: (appId: string, key: string, value: string) => Promise<AppScopedStorageRecord>;
     remove: (appId: string, key: string) => Promise<AppScopedStorageDeleteResult>;
+  };
+  appHost: {
+    listHosts: (appId: string, windowId: string) => Promise<GeneratedAppHostListResult>;
+    getHost: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostGetResult>;
+    getHostStatus: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostStatusResult>;
+    getCapabilities: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostCapabilitiesResult>;
+    testConnection: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostTestConnectionResult>;
   };
   agentEndpoint: {
     list: () => Promise<AgentEndpoint[]>;
@@ -355,6 +367,33 @@ function createHostedApi(): HostedSwitchboardApi {
         }),
       remove: (appId: string, key: string) =>
         request(`/api/app-storage/${encodeURIComponent(appId)}/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    },
+    appHost: {
+      listHosts: (appId: string, windowId: string) =>
+        request('/api/app-host/list', {
+          method: 'POST',
+          body: { appId, windowId, method: 'host:list' },
+        }),
+      getHost: (appId: string, windowId: string, hostId: string) =>
+        request('/api/app-host/get', {
+          method: 'POST',
+          body: { appId, windowId, hostId, method: 'host:get' },
+        }),
+      getHostStatus: (appId: string, windowId: string, hostId: string) =>
+        request('/api/app-host/status', {
+          method: 'POST',
+          body: { appId, windowId, hostId, method: 'host:getStatus' },
+        }),
+      getCapabilities: (appId: string, windowId: string, hostId: string) =>
+        request('/api/app-host/capabilities', {
+          method: 'POST',
+          body: { appId, windowId, hostId, method: 'host:getCapabilities' },
+        }),
+      testConnection: (appId: string, windowId: string, hostId: string) =>
+        request('/api/app-host/test-connection', {
+          method: 'POST',
+          body: { appId, windowId, hostId, method: 'host:testConnection' },
+        }),
     },
     agentEndpoint: {
       list: () => request('/api/agent-endpoints'),

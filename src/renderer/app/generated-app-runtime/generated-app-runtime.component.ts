@@ -272,6 +272,9 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
         }),
         host: Object.freeze({
           listHosts: () => __sdkRequest('host:list'),
+          getHost: (hostId) => __sdkRequest('host:get', { hostId }),
+          getHostStatus: (hostId) => __sdkRequest('host:getStatus', { hostId }),
+          getCapabilities: (hostId) => __sdkRequest('host:getCapabilities', { hostId }),
           testConnection: (hostId) => __sdkRequest('host:testConnection', { hostId }),
         }),
         storage: Object.freeze({
@@ -358,29 +361,42 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
     }
 
     if (message.method === 'host:list') {
-      this.requireCapability('host:read', message.method);
-      const hosts = api ? await api.host.list() : this.hosts;
-      return hosts.map((host) => ({
-        id: host.id,
-        name: host.name,
-        address: host.address || host.hostname,
-        port: host.port,
-        lastConnectionStatus: host.lastConnectionStatus,
-        osHint: host.osHint,
-        bootstrapStatus: host.bootstrapStatus,
-        capabilities: host.capabilities,
-        tags: host.tags,
-      }));
+      if (!api?.appHost) {
+        throw new Error('Generated app host SDK API is unavailable.');
+      }
+      return api.appHost.listHosts(this.manifest!.appId, this.windowId);
+    }
+
+    if (message.method === 'host:get') {
+      if (!api?.appHost) {
+        throw new Error('Generated app host SDK API is unavailable.');
+      }
+      const hostId = sdkHostId(message.payload);
+      return api.appHost.getHost(this.manifest!.appId, this.windowId, hostId);
+    }
+
+    if (message.method === 'host:getStatus') {
+      if (!api?.appHost) {
+        throw new Error('Generated app host SDK API is unavailable.');
+      }
+      const hostId = sdkHostId(message.payload);
+      return api.appHost.getHostStatus(this.manifest!.appId, this.windowId, hostId);
+    }
+
+    if (message.method === 'host:getCapabilities') {
+      if (!api?.appHost) {
+        throw new Error('Generated app host SDK API is unavailable.');
+      }
+      const hostId = sdkHostId(message.payload);
+      return api.appHost.getCapabilities(this.manifest!.appId, this.windowId, hostId);
     }
 
     if (message.method === 'host:testConnection') {
-      this.requireCapability('host:actions', message.method);
-      const payload = isRecord(message.payload) ? message.payload : {};
-      const hostId = typeof payload.hostId === 'string' ? payload.hostId : '';
-      if (!api || !hostId) {
-        throw new Error('Host action request is missing host context.');
+      if (!api?.appHost) {
+        throw new Error('Generated app host SDK API is unavailable.');
       }
-      return api.host.testConnection(hostId);
+      const hostId = sdkHostId(message.payload);
+      return api.appHost.testConnection(this.manifest!.appId, this.windowId, hostId);
     }
 
     if (message.method === 'storage:get') {
@@ -430,12 +446,6 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
         reject(new Error('Generated app window SDK handler is unavailable.'));
       }
     });
-  }
-
-  private requireCapability(capability: string, method: string): void {
-    if (!this.grantedCapabilities.has(capability)) {
-      throw new Error(`Capability denied for ${method}: ${capability}`);
-    }
   }
 
   private postSdkResponse(requestId: string, ok: boolean, result: unknown, error?: string): void {
@@ -507,6 +517,15 @@ function sdkStorageKey(payload: unknown): string {
   const record = isRecord(payload) ? payload : {};
   const key = typeof record.key === 'string' && record.key.trim() ? record.key.trim() : 'default';
   return key;
+}
+
+function sdkHostId(payload: unknown): string {
+  const record = isRecord(payload) ? payload : {};
+  const hostId = typeof record.hostId === 'string' ? record.hostId.trim() : '';
+  if (!hostId) {
+    throw new Error('Host SDK request is missing hostId.');
+  }
+  return hostId;
 }
 
 function generatedAppFallbackCode(name: string): string {

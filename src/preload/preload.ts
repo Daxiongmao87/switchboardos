@@ -40,6 +40,11 @@ import type {
   CreateHostTagInput,
   CreateWorkspaceProfileInput,
   CredentialRef,
+  GeneratedAppHostCapabilitiesResult,
+  GeneratedAppHostGetResult,
+  GeneratedAppHostListResult,
+  GeneratedAppHostStatusResult,
+  GeneratedAppHostTestConnectionResult,
   HostOperationInput,
   HostOperationResult,
   HostGroup,
@@ -334,6 +339,20 @@ contextBridge.exposeInMainWorld('sb', {
       invoke('app-storage:delete', { appId, key }),
   },
 
+  // --- Generated App Host SDK ---
+  appHost: {
+    listHosts: (appId: string, windowId: string): Promise<GeneratedAppHostListResult> =>
+      invoke('app-host:list', { appId, windowId, method: 'host:list' }),
+    getHost: (appId: string, windowId: string, hostId: string): Promise<GeneratedAppHostGetResult> =>
+      invoke('app-host:get', { appId, windowId, hostId, method: 'host:get' }),
+    getHostStatus: (appId: string, windowId: string, hostId: string): Promise<GeneratedAppHostStatusResult> =>
+      invoke('app-host:get-status', { appId, windowId, hostId, method: 'host:getStatus' }),
+    getCapabilities: (appId: string, windowId: string, hostId: string): Promise<GeneratedAppHostCapabilitiesResult> =>
+      invoke('app-host:get-capabilities', { appId, windowId, hostId, method: 'host:getCapabilities' }),
+    testConnection: (appId: string, windowId: string, hostId: string): Promise<GeneratedAppHostTestConnectionResult> =>
+      invoke('app-host:test-connection', { appId, windowId, hostId, method: 'host:testConnection' }),
+  },
+
   // --- Agent Endpoints ---
   agentEndpoint: {
     list: (): Promise<AgentEndpoint[]> => invoke('agent-endpoint:list'),
@@ -507,6 +526,13 @@ declare global {
         get: (appId: string, key: string) => Promise<AppScopedStorageGetResult>;
         set: (appId: string, key: string, value: string) => Promise<AppScopedStorageRecord>;
         remove: (appId: string, key: string) => Promise<AppScopedStorageDeleteResult>;
+      };
+      appHost: {
+        listHosts: (appId: string, windowId: string) => Promise<GeneratedAppHostListResult>;
+        getHost: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostGetResult>;
+        getHostStatus: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostStatusResult>;
+        getCapabilities: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostCapabilitiesResult>;
+        testConnection: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostTestConnectionResult>;
       };
       agentEndpoint: {
         list: () => Promise<AgentEndpoint[]>;

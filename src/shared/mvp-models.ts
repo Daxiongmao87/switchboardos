@@ -44,6 +44,108 @@ export interface ConnectionTestResult {
   errorCode?: string;
 }
 
+export type GeneratedAppHostSdkMethod =
+  | 'host:list'
+  | 'host:get'
+  | 'host:getStatus'
+  | 'host:getCapabilities'
+  | 'host:testConnection';
+
+export interface GeneratedAppHostSdkBaseInput {
+  appId: string;
+  windowId: string;
+  method: GeneratedAppHostSdkMethod;
+}
+
+export interface GeneratedAppHostListInput extends GeneratedAppHostSdkBaseInput {
+  method: 'host:list';
+}
+
+export interface GeneratedAppHostGetInput extends GeneratedAppHostSdkBaseInput {
+  method: 'host:get';
+  hostId: string;
+}
+
+export interface GeneratedAppHostStatusInput extends GeneratedAppHostSdkBaseInput {
+  method: 'host:getStatus';
+  hostId: string;
+}
+
+export interface GeneratedAppHostCapabilitiesInput extends GeneratedAppHostSdkBaseInput {
+  method: 'host:getCapabilities';
+  hostId: string;
+}
+
+export interface GeneratedAppHostTestConnectionInput extends GeneratedAppHostSdkBaseInput {
+  method: 'host:testConnection';
+  hostId: string;
+}
+
+export type GeneratedAppHostTargetInput =
+  | GeneratedAppHostGetInput
+  | GeneratedAppHostStatusInput
+  | GeneratedAppHostCapabilitiesInput
+  | GeneratedAppHostTestConnectionInput;
+
+export interface GeneratedAppHostSummary {
+  id: string;
+  name: string;
+  address: string;
+  port: number;
+  lastConnectionStatus: HostConnectionStatus;
+  lastCheckedAt: string | null;
+  osHint: string;
+  bootstrapStatus: HostBootstrapStatus;
+  capabilities: string[];
+  tags: string[];
+}
+
+export interface GeneratedAppHostStatus {
+  id: string;
+  lastConnectionStatus: HostConnectionStatus;
+  lastCheckedAt: string | null;
+  bootstrapStatus: HostBootstrapStatus;
+  osHint: string;
+}
+
+export interface GeneratedAppHostListResult extends GeneratedAppHostListInput {
+  hosts: GeneratedAppHostSummary[];
+  hostCount: number;
+}
+
+export interface GeneratedAppHostGetResult extends GeneratedAppHostGetInput {
+  host: GeneratedAppHostSummary | null;
+  found: boolean;
+}
+
+export interface GeneratedAppHostStatusResult extends GeneratedAppHostStatusInput {
+  status: GeneratedAppHostStatus | null;
+  found: boolean;
+}
+
+export interface GeneratedAppHostCapabilitiesResult extends GeneratedAppHostCapabilitiesInput {
+  capabilities: string[];
+  found: boolean;
+}
+
+export interface GeneratedAppHostTestConnectionResult extends GeneratedAppHostTestConnectionInput {
+  status: ConnectionTestStatus;
+  success: boolean;
+  message: string;
+  checkedAt: string;
+  latencyMs?: number;
+  protocolDetected?: 'ssh' | 'unknown';
+  errorCode?: string;
+}
+
+export type GeneratedAppHostSdkInput = GeneratedAppHostListInput | GeneratedAppHostTargetInput;
+export type GeneratedAppHostSdkResult =
+  | GeneratedAppHostListResult
+  | GeneratedAppHostGetResult
+  | GeneratedAppHostStatusResult
+  | GeneratedAppHostCapabilitiesResult
+  | GeneratedAppHostTestConnectionResult;
+
 export interface AuditEvent {
   id: string;
   type: string;

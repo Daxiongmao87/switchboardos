@@ -1712,6 +1712,269 @@ async function browserSmoke() {
     }
   })();
 
+  const generatedHostSdk = await (async () => {
+    const api = window.sb;
+    if (!api?.appManifest || !api.appPermission || !api.audit || !api.appHost) {
+      return { available: false, error: 'generated app host SDK APIs unavailable' };
+    }
+
+    const semanticEvents = [];
+    const handleSemantic = (event) => {
+      semanticEvents.push(event.detail);
+    };
+    window.addEventListener('switchboard-generated-app-semantic', handleSemantic);
+
+    let allowedManifest = null;
+    let deniedManifest = null;
+    const allowedPermissions = [];
+    const allowedAppId = `smoke-host-sdk-allowed-${Date.now()}`;
+    const deniedAppId = `smoke-host-sdk-denied-${Date.now()}`;
+    const targetHostId = seededHost.id;
+
+    const runtimeDiagnostics = (appId) => {
+      const windowElement = document.querySelector(`.desktop-window[data-app-id="${appId}"]`);
+      const runtime = windowElement?.querySelector('[data-testid="generated-app-runtime"]');
+      const srcdoc = runtime?.querySelector('iframe')?.getAttribute('srcdoc') || '';
+      return {
+        windowPresent: Boolean(windowElement),
+        runtimePresent: Boolean(runtime),
+        runtimeStatus: runtime?.getAttribute('data-semantic-status') || null,
+        runtimeCapabilities: runtime?.getAttribute('data-granted-capabilities') || null,
+        srcdocHasHostSdk: srcdoc.includes('SwitchboardOS.host.listHosts'),
+        semanticStatuses: semanticEvents
+          .filter((entry) => entry?.semanticState?.metadata?.appId === appId)
+          .map((entry) => entry.semanticState.status),
+      };
+    };
+
+    const waitForHostSdkState = async (appId) => {
+      try {
+        return await waitFor(() => {
+          return semanticEvents.find((entry) => {
+            const state = entry?.semanticState;
+            return state?.metadata?.appId === appId && typeof state.status === 'string' && state.status.startsWith('host-sdk');
+          }) || null;
+        }, `generated host SDK state ${appId}`, 30000);
+      } catch (error) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}: ${JSON.stringify(runtimeDiagnostics(appId))}`);
+      }
+    };
+
+    try {
+      allowedManifest = await api.appManifest.create({
+        appId: allowedAppId,
+        name: 'Smoke Host SDK Allowed',
+        version: '1.0.0',
+        entrypoint: 'generated://smoke-host-sdk-allowed',
+        description: 'Smoke generated app for backend-owned host SDK contract.',
+        author: 'SwitchboardOS Smoke',
+        icon: 'HA',
+        category: 'smoke',
+        capabilities: ['host:read', 'host:actions'],
+        sourceCode: `
+          (async () => {
+            const targetHostId = ${JSON.stringify(targetHostId)};
+            const sensitiveKeys = ['username', 'authMode', 'keyPath', 'credentialRefId', 'notes', 'defaultShell', 'defaultWorkingDirectory'];
+            try {
+              const listResult = await SwitchboardOS.host.listHosts();
+              const getResult = await SwitchboardOS.host.getHost(targetHostId);
+              const statusResult = await SwitchboardOS.host.getHostStatus(targetHostId);
+              const capabilitiesResult = await SwitchboardOS.host.getCapabilities(targetHostId);
+              const testResult = await SwitchboardOS.host.testConnection(targetHostId);
+              const host = getResult && getResult.host;
+              const sensitiveLeaked = Boolean(host && sensitiveKeys.some((key) => Object.prototype.hasOwnProperty.call(host, key)));
+              const foundInList = Array.isArray(listResult.hosts) && listResult.hosts.some((candidate) => candidate.id === targetHostId);
+              SwitchboardOS.agent.setState({
+                status: foundInList && getResult.found && statusResult.found && capabilitiesResult.found && testResult.hostId === targetHostId && !sensitiveLeaked
+                  ? 'host-sdk-ok'
+                  : 'host-sdk-mismatch',
+                summary: 'Host SDK smoke completed through backend-owned appHost contract.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  targetHostId,
+                  hostCount: listResult.hostCount,
+                  foundInList,
+                  getFound: getResult.found,
+                  statusFound: statusResult.found,
+                  capabilitiesFound: capabilitiesResult.found,
+                  testStatus: testResult.status,
+                  testHostMatches: testResult.hostId === targetHostId,
+                  sensitiveLeaked
+                }
+              });
+            } catch (error) {
+              SwitchboardOS.agent.setState({
+                status: 'host-sdk-error',
+                summary: 'Host SDK smoke failed.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  error: error instanceof Error ? error.message : String(error),
+                  targetHostId
+                }
+              });
+            }
+          })();
+        `,
+        packageMetadata: {
+          smoke: 'generated-app-host-sdk',
+        },
+        enabled: true,
+        installedAt: new Date().toISOString(),
+      });
+
+      allowedPermissions.push(await api.appPermission.create({
+        appId: allowedAppId,
+        capability: 'host:read',
+        granted: true,
+      }));
+      allowedPermissions.push(await api.appPermission.create({
+        appId: allowedAppId,
+        capability: 'host:actions',
+        granted: true,
+      }));
+
+      window.postMessage({ type: 'sb:app-open', appId: allowedAppId }, '*');
+      const allowedWindow = await waitFor(
+        () => document.querySelector(`.desktop-window[data-app-id="${allowedAppId}"]`),
+        `generated host SDK allowed window ${JSON.stringify(runtimeDiagnostics(allowedAppId))}`,
+        20000,
+      );
+      const allowedRuntime = await waitFor(
+        () => allowedWindow.querySelector('[data-testid="generated-app-runtime"]'),
+        `generated host SDK allowed runtime mounted ${JSON.stringify(runtimeDiagnostics(allowedAppId))}`,
+        20000,
+      );
+      await waitFor(
+        () => (allowedRuntime.querySelector('iframe')?.getAttribute('srcdoc') || '').includes('SwitchboardOS.host.listHosts'),
+        `generated host SDK allowed iframe source installed ${JSON.stringify(runtimeDiagnostics(allowedAppId))}`,
+        20000,
+      );
+      const allowedState = await waitForHostSdkState(allowedAppId);
+      const auditAfterAllowed = await api.audit.list();
+      const allowedAuditEvents = auditAfterAllowed.filter((event) => event.metadata?.appId === allowedAppId || event.entityId === allowedAppId);
+      const allowedAuditJson = JSON.stringify(allowedAuditEvents);
+
+      keydown('F4', { altKey: true });
+      await waitFor(
+        () => !document.querySelector(`.desktop-window[data-app-id="${allowedAppId}"]`),
+        'Alt+F4 closed generated host SDK allowed app',
+      );
+
+      deniedManifest = await api.appManifest.create({
+        appId: deniedAppId,
+        name: 'Smoke Host SDK Denied',
+        version: '1.0.0',
+        entrypoint: 'generated://smoke-host-sdk-denied',
+        description: 'Smoke generated app without host SDK permission.',
+        author: 'SwitchboardOS Smoke',
+        icon: 'HD',
+        category: 'smoke',
+        capabilities: [],
+        sourceCode: `
+          (async () => {
+            try {
+              await SwitchboardOS.host.listHosts();
+              SwitchboardOS.agent.setState({
+                status: 'host-sdk-denial-missed',
+                summary: 'Host SDK unexpectedly succeeded without permission.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  denied: false
+                }
+              });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              SwitchboardOS.agent.setState({
+                status: 'host-sdk-denied',
+                summary: 'Host SDK denied without permission.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  denied: true,
+                  mentionsCapability: message.includes('host:read')
+                }
+              });
+            }
+          })();
+        `,
+        packageMetadata: {
+          smoke: 'generated-app-host-sdk-denied',
+        },
+        enabled: true,
+        installedAt: new Date().toISOString(),
+      });
+
+      window.postMessage({ type: 'sb:app-open', appId: deniedAppId }, '*');
+      const deniedWindow = await waitFor(
+        () => document.querySelector(`.desktop-window[data-app-id="${deniedAppId}"]`),
+        `generated host SDK denied window ${JSON.stringify(runtimeDiagnostics(deniedAppId))}`,
+        20000,
+      );
+      const deniedRuntime = await waitFor(
+        () => deniedWindow.querySelector('[data-testid="generated-app-runtime"]'),
+        `generated host SDK denied runtime mounted ${JSON.stringify(runtimeDiagnostics(deniedAppId))}`,
+        20000,
+      );
+      await waitFor(
+        () => (deniedRuntime.querySelector('iframe')?.getAttribute('srcdoc') || '').includes('SwitchboardOS.host.listHosts'),
+        `generated host SDK denied iframe source installed ${JSON.stringify(runtimeDiagnostics(deniedAppId))}`,
+        20000,
+      );
+      const deniedState = await waitForHostSdkState(deniedAppId);
+      const auditAfterDenied = await api.audit.list();
+      const deniedAuditEvents = auditAfterDenied.filter((event) => event.metadata?.appId === deniedAppId || event.entityId === deniedAppId);
+      const deniedAuditJson = JSON.stringify(deniedAuditEvents);
+
+      keydown('F4', { altKey: true });
+      await waitFor(
+        () => !document.querySelector(`.desktop-window[data-app-id="${deniedAppId}"]`),
+        'Alt+F4 closed generated host SDK denied app',
+      );
+
+      return {
+        available: true,
+        allowedAppId,
+        deniedAppId,
+        targetHostId,
+        allowedStateStatus: allowedState.semanticState.status,
+        allowedFoundInList: allowedState.semanticState.metadata.foundInList === true,
+        allowedGetFound: allowedState.semanticState.metadata.getFound === true,
+        allowedStatusFound: allowedState.semanticState.metadata.statusFound === true,
+        allowedCapabilitiesFound: allowedState.semanticState.metadata.capabilitiesFound === true,
+        allowedTestHostMatches: allowedState.semanticState.metadata.testHostMatches === true,
+        allowedSensitiveLeaked: allowedState.semanticState.metadata.sensitiveLeaked === true,
+        allowedAuditHasList: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.listed' && event.metadata?.method === 'host:list'),
+        allowedAuditHasRead: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.read' && event.metadata?.method === 'host:get'),
+        allowedAuditHasStatus: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.status_read' && event.metadata?.method === 'host:getStatus'),
+        allowedAuditHasCapabilities: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.capabilities_read' && event.metadata?.method === 'host:getCapabilities'),
+        allowedAuditHasTest: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.connection_tested' && event.metadata?.method === 'host:testConnection'),
+        allowedAuditSanitized: !allowedAuditJson.includes('SwitchboardOS.host.')
+          && !allowedAuditJson.includes('Created by the shell UI smoke test')
+          && allowedAuditJson.includes('"hostCredentialsLogged":false')
+          && allowedAuditJson.includes('"sourceCodeLogged":false')
+          && allowedAuditJson.includes('"secretsLogged":false'),
+        deniedStateStatus: deniedState.semanticState.status,
+        deniedStateMentionsCapability: deniedState.semanticState.metadata.mentionsCapability === true,
+        deniedAuditHasBackendDenial: deniedAuditEvents.some((event) => event.type === 'app_host_sdk.denied' && event.metadata?.capability === 'host:read'),
+        deniedAuditHasSdkDenial: deniedAuditEvents.some((event) => event.type === 'app.sdk_capability_denied' && event.metadata?.method === 'host:list'),
+        deniedAuditSanitized: !deniedAuditJson.includes('SwitchboardOS.host.')
+          && deniedAuditJson.includes('"hostCredentialsLogged":false')
+          && deniedAuditJson.includes('"sourceCodeLogged":false')
+          && deniedAuditJson.includes('"secretsLogged":false'),
+      };
+    } finally {
+      window.removeEventListener('switchboard-generated-app-semantic', handleSemantic);
+      for (const permission of allowedPermissions) {
+        await api.appPermission.remove(permission.id).catch(() => false);
+      }
+      if (allowedManifest) {
+        await api.appManifest.remove(allowedManifest.id).catch(() => false);
+      }
+      if (deniedManifest) {
+        await api.appManifest.remove(deniedManifest.id).catch(() => false);
+      }
+    }
+  })();
+
   return {
     initial,
     menus: {
@@ -1773,6 +2036,7 @@ async function browserSmoke() {
     generatedPaletteCapability,
     generatedScopedStorage,
     generatedWindowSdk,
+    generatedHostSdk,
     windows: {
       fileExplorerOpen: Boolean(fileWindow),
       hostsOpen: Boolean(hostsWindow),
@@ -2035,6 +2299,25 @@ async function main() {
     report.generatedWindowSdk.malformedMentionsSize,
     report.generatedWindowSdk.auditHasSdkDenial,
     report.generatedWindowSdk.auditSanitized,
+    report.generatedHostSdk.available,
+    report.generatedHostSdk.allowedStateStatus === 'host-sdk-ok',
+    report.generatedHostSdk.allowedFoundInList,
+    report.generatedHostSdk.allowedGetFound,
+    report.generatedHostSdk.allowedStatusFound,
+    report.generatedHostSdk.allowedCapabilitiesFound,
+    report.generatedHostSdk.allowedTestHostMatches,
+    !report.generatedHostSdk.allowedSensitiveLeaked,
+    report.generatedHostSdk.allowedAuditHasList,
+    report.generatedHostSdk.allowedAuditHasRead,
+    report.generatedHostSdk.allowedAuditHasStatus,
+    report.generatedHostSdk.allowedAuditHasCapabilities,
+    report.generatedHostSdk.allowedAuditHasTest,
+    report.generatedHostSdk.allowedAuditSanitized,
+    report.generatedHostSdk.deniedStateStatus === 'host-sdk-denied',
+    report.generatedHostSdk.deniedStateMentionsCapability,
+    report.generatedHostSdk.deniedAuditHasBackendDenial,
+    report.generatedHostSdk.deniedAuditHasSdkDenial,
+    report.generatedHostSdk.deniedAuditSanitized,
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
     report.menuAffordances.desktopMenu.iconCount >= 6,

@@ -228,6 +228,31 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:app-host:list',
+    routeMarker: "'app-host:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-host:get',
+    routeMarker: "'app-host:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-host:get-status',
+    routeMarker: "'app-host:get-status'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-host:get-capabilities',
+    routeMarker: "'app-host:get-capabilities'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:app-host:test-connection',
+    routeMarker: "'app-host:test-connection'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:bootstrap-preset:list',
     routeMarker: "'bootstrap-preset:list'",
     contextFile: 'src/main/main.ts',
@@ -585,6 +610,26 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:DELETE:/api/app-storage/:appId/:key',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-host/list',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-host/get',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-host/status',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-host/capabilities',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-host/test-connection',
     contextFile: 'src/main/hosted-server.ts',
   },
   {
@@ -1165,7 +1210,10 @@ function validateHostedDispatches() {
     }
   }
 
-  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/app-manifests') || entry.id.includes('/api/app-permissions') || entry.id.includes('/api/app-storage'))) {
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/app-manifests')
+    || entry.id.includes('/api/app-permissions')
+    || entry.id.includes('/api/app-storage')
+    || entry.id.includes('/api/app-host'))) {
     const appHelperIndex = hostedText.indexOf('private runHostedAppRoute');
     if (appHelperIndex === -1) {
       fail('Hosted app manifest/permission/storage routes are not using runHostedAppRoute.');
@@ -1346,6 +1394,42 @@ function validateHostedDispatches() {
 
   if (!hostedText.includes('this.assertAppScopedStorageGranted(input')) {
     fail('Hosted app scoped storage routes must enforce granted storage:scoped capability in hosted-server.ts.');
+  }
+
+  if (hostedText.includes("if (resource === 'app-host') {\n      return this.options.store.")) {
+    fail('Direct hosted generated app host SDK fallback detected in hosted-server.ts.');
+  }
+
+  if (mainText.includes("ipcMain.handle('app-host:list', async (_event, input) => mvpStore.listHosts()")
+    || mainText.includes("ipcMain.handle('app-host:get', async (_event, input) => mvpStore.getHost(")
+    || mainText.includes("ipcMain.handle('app-host:test-connection', async (_event, input) => mvpStore.testConnection(")) {
+    fail('Direct IPC generated app host SDK fallback detected in main.ts.');
+  }
+
+  if (!mainText.includes('assertGeneratedAppHostCapabilityGranted(validatedInput')) {
+    fail('IPC generated app host SDK routes must enforce granted host app capability in main.ts.');
+  }
+
+  if (!hostedText.includes('this.assertGeneratedAppHostCapabilityGranted(input')) {
+    fail('Hosted generated app host SDK routes must enforce granted host app capability in hosted-server.ts.');
+  }
+
+  if (generatedRuntimeText.includes('api.host.list(')
+    || generatedRuntimeText.includes('api.host.get(')
+    || generatedRuntimeText.includes('api.host.testConnection(')) {
+    fail('Generated app runtime host SDK must call structured appHost API, not generic host API.');
+  }
+
+  if (generatedRuntimeText.includes("requireCapability('host:")) {
+    fail('Generated app runtime must not rely on renderer-side grantedCapabilities for host SDK authorization.');
+  }
+
+  if (!generatedRuntimeText.includes('api.appHost.listHosts')
+    || !generatedRuntimeText.includes('api.appHost.getHost')
+    || !generatedRuntimeText.includes('api.appHost.getHostStatus')
+    || !generatedRuntimeText.includes('api.appHost.getCapabilities')
+    || !generatedRuntimeText.includes('api.appHost.testConnection')) {
+    fail('Generated app runtime must call structured appHost API for host SDK operations.');
   }
 
   if (generatedRuntimeText.includes('switchboardos.generated-app') || generatedRuntimeText.includes('localStorage')) {

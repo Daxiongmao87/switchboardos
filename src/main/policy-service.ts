@@ -7,6 +7,8 @@ export type PolicyCapability =
   | 'host:update'
   | 'host:delete'
   | 'host:test-connection'
+  | 'host:read'
+  | 'host:actions'
   | 'host:updateGroup'
   | 'host:setFavorite'
   | 'host:duplicate'
@@ -77,6 +79,7 @@ export interface PolicyContext {
   entityId?: string | null;
   entityType?: string | null;
   sessionId?: string | null;
+  appId?: string | null;
 }
 
 export interface PolicyDecision {
@@ -96,6 +99,8 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'host:update',
   'host:delete',
   'host:test-connection',
+  'host:read',
+  'host:actions',
   'host:updateGroup',
   'host:setFavorite',
   'host:duplicate',
@@ -242,6 +247,7 @@ export class PolicyService {
           entityId: context.entityId ?? null,
           entityType: context.entityType ?? null,
           sessionId: context.sessionId ?? null,
+          appId: context.appId ?? null,
           secretsLogged: false,
         },
       });

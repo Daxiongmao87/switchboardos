@@ -8,6 +8,13 @@ import type {
   AppScopedStorageDeleteInput,
   AppScopedStorageGetInput,
   AppScopedStorageSetInput,
+  GeneratedAppHostCapabilitiesInput,
+  GeneratedAppHostGetInput,
+  GeneratedAppHostListInput,
+  GeneratedAppHostStatusInput,
+  GeneratedAppHostTargetInput,
+  GeneratedAppHostTestConnectionInput,
+  GeneratedAppHostSdkMethod,
   CreateAgentEndpointInput,
   CreateAuditEventInput,
   CreateBootstrapPresetInput,
@@ -92,6 +99,13 @@ const OPERATOR_PROPOSAL_RISKS: readonly OperatorProposalRisk[] = ['low', 'medium
 const OPERATOR_PROPOSAL_SOURCES: readonly OperatorProposalSource[] = ['provider', 'fallback'];
 const OPERATOR_PROPOSAL_STATUSES: readonly OperatorProposalStatus[] = ['pending', 'approved', 'dispatched', 'failed'];
 const AGENT_ENDPOINT_POLICIES: readonly AgentEndpoint['policy'][] = ['safe', 'balanced', 'permissive', 'full-trust'];
+const GENERATED_APP_HOST_SDK_METHODS: readonly GeneratedAppHostSdkMethod[] = [
+  'host:list',
+  'host:get',
+  'host:getStatus',
+  'host:getCapabilities',
+  'host:testConnection',
+];
 const WORKSPACE_FILE_KINDS = ['applet', 'scriptlet', 'note'] as const;
 const CREDENTIAL_TYPES: readonly CredentialType[] = ['keychain_ref', 'file_path', 'ssh_agent', 'env_var'];
 const MAX_OPERATOR_ACTION_COMMAND_LENGTH = 4000;
@@ -449,6 +463,35 @@ export function validateAppScopedStorageDeleteInput(value: unknown): AppScopedSt
     appId: validateAppScopedStorageAppId(record.appId),
     key: validateAppScopedStorageKey(record.key),
   };
+}
+
+export function validateGeneratedAppHostListInput(value: unknown): GeneratedAppHostListInput {
+  const record = requireRecord(value, 'generated app host list input');
+  const method = validateGeneratedAppHostMethod(record.method);
+  if (method !== 'host:list') {
+    throw new RuntimeValidationError('method must be host:list.');
+  }
+  return {
+    appId: validateGeneratedAppSdkAppId(record.appId),
+    windowId: validateGeneratedAppSdkWindowId(record.windowId),
+    method,
+  };
+}
+
+export function validateGeneratedAppHostGetInput(value: unknown): GeneratedAppHostGetInput {
+  return validateGeneratedAppHostTargetInput(value, 'host:get', 'generated app host get input');
+}
+
+export function validateGeneratedAppHostStatusInput(value: unknown): GeneratedAppHostStatusInput {
+  return validateGeneratedAppHostTargetInput(value, 'host:getStatus', 'generated app host status input');
+}
+
+export function validateGeneratedAppHostCapabilitiesInput(value: unknown): GeneratedAppHostCapabilitiesInput {
+  return validateGeneratedAppHostTargetInput(value, 'host:getCapabilities', 'generated app host capabilities input');
+}
+
+export function validateGeneratedAppHostTestConnectionInput(value: unknown): GeneratedAppHostTestConnectionInput {
+  return validateGeneratedAppHostTargetInput(value, 'host:testConnection', 'generated app host test input');
 }
 
 export function validateHostOperationInput(value: unknown): HostOperationInput {
@@ -1014,6 +1057,44 @@ function validateAppScopedStorageKey(value: unknown): string {
     throw new RuntimeValidationError('key must be 256 characters or fewer.');
   }
   return key;
+}
+
+function validateGeneratedAppHostTargetInput<TMethod extends Exclude<GeneratedAppHostSdkMethod, 'host:list'>>(
+  value: unknown,
+  expectedMethod: TMethod,
+  label: string,
+): Extract<GeneratedAppHostTargetInput, { method: TMethod }> {
+  const record = requireRecord(value, label);
+  const method = validateGeneratedAppHostMethod(record.method);
+  if (method !== expectedMethod) {
+    throw new RuntimeValidationError(`method must be ${expectedMethod}.`);
+  }
+  return {
+    appId: validateGeneratedAppSdkAppId(record.appId),
+    windowId: validateGeneratedAppSdkWindowId(record.windowId),
+    method,
+    hostId: validateHostIdInput(record.hostId),
+  } as Extract<GeneratedAppHostTargetInput, { method: TMethod }>;
+}
+
+function validateGeneratedAppHostMethod(value: unknown): GeneratedAppHostSdkMethod {
+  return requireEnum(value, GENERATED_APP_HOST_SDK_METHODS, 'method');
+}
+
+function validateGeneratedAppSdkAppId(value: unknown): string {
+  const appId = requireNonEmptyString(value, 'appId');
+  if (appId.length > 128) {
+    throw new RuntimeValidationError('appId must be 128 characters or fewer.');
+  }
+  return appId;
+}
+
+function validateGeneratedAppSdkWindowId(value: unknown): string {
+  const windowId = requireNonEmptyString(value, 'windowId');
+  if (windowId.length > 128) {
+    throw new RuntimeValidationError('windowId must be 128 characters or fewer.');
+  }
+  return windowId;
 }
 
 export function requireRecord(value: unknown, label: string): Record<string, unknown> {

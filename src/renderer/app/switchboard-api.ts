@@ -11,6 +11,11 @@ import type {
   AppScopedStorageDeleteResult,
   AppScopedStorageGetResult,
   AppScopedStorageRecord,
+  GeneratedAppHostCapabilitiesResult,
+  GeneratedAppHostGetResult,
+  GeneratedAppHostListResult,
+  GeneratedAppHostStatusResult,
+  GeneratedAppHostTestConnectionResult,
   CreateAppManifestInput,
   CreateAppPermissionInput,
   CreateAuditEventInput,
@@ -188,6 +193,13 @@ export interface SwitchboardApi {
     get: (appId: string, key: string) => Promise<AppScopedStorageGetResult>;
     set: (appId: string, key: string, value: string) => Promise<AppScopedStorageRecord>;
     remove: (appId: string, key: string) => Promise<AppScopedStorageDeleteResult>;
+  };
+  appHost: {
+    listHosts: (appId: string, windowId: string) => Promise<GeneratedAppHostListResult>;
+    getHost: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostGetResult>;
+    getHostStatus: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostStatusResult>;
+    getCapabilities: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostCapabilitiesResult>;
+    testConnection: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostTestConnectionResult>;
   };
   agentEndpoint: {
     list: () => Promise<AgentEndpoint[]>;

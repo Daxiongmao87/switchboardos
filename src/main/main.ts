@@ -26,7 +26,7 @@ import { HostedServer, type HostedServerAppInfo } from './hosted-server';
 import { HostOperationRunner } from './host-operation-runner';
 import { SecretVault, SecretVaultUnavailableError, type SecretMetadata } from './secret-vault';
 import { SshService } from './ssh-service';
-import { AppCapabilityDeniedError, PolicyService } from './policy-service';
+import { AppCapabilityDeniedError, PolicyService, type PolicyCapability } from './policy-service';
 import { AgentOperatorService } from './agent-operator-service';
 import {
   getHostRouteContract,
@@ -46,6 +46,11 @@ import {
   validateAppScopedStorageGetInput,
   validateAppScopedStorageSetInput,
   validateAuditEventInput,
+  validateGeneratedAppHostCapabilitiesInput,
+  validateGeneratedAppHostGetInput,
+  validateGeneratedAppHostListInput,
+  validateGeneratedAppHostStatusInput,
+  validateGeneratedAppHostTestConnectionInput,
   validateBootstrapGenerateInput,
   validateBootstrapPresetCreateInput,
   validateBootstrapPresetIdInput,
@@ -122,6 +127,15 @@ import type {
   CreateHostGroupInput,
   CreateHostInput,
   CreateHostTagInput,
+  GeneratedAppHostCapabilitiesResult,
+  GeneratedAppHostGetResult,
+  GeneratedAppHostListInput,
+  GeneratedAppHostListResult,
+  GeneratedAppHostSdkResult,
+  GeneratedAppHostStatusResult,
+  GeneratedAppHostSummary,
+  GeneratedAppHostTargetInput,
+  GeneratedAppHostTestConnectionResult,
   HostOperationInput,
   CreateWorkspaceProfileInput,
   MvpSettingsUpdate,
@@ -1093,7 +1107,7 @@ function runTerminalIpcRoute<TResult>(
     entityType: string;
   },
   input: unknown,
-  execute: () => TResult,
+  execute: () => Promise<TResult> | TResult,
   successAuditMetadata?: (result: TResult) => Record<string, unknown>,
 ): Promise<TResult> {
   return runHostRouteContract({
@@ -1158,9 +1172,10 @@ function runAppRouteIpc<TResult>(
     entityId?: string | null;
     entityType: string;
     appId?: string | null;
+    hostId?: string | null;
   },
   input: unknown,
-  execute: () => TResult,
+  execute: () => Promise<TResult> | TResult,
   successAuditMetadata?: (result: TResult) => Record<string, unknown>,
 ): Promise<TResult> {
   return runHostRouteContract({
@@ -1424,6 +1439,146 @@ function assertAppScopedStorageGranted(input: AppScopedStorageGetInput, action: 
     },
   });
   throw new AppCapabilityDeniedError(input.appId, 'storage:scoped', action);
+}
+
+function generatedAppHostCapabilityForMethod(input: GeneratedAppHostListInput | GeneratedAppHostTargetInput): PolicyCapability {
+  return input.method === 'host:testConnection' ? 'host:actions' : 'host:read';
+}
+
+function generatedAppHostSummary(host: HostRecord): GeneratedAppHostSummary {
+  return {
+    id: host.id,
+    name: host.name,
+    address: host.address || host.hostname,
+    port: host.port,
+    lastConnectionStatus: host.lastConnectionStatus,
+    lastCheckedAt: host.lastCheckedAt,
+    osHint: host.osHint,
+    bootstrapStatus: host.bootstrapStatus,
+    capabilities: [...host.capabilities],
+    tags: [...host.tags],
+  };
+}
+
+function generatedAppHostStatus(host: HostRecord): GeneratedAppHostStatusResult['status'] {
+  return {
+    id: host.id,
+    lastConnectionStatus: host.lastConnectionStatus,
+    lastCheckedAt: host.lastCheckedAt,
+    bootstrapStatus: host.bootstrapStatus,
+    osHint: host.osHint,
+  };
+}
+
+function generatedAppHostListResult(input: GeneratedAppHostListInput): GeneratedAppHostListResult {
+  const hosts = mvpStore.listHosts().map(generatedAppHostSummary);
+  return {
+    ...input,
+    hosts,
+    hostCount: hosts.length,
+  };
+}
+
+function generatedAppHostGetResult(input: Extract<GeneratedAppHostTargetInput, { method: 'host:get' }>): GeneratedAppHostGetResult {
+  const host = mvpStore.getHost(input.hostId);
+  return {
+    ...input,
+    host: host ? generatedAppHostSummary(host) : null,
+    found: Boolean(host),
+  };
+}
+
+function generatedAppHostStatusResult(
+  input: Extract<GeneratedAppHostTargetInput, { method: 'host:getStatus' }>,
+): GeneratedAppHostStatusResult {
+  const host = mvpStore.getHost(input.hostId);
+  return {
+    ...input,
+    status: host ? generatedAppHostStatus(host) : null,
+    found: Boolean(host),
+  };
+}
+
+function generatedAppHostCapabilitiesResult(
+  input: Extract<GeneratedAppHostTargetInput, { method: 'host:getCapabilities' }>,
+): GeneratedAppHostCapabilitiesResult {
+  const host = mvpStore.getHost(input.hostId);
+  return {
+    ...input,
+    capabilities: host ? [...host.capabilities] : [],
+    found: Boolean(host),
+  };
+}
+
+async function generatedAppHostTestConnectionResult(
+  input: Extract<GeneratedAppHostTargetInput, { method: 'host:testConnection' }>,
+): Promise<GeneratedAppHostTestConnectionResult> {
+  const result = await mvpStore.testConnection(input.hostId);
+  return {
+    ...input,
+    status: result.status,
+    success: result.success,
+    message: result.message,
+    checkedAt: result.checkedAt,
+    latencyMs: result.latencyMs,
+    protocolDetected: result.protocolDetected,
+    errorCode: result.errorCode,
+  };
+}
+
+function generatedAppHostRouteSuccessMetadata(result: GeneratedAppHostSdkResult): Record<string, unknown> {
+  const found = 'found' in result ? result.found : true;
+  return {
+    appId: result.appId,
+    windowId: result.windowId,
+    method: result.method,
+    hostId: 'hostId' in result ? result.hostId : null,
+    hostCount: 'hostCount' in result ? result.hostCount : null,
+    found,
+    success: 'success' in result ? result.success : null,
+    status: 'status' in result && typeof result.status === 'string' ? result.status : null,
+    capability: generatedAppHostCapabilityForMethod(result),
+    hostCredentialsLogged: false,
+    hostNotesLogged: false,
+    sourceCodeLogged: false,
+    packageMetadataLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function assertGeneratedAppHostCapabilityGranted(
+  input: GeneratedAppHostListInput | GeneratedAppHostTargetInput,
+  action: string,
+): void {
+  const capability = generatedAppHostCapabilityForMethod(input);
+  if (mvpStore.hasGrantedAppPermission(input.appId, capability)) {
+    return;
+  }
+
+  mvpStore.logAuditEvent({
+    type: 'app_host_sdk.denied',
+    entityType: 'app',
+    entityId: input.appId,
+    message: 'Generated app host SDK request denied.',
+    metadata: {
+      actionClass: 'app-host-sdk-route',
+      action,
+      appId: input.appId,
+      windowId: input.windowId,
+      method: input.method,
+      hostId: 'hostId' in input ? input.hostId : null,
+      capability,
+      granted: false,
+      hostCredentialsLogged: false,
+      hostNotesLogged: false,
+      sourceCodeLogged: false,
+      packageMetadataLogged: false,
+      providerPayloadLogged: false,
+      secretsLogged: false,
+    },
+  });
+  throw new AppCapabilityDeniedError(input.appId, capability, action);
 }
 
 function bootstrapPresetRouteSuccessMetadata(result: BootstrapPresetRecord | boolean | null): Record<string, unknown> {
@@ -3054,6 +3209,103 @@ ipcMain.handle('app-storage:delete', async (_event, input: AppScopedStorageGetIn
       return mvpStore.deleteAppScopedStorage(validatedInput);
     },
     appScopedStorageRouteSuccessMetadata,
+  );
+});
+
+// Generated App Host SDK
+ipcMain.handle('app-host:list', async (_event, input: GeneratedAppHostListInput) => {
+  const validatedInput = validateGeneratedAppHostListInput(input);
+  return runAppRouteIpc(
+    'ipc:app-host:list',
+    {
+      route: 'app-host:list',
+      action: 'app-host:list',
+      entityId: validatedInput.appId,
+      entityType: 'app',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertGeneratedAppHostCapabilityGranted(validatedInput, 'app-host:list');
+      return generatedAppHostListResult(validatedInput);
+    },
+    generatedAppHostRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-host:get', async (_event, input: GeneratedAppHostTargetInput) => {
+  const validatedInput = validateGeneratedAppHostGetInput(input);
+  return runAppRouteIpc(
+    'ipc:app-host:get',
+    {
+      route: 'app-host:get',
+      action: 'app-host:get',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertGeneratedAppHostCapabilityGranted(validatedInput, 'app-host:get');
+      return generatedAppHostGetResult(validatedInput);
+    },
+    generatedAppHostRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-host:get-status', async (_event, input: GeneratedAppHostTargetInput) => {
+  const validatedInput = validateGeneratedAppHostStatusInput(input);
+  return runAppRouteIpc(
+    'ipc:app-host:get-status',
+    {
+      route: 'app-host:get-status',
+      action: 'app-host:get-status',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertGeneratedAppHostCapabilityGranted(validatedInput, 'app-host:get-status');
+      return generatedAppHostStatusResult(validatedInput);
+    },
+    generatedAppHostRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-host:get-capabilities', async (_event, input: GeneratedAppHostTargetInput) => {
+  const validatedInput = validateGeneratedAppHostCapabilitiesInput(input);
+  return runAppRouteIpc(
+    'ipc:app-host:get-capabilities',
+    {
+      route: 'app-host:get-capabilities',
+      action: 'app-host:get-capabilities',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertGeneratedAppHostCapabilityGranted(validatedInput, 'app-host:get-capabilities');
+      return generatedAppHostCapabilitiesResult(validatedInput);
+    },
+    generatedAppHostRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-host:test-connection', async (_event, input: GeneratedAppHostTargetInput) => {
+  const validatedInput = validateGeneratedAppHostTestConnectionInput(input);
+  return runAppRouteIpc(
+    'ipc:app-host:test-connection',
+    {
+      route: 'app-host:test-connection',
+      action: 'app-host:test-connection',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertGeneratedAppHostCapabilityGranted(validatedInput, 'app-host:test-connection');
+      return generatedAppHostTestConnectionResult(validatedInput);
+    },
+    generatedAppHostRouteSuccessMetadata,
   );
 });
 
