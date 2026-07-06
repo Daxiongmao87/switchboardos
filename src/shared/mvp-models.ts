@@ -227,6 +227,20 @@ export interface ShellWindowBounds {
   height: number;
 }
 
+export interface ShellWindowPreferredSize {
+  minWidth: number | null;
+  minHeight: number | null;
+  maxWidth: number | null;
+  maxHeight: number | null;
+}
+
+export interface ShellWindowRuntimeMetadata {
+  badge: string | null;
+  status: string | null;
+  preferredSize: ShellWindowPreferredSize | null;
+  updatedAt: string | null;
+}
+
 export interface ShellWindowAction {
   id: string;
   label: string;
@@ -252,9 +266,17 @@ export interface ShellWindowSnapshot {
   tilePosition: ShellTilePosition | null;
   focused: boolean;
   zIndex: number;
+  runtimeMetadata: ShellWindowRuntimeMetadata;
   semanticState: ShellWindowSemanticState;
   registeredActions: ShellWindowAction[];
 }
+
+export type WorkspaceWindowLayoutSnapshot = Omit<
+  ShellWindowSnapshot,
+  'focused' | 'semanticState' | 'registeredActions' | 'runtimeMetadata'
+> & {
+  runtimeMetadata?: ShellWindowRuntimeMetadata;
+};
 
 export interface WorkspaceLayoutSnapshot {
   desktopShortcutIds: Array<{
@@ -263,7 +285,7 @@ export interface WorkspaceLayoutSnapshot {
     shellOwned?: boolean;
     label?: string;
   }>;
-  windows: Array<Omit<ShellWindowSnapshot, 'focused' | 'semanticState' | 'registeredActions'>>;
+  windows: WorkspaceWindowLayoutSnapshot[];
 }
 
 export interface WorkspaceProfile {

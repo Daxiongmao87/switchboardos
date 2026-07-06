@@ -121,6 +121,10 @@
       [attr.data-window-id]="shellWindow.windowId"
       [attr.data-app-id]="shellWindow.appId"
       [attr.data-host-id]="shellWindow.hostId"
+      [attr.data-window-sdk-badge]="shellWindow.runtimeMetadata.badge || null"
+      [attr.data-window-sdk-status]="shellWindow.runtimeMetadata.status || null"
+      [attr.data-window-sdk-preferred-size]="windowPreferredSizeText(shellWindow)"
+      [attr.data-window-sdk-updated-at]="shellWindow.runtimeMetadata.updatedAt || null"
       [attr.aria-label]="shellWindow.title + ' shell window'"
       (mousedown)="focusWindow(shellWindow)"
     >
@@ -132,6 +136,8 @@
         <div class="window-title-group">
           <span class="window-icon">{{ shellWindow.appDefinition.icon }}</span>
           <span class="window-title">{{ shellWindow.title }}</span>
+          <span *ngIf="shellWindow.runtimeMetadata.badge" class="window-badge">{{ shellWindow.runtimeMetadata.badge }}</span>
+          <span *ngIf="shellWindow.runtimeMetadata.status" class="window-runtime-status">{{ shellWindow.runtimeMetadata.status }}</span>
         </div>
         <div class="window-controls">
           <button class="window-btn window-btn-minimize" type="button" (click)="minimizeWindow(shellWindow)" title="Minimize" aria-label="Minimize window">
@@ -842,11 +848,15 @@
         [attr.data-shell-object-window-id]="taskbarWindowObject(shellWindow).windowId || null"
         [attr.data-shell-object-action-ids]="shellPrimitiveActionIds(taskbarWindowObject(shellWindow))"
         [attr.data-shell-object-capabilities]="shellPrimitiveCapabilities(taskbarWindowObject(shellWindow)) || null"
+        [attr.data-window-sdk-badge]="shellWindow.runtimeMetadata.badge || null"
+        [attr.data-window-sdk-status]="shellWindow.runtimeMetadata.status || null"
+        [attr.data-window-sdk-preferred-size]="windowPreferredSizeText(shellWindow)"
         (click)="shellWindow.state === 'minimized' ? restoreWindow(shellWindow) : focusWindow(shellWindow)"
         (contextmenu)="openTaskbarWindowContextMenu($event, shellWindow)"
       >
         <span>{{ shellWindow.appDefinition.icon }}</span>
         <span>{{ shellWindow.title }}</span>
+        <span *ngIf="shellWindow.runtimeMetadata.badge" class="taskbar-window-badge">{{ shellWindow.runtimeMetadata.badge }}</span>
       </button>
     </div>
 

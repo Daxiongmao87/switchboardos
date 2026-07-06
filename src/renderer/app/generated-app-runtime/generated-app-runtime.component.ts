@@ -38,6 +38,23 @@ interface SdkStateMessage {
 
 type SdkMessage = SdkRequestMessage | SdkStateMessage;
 
+type GeneratedAppWindowSdkMethod =
+  | 'window:getInfo'
+  | 'window:setTitle'
+  | 'window:setBadge'
+  | 'window:setStatus'
+  | 'window:setPreferredSize';
+
+interface GeneratedAppWindowSdkRequestDetail {
+  appId: string;
+  windowId: string;
+  method: GeneratedAppWindowSdkMethod;
+  payload?: unknown;
+  handled: boolean;
+  resolve: (result: unknown) => void;
+  reject: (error: Error) => void;
+}
+
 @Component({
   selector: 'app-generated-app-runtime',
   standalone: false,
@@ -244,7 +261,15 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
         });
       }
       window.SwitchboardOS = Object.freeze({
-        window: Object.freeze({ id: __windowId, appId: __appId }),
+        window: Object.freeze({
+          id: __windowId,
+          appId: __appId,
+          getInfo: () => __sdkRequest('window:getInfo'),
+          setTitle: (title) => __sdkRequest('window:setTitle', { title }),
+          setBadge: (badge) => __sdkRequest('window:setBadge', { badge }),
+          setStatus: (status) => __sdkRequest('window:setStatus', { status }),
+          setPreferredSize: (size) => __sdkRequest('window:setPreferredSize', size),
+        }),
         host: Object.freeze({
           listHosts: () => __sdkRequest('host:list'),
           testConnection: (hostId) => __sdkRequest('host:testConnection', { hostId }),
@@ -328,6 +353,10 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
 
   private async executeSdkRequest(message: SdkRequestMessage): Promise<unknown> {
     const api = getSwitchboardApi();
+    if (isGeneratedAppWindowSdkMethod(message.method)) {
+      return this.executeWindowSdkRequest(message);
+    }
+
     if (message.method === 'host:list') {
       this.requireCapability('host:read', message.method);
       const hosts = api ? await api.host.list() : this.hosts;
@@ -385,6 +414,24 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
     throw new Error(`Unsupported SwitchboardOS SDK method: ${message.method}`);
   }
 
+  private executeWindowSdkRequest(message: SdkRequestMessage): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const detail: GeneratedAppWindowSdkRequestDetail = {
+        appId: this.manifest!.appId,
+        windowId: this.windowId,
+        method: message.method as GeneratedAppWindowSdkMethod,
+        payload: message.payload,
+        handled: false,
+        resolve,
+        reject,
+      };
+      window.dispatchEvent(new CustomEvent('switchboard-generated-app-window-request', { detail }));
+      if (!detail.handled) {
+        reject(new Error('Generated app window SDK handler is unavailable.'));
+      }
+    });
+  }
+
   private requireCapability(capability: string, method: string): void {
     if (!this.grantedCapabilities.has(capability)) {
       throw new Error(`Capability denied for ${method}: ${capability}`);
@@ -438,6 +485,14 @@ function isSdkMessage(value: unknown): value is SdkMessage {
     && (value.type === 'switchboard-sdk-request' || value.type === 'switchboard-sdk-state')
     && typeof value.appId === 'string'
     && typeof value.windowId === 'string';
+}
+
+function isGeneratedAppWindowSdkMethod(value: string): value is GeneratedAppWindowSdkMethod {
+  return value === 'window:getInfo'
+    || value === 'window:setTitle'
+    || value === 'window:setBadge'
+    || value === 'window:setStatus'
+    || value === 'window:setPreferredSize';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

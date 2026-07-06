@@ -1356,6 +1356,24 @@ function validateHostedDispatches() {
     fail('Generated app runtime must call structured appStorage API for SDK storage get/set.');
   }
 
+  for (const marker of [
+    'window:getInfo',
+    'window:setTitle',
+    'window:setBadge',
+    'window:setStatus',
+    'window:setPreferredSize',
+    'switchboard-generated-app-window-request',
+  ]) {
+    if (!generatedRuntimeText.includes(marker)) {
+      fail(`Generated app runtime missing window SDK contract marker: ${marker}`);
+    }
+  }
+
+  if (generatedRuntimeText.includes('querySelector(\'.desktop-window')
+    || generatedRuntimeText.includes('querySelector(".desktop-window')) {
+    fail('Generated app runtime must not mutate shell window DOM directly.');
+  }
+
   if (hostedText.includes("if (actionOrId === 'presets' && method === 'GET') {\n        return listBootstrapPresets();")
     || hostedText.includes("requireHostedCapability(request, session, 'bootstrap:generate'")
     || hostedText.includes('return this.generateBootstrap(validateBootstrapGenerateInput(body));')) {

@@ -695,6 +695,26 @@ button {
   white-space: nowrap;
 }
 
+.window-badge,
+.taskbar-window-badge {
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  color: var(--color-accent-strong);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.window-runtime-status {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .window-detail {
   font-size: 11px;
   overflow: hidden;

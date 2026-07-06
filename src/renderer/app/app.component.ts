@@ -14,6 +14,8 @@ import type {
   ShellTilePosition,
   ShellWindowAction,
   ShellWindowBounds,
+  ShellWindowPreferredSize,
+  ShellWindowRuntimeMetadata,
   ShellWindowSemanticState,
   ShellWindowSnapshot,
   WorkspaceProfile,
@@ -505,6 +507,23 @@ interface ShellAppDefinition {
 interface ShellWindow extends ShellWindowSnapshot {
   appId: ShellAppId;
   appDefinition: ShellAppDefinition;
+}
+
+type GeneratedAppWindowSdkMethod =
+  | 'window:getInfo'
+  | 'window:setTitle'
+  | 'window:setBadge'
+  | 'window:setStatus'
+  | 'window:setPreferredSize';
+
+interface GeneratedAppWindowSdkRequestDetail {
+  appId: ShellAppId;
+  windowId: string;
+  method: GeneratedAppWindowSdkMethod;
+  payload?: unknown;
+  handled: boolean;
+  resolve: (result: unknown) => void;
+  reject: (error: Error) => void;
 }
 
 type WorkspaceArtifactKind = 'folder' | 'applet' | 'scriptlet' | 'note';
@@ -1501,6 +1520,27 @@ export class AppComponent implements OnInit, OnDestroy {
         ...detail.registeredActions,
         ...this.layoutActions(),
       ];
+    }
+  }
+
+  @HostListener('window:switchboard-generated-app-window-request', ['$event'])
+  handleGeneratedAppWindowRequest(event: CustomEvent<GeneratedAppWindowSdkRequestDetail>): void {
+    const detail = event.detail;
+    const windowItem = this.windows.find((candidate) =>
+      candidate.windowId === detail?.windowId
+      && candidate.appId === detail.appId
+      && this.isGeneratedAppWindow(candidate));
+
+    detail.handled = true;
+    if (!windowItem) {
+      detail.reject(new Error('Generated app window scope was not found.'));
+      return;
+    }
+
+    try {
+      detail.resolve(this.applyGeneratedAppWindowRequest(windowItem, detail.method, detail.payload));
+    } catch (error) {
+      detail.reject(error instanceof Error ? error : new Error('Generated app window request failed.'));
     }
   }
 
@@ -3516,10 +3556,145 @@ export class AppComponent implements OnInit, OnDestroy {
       tilePosition: windowItem.tilePosition,
       focused: windowItem.focused,
       zIndex: windowItem.zIndex,
+      runtimeMetadata: windowItem.runtimeMetadata,
       semanticState: windowItem.semanticState,
       registeredActions: windowItem.registeredActions,
     };
     return JSON.stringify(snapshot, null, 2);
+  }
+
+  windowPreferredSizeText(windowItem: ShellWindow): string | null {
+    return windowItem.runtimeMetadata.preferredSize
+      ? JSON.stringify(windowItem.runtimeMetadata.preferredSize)
+      : null;
+  }
+
+  private applyGeneratedAppWindowRequest(
+    windowItem: ShellWindow,
+    method: GeneratedAppWindowSdkMethod,
+    payload: unknown,
+  ): unknown {
+    if (method === 'window:getInfo') {
+      return this.generatedAppWindowInfo(windowItem);
+    }
+
+    if (method === 'window:setTitle') {
+      const title = this.sdkStringField(payload, 'title', 80, true);
+      if (!title) {
+        throw new Error('Generated app window SDK field "title" is required.');
+      }
+      windowItem.title = title;
+      this.touchWindowRuntimeMetadata(windowItem, {});
+      return this.generatedAppWindowInfo(windowItem);
+    }
+
+    if (method === 'window:setBadge') {
+      const badge = this.sdkStringField(payload, 'badge', 12, false);
+      this.touchWindowRuntimeMetadata(windowItem, { badge });
+      return this.generatedAppWindowInfo(windowItem);
+    }
+
+    if (method === 'window:setStatus') {
+      const status = this.sdkStringField(payload, 'status', 48, false);
+      this.touchWindowRuntimeMetadata(windowItem, { status });
+      return this.generatedAppWindowInfo(windowItem);
+    }
+
+    if (method === 'window:setPreferredSize') {
+      const preferredSize = this.sdkPreferredSize(payload);
+      this.touchWindowRuntimeMetadata(windowItem, { preferredSize });
+      return this.generatedAppWindowInfo(windowItem);
+    }
+
+    throw new Error(`Unsupported generated app window SDK method: ${method}`);
+  }
+
+  private generatedAppWindowInfo(windowItem: ShellWindow): Record<string, unknown> {
+    return {
+      appId: windowItem.appId,
+      windowId: windowItem.windowId,
+      title: windowItem.title,
+      bounds: { ...windowItem.bounds },
+      state: windowItem.state,
+      tilePosition: windowItem.tilePosition,
+      focused: windowItem.focused,
+      zIndex: windowItem.zIndex,
+      badge: windowItem.runtimeMetadata.badge,
+      status: windowItem.runtimeMetadata.status,
+      preferredSize: windowItem.runtimeMetadata.preferredSize,
+      theme: document.body.classList.contains('light') ? 'light' : 'dark',
+      scale: window.devicePixelRatio || 1,
+    };
+  }
+
+  private touchWindowRuntimeMetadata(windowItem: ShellWindow, patch: Partial<ShellWindowRuntimeMetadata>): void {
+    windowItem.runtimeMetadata = {
+      ...windowItem.runtimeMetadata,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private sdkStringField(payload: unknown, field: string, maxLength: number, required: boolean): string | null {
+    const record = isPlainRecord(payload) ? payload : {};
+    const raw = record[field];
+    if (raw === null || raw === undefined || raw === '') {
+      if (required) {
+        throw new Error(`Generated app window SDK field "${field}" is required.`);
+      }
+      return null;
+    }
+    if (typeof raw !== 'string') {
+      throw new Error(`Generated app window SDK field "${field}" must be a string.`);
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      if (required) {
+        throw new Error(`Generated app window SDK field "${field}" is required.`);
+      }
+      return null;
+    }
+    if (trimmed.length > maxLength) {
+      throw new Error(`Generated app window SDK field "${field}" exceeds ${maxLength} characters.`);
+    }
+    return trimmed;
+  }
+
+  private sdkPreferredSize(payload: unknown): ShellWindowPreferredSize | null {
+    if (payload === null || payload === undefined) {
+      return null;
+    }
+    const record = isPlainRecord(payload) ? payload : {};
+    const preferredSize: ShellWindowPreferredSize = {
+      minWidth: this.sdkOptionalDimension(record['minWidth'], 'minWidth', 240, 1600),
+      minHeight: this.sdkOptionalDimension(record['minHeight'], 'minHeight', 160, 1200),
+      maxWidth: this.sdkOptionalDimension(record['maxWidth'], 'maxWidth', 320, 2400),
+      maxHeight: this.sdkOptionalDimension(record['maxHeight'], 'maxHeight', 240, 1800),
+    };
+    if (preferredSize.minWidth !== null && preferredSize.maxWidth !== null && preferredSize.minWidth > preferredSize.maxWidth) {
+      throw new Error('Generated app window SDK preferred size minWidth exceeds maxWidth.');
+    }
+    if (preferredSize.minHeight !== null && preferredSize.maxHeight !== null && preferredSize.minHeight > preferredSize.maxHeight) {
+      throw new Error('Generated app window SDK preferred size minHeight exceeds maxHeight.');
+    }
+    if (Object.values(preferredSize).every((value) => value === null)) {
+      return null;
+    }
+    return preferredSize;
+  }
+
+  private sdkOptionalDimension(value: unknown, field: string, min: number, max: number): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`Generated app window SDK field "${field}" must be a finite number.`);
+    }
+    const rounded = Math.round(value);
+    if (rounded < min || rounded > max) {
+      throw new Error(`Generated app window SDK field "${field}" is outside ${min}-${max}.`);
+    }
+    return rounded;
   }
 
   hostFor(windowItem: ShellWindow): HostRecord | null {
@@ -3774,6 +3949,7 @@ export class AppComponent implements OnInit, OnDestroy {
         state: windowItem.state,
         tilePosition: windowItem.tilePosition,
         zIndex: windowItem.zIndex,
+        runtimeMetadata: windowItem.runtimeMetadata,
       })),
     };
   }
@@ -4602,6 +4778,7 @@ export class AppComponent implements OnInit, OnDestroy {
       tilePosition: null,
       focused: true,
       zIndex: this.nextZIndex++,
+      runtimeMetadata: defaultWindowRuntimeMetadata(),
       semanticState: this.buildSemanticState(definition.appId, host),
       registeredActions: this.registeredActionsFor(definition.appId, host),
       appDefinition: definition,
@@ -4619,7 +4796,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private createWindowFromSnapshot(
     definition: ShellAppDefinition,
-    snapshot: Omit<ShellWindowSnapshot, 'focused' | 'semanticState' | 'registeredActions'>,
+    snapshot: WorkspaceLayoutSnapshot['windows'][number],
     host: HostRecord | null,
   ): ShellWindow {
     return {
@@ -4632,6 +4809,7 @@ export class AppComponent implements OnInit, OnDestroy {
       tilePosition: snapshot.tilePosition,
       focused: false,
       zIndex: snapshot.zIndex,
+      runtimeMetadata: normalizeWindowRuntimeMetadata(snapshot.runtimeMetadata),
       semanticState: this.buildSemanticState(definition.appId, host),
       registeredActions: this.registeredActionsFor(definition.appId, host),
       appDefinition: definition,
@@ -5207,20 +5385,40 @@ export class AppComponent implements OnInit, OnDestroy {
       ? this.normalizeDesktopShortcuts(record.desktopShortcutIds)
       : this.emptyWorkspaceLayout().desktopShortcutIds;
     const windows = Array.isArray(record.windows)
-      ? record.windows.filter((windowItem): windowItem is WorkspaceLayoutSnapshot['windows'][number] => {
-        return Boolean(
-          windowItem &&
-          typeof windowItem === 'object' &&
-          typeof windowItem.windowId === 'string' &&
-          typeof windowItem.appId === 'string' &&
-          this.isShellAppId(windowItem.appId) &&
-          windowItem.bounds &&
-          Number.isFinite(windowItem.bounds.x) &&
-          Number.isFinite(windowItem.bounds.y) &&
-          Number.isFinite(windowItem.bounds.width) &&
-          Number.isFinite(windowItem.bounds.height),
-        );
-      })
+      ? record.windows
+          .map((windowItem): WorkspaceLayoutSnapshot['windows'][number] | null => {
+            if (!windowItem
+              || typeof windowItem !== 'object'
+              || typeof windowItem.windowId !== 'string'
+              || typeof windowItem.appId !== 'string'
+              || !this.isShellAppId(windowItem.appId)
+              || !windowItem.bounds
+              || !Number.isFinite(windowItem.bounds.x)
+              || !Number.isFinite(windowItem.bounds.y)
+              || !Number.isFinite(windowItem.bounds.width)
+              || !Number.isFinite(windowItem.bounds.height)) {
+              return null;
+            }
+            return {
+              windowId: windowItem.windowId,
+              appId: windowItem.appId,
+              hostId: typeof windowItem.hostId === 'string' ? windowItem.hostId : null,
+              title: typeof windowItem.title === 'string' && windowItem.title.trim()
+                ? windowItem.title.trim()
+                : this.getAppDefinition(windowItem.appId)?.title ?? windowItem.appId,
+              bounds: {
+                x: windowItem.bounds.x,
+                y: windowItem.bounds.y,
+                width: windowItem.bounds.width,
+                height: windowItem.bounds.height,
+              },
+              state: windowItem.state,
+              tilePosition: windowItem.tilePosition,
+              zIndex: Number.isFinite(windowItem.zIndex) ? windowItem.zIndex : 1,
+              runtimeMetadata: normalizeWindowRuntimeMetadata(windowItem.runtimeMetadata),
+            };
+          })
+          .filter((windowItem): windowItem is WorkspaceLayoutSnapshot['windows'][number] => windowItem !== null)
       : [];
 
     return {
@@ -5543,6 +5741,48 @@ export class AppComponent implements OnInit, OnDestroy {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function defaultWindowRuntimeMetadata(): ShellWindowRuntimeMetadata {
+  return {
+    badge: null,
+    status: null,
+    preferredSize: null,
+    updatedAt: null,
+  };
+}
+
+function normalizeWindowRuntimeMetadata(value: unknown): ShellWindowRuntimeMetadata {
+  if (!isPlainRecord(value)) {
+    return defaultWindowRuntimeMetadata();
+  }
+  return {
+    badge: typeof value['badge'] === 'string' && value['badge'].trim() ? value['badge'].trim().slice(0, 12) : null,
+    status: typeof value['status'] === 'string' && value['status'].trim() ? value['status'].trim().slice(0, 48) : null,
+    preferredSize: normalizeWindowPreferredSize(value['preferredSize']),
+    updatedAt: typeof value['updatedAt'] === 'string' && value['updatedAt'].trim() ? value['updatedAt'] : null,
+  };
+}
+
+function normalizeWindowPreferredSize(value: unknown): ShellWindowPreferredSize | null {
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+  const preferredSize: ShellWindowPreferredSize = {
+    minWidth: normalizedOptionalDimension(value['minWidth']),
+    minHeight: normalizedOptionalDimension(value['minHeight']),
+    maxWidth: normalizedOptionalDimension(value['maxWidth']),
+    maxHeight: normalizedOptionalDimension(value['maxHeight']),
+  };
+  return Object.values(preferredSize).some((dimension) => dimension !== null) ? preferredSize : null;
+}
+
+function normalizedOptionalDimension(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function actionRegistryFromManifest(manifest: AppManifest): ShellWindowAction[] {

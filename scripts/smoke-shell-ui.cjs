@@ -1531,6 +1531,187 @@ async function browserSmoke() {
     }
   })();
 
+  const generatedWindowSdk = await (async () => {
+    const api = window.sb;
+    if (!api?.appManifest || !api.audit) {
+      return { available: false, error: 'generated app manifest/audit APIs unavailable' };
+    }
+
+    const semanticEvents = [];
+    const handleSemantic = (event) => {
+      semanticEvents.push(event.detail);
+    };
+    window.addEventListener('switchboard-generated-app-semantic', handleSemantic);
+
+    let manifest = null;
+    const appId = `smoke-window-sdk-${Date.now()}`;
+    const expectedTitle = 'SDK Window Contract';
+    const expectedBadge = 'SDK';
+    const expectedStatus = 'runtime-ready';
+
+    const runtimeDiagnostics = () => {
+      const windowElement = document.querySelector(`.desktop-window[data-app-id="${appId}"]`);
+      const runtime = windowElement?.querySelector('[data-testid="generated-app-runtime"]');
+      const srcdoc = runtime?.querySelector('iframe')?.getAttribute('srcdoc') || '';
+      return {
+        windowPresent: Boolean(windowElement),
+        windowId: windowElement?.getAttribute('data-window-id') || null,
+        titleText: windowElement?.querySelector('.window-title')?.textContent?.trim() || null,
+        windowBadge: windowElement?.getAttribute('data-window-sdk-badge') || null,
+        windowStatus: windowElement?.getAttribute('data-window-sdk-status') || null,
+        windowPreferredSize: windowElement?.getAttribute('data-window-sdk-preferred-size') || null,
+        taskbarBadge: windowElement
+          ? document.querySelector(`.taskbar-window[data-shell-object-window-id="${windowElement.getAttribute('data-window-id')}"]`)?.getAttribute('data-window-sdk-badge') || null
+          : null,
+        srcdocHasWindowSetTitle: srcdoc.includes('SwitchboardOS.window.setTitle'),
+        semanticStatuses: semanticEvents
+          .filter((entry) => entry?.semanticState?.metadata?.appId === appId)
+          .map((entry) => entry.semanticState.status),
+      };
+    };
+
+    try {
+      manifest = await api.appManifest.create({
+        appId,
+        name: 'Smoke Window SDK',
+        version: '1.0.0',
+        entrypoint: 'generated://smoke-window-sdk',
+        description: 'Smoke generated app for shell-owned window SDK contract.',
+        author: 'SwitchboardOS Smoke',
+        icon: 'SW',
+        category: 'smoke',
+        capabilities: [],
+        sourceCode: `
+          (async () => {
+            try {
+              const initialInfo = await SwitchboardOS.window.getInfo();
+              const titleInfo = await SwitchboardOS.window.setTitle(${JSON.stringify(expectedTitle)});
+              const badgeInfo = await SwitchboardOS.window.setBadge(${JSON.stringify(expectedBadge)});
+              const statusInfo = await SwitchboardOS.window.setStatus(${JSON.stringify(expectedStatus)});
+              const sizeInfo = await SwitchboardOS.window.setPreferredSize({
+                minWidth: 480,
+                minHeight: 320,
+                maxWidth: 900,
+                maxHeight: 700
+              });
+              let malformedDenied = false;
+              let malformedMessage = '';
+              try {
+                await SwitchboardOS.window.setPreferredSize({ minWidth: 1200, maxWidth: 400 });
+              } catch (error) {
+                malformedDenied = true;
+                malformedMessage = error instanceof Error ? error.message : String(error);
+              }
+              SwitchboardOS.agent.setState({
+                status: malformedDenied ? 'window-sdk-ok' : 'window-sdk-denial-missed',
+                summary: 'Window SDK smoke completed through shell-owned window object.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  windowId: SwitchboardOS.window.id,
+                  initialWindowMatches: initialInfo.windowId === SwitchboardOS.window.id,
+                  titleApplied: titleInfo.title === ${JSON.stringify(expectedTitle)},
+                  badgeApplied: badgeInfo.badge === ${JSON.stringify(expectedBadge)},
+                  statusApplied: statusInfo.status === ${JSON.stringify(expectedStatus)},
+                  preferredSizeApplied: sizeInfo.preferredSize && sizeInfo.preferredSize.minWidth === 480,
+                  malformedDenied,
+                  malformedMentionsSize: malformedMessage.includes('minWidth') || malformedMessage.includes('preferred size')
+                }
+              });
+            } catch (error) {
+              SwitchboardOS.agent.setState({
+                status: 'window-sdk-error',
+                summary: 'Window SDK smoke failed.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  error: error instanceof Error ? error.message : String(error)
+                }
+              });
+            }
+          })();
+        `,
+        packageMetadata: {
+          smoke: 'generated-app-window-sdk',
+        },
+        enabled: true,
+        installedAt: new Date().toISOString(),
+      });
+
+      window.postMessage({ type: 'sb:app-open', appId }, '*');
+      const windowElement = await waitFor(
+        () => document.querySelector(`.desktop-window[data-app-id="${appId}"]`),
+        `generated window SDK shell window ${JSON.stringify(runtimeDiagnostics())}`,
+        20000,
+      );
+      await waitFor(
+        () => windowElement.querySelector('[data-testid="generated-app-runtime"]'),
+        `generated window SDK runtime mounted ${JSON.stringify(runtimeDiagnostics())}`,
+        20000,
+      );
+      await waitFor(
+        () => runtimeDiagnostics().srcdocHasWindowSetTitle,
+        `generated window SDK iframe source installed ${JSON.stringify(runtimeDiagnostics())}`,
+        20000,
+      );
+      const sdkState = await waitFor(() => {
+        return semanticEvents.find((entry) => {
+          const state = entry?.semanticState;
+          return state?.metadata?.appId === appId && typeof state.status === 'string' && state.status.startsWith('window-sdk');
+        }) || null;
+      }, `generated window SDK semantic state ${JSON.stringify(runtimeDiagnostics())}`, 20000);
+
+      await waitFor(
+        () => runtimeDiagnostics().windowBadge === expectedBadge
+          && runtimeDiagnostics().windowStatus === expectedStatus
+          && runtimeDiagnostics().titleText === expectedTitle
+          && (runtimeDiagnostics().windowPreferredSize || '').includes('"minWidth":480'),
+        `generated window SDK shell metadata reflected ${JSON.stringify(runtimeDiagnostics())}`,
+        20000,
+      );
+
+      const diagnostics = runtimeDiagnostics();
+      const taskbarButton = document.querySelector(`.taskbar-window[data-shell-object-window-id="${diagnostics.windowId}"]`);
+      const auditEvents = await api.audit.list();
+      const appAuditEvents = auditEvents.filter((event) => event.entityId === appId || event.metadata?.appId === appId);
+      const auditJson = JSON.stringify(appAuditEvents);
+
+      keydown('F4', { altKey: true });
+      await waitFor(
+        () => !document.querySelector(`.desktop-window[data-app-id="${appId}"]`),
+        'Alt+F4 closed generated window SDK app',
+      );
+
+      return {
+        available: true,
+        appId,
+        windowId: diagnostics.windowId,
+        titleText: diagnostics.titleText,
+        windowBadge: diagnostics.windowBadge,
+        windowStatus: diagnostics.windowStatus,
+        windowPreferredSize: diagnostics.windowPreferredSize,
+        taskbarBadge: taskbarButton?.getAttribute('data-window-sdk-badge') || null,
+        taskbarStatus: taskbarButton?.getAttribute('data-window-sdk-status') || null,
+        taskbarPreferredSize: taskbarButton?.getAttribute('data-window-sdk-preferred-size') || null,
+        stateStatus: sdkState.semanticState.status,
+        initialWindowMatches: sdkState.semanticState.metadata.initialWindowMatches === true,
+        titleApplied: sdkState.semanticState.metadata.titleApplied === true,
+        badgeApplied: sdkState.semanticState.metadata.badgeApplied === true,
+        statusApplied: sdkState.semanticState.metadata.statusApplied === true,
+        preferredSizeApplied: sdkState.semanticState.metadata.preferredSizeApplied === true,
+        malformedDenied: sdkState.semanticState.metadata.malformedDenied === true,
+        malformedMentionsSize: sdkState.semanticState.metadata.malformedMentionsSize === true,
+        auditHasSdkDenial: appAuditEvents.some((event) => event.type === 'app.sdk_capability_denied' && event.metadata?.method === 'window:setPreferredSize'),
+        auditSanitized: !auditJson.includes('SwitchboardOS.window.setTitle')
+          && auditJson.includes('"sourceCodeLogged":false')
+          && auditJson.includes('"secretsLogged":false'),
+      };
+    } finally {
+      window.removeEventListener('switchboard-generated-app-semantic', handleSemantic);
+      if (manifest) {
+        await api.appManifest.remove(manifest.id).catch(() => false);
+      }
+    }
+  })();
+
   return {
     initial,
     menus: {
@@ -1591,6 +1772,7 @@ async function browserSmoke() {
     keyboardShortcuts: keyboardShortcutReport,
     generatedPaletteCapability,
     generatedScopedStorage,
+    generatedWindowSdk,
     windows: {
       fileExplorerOpen: Boolean(fileWindow),
       hostsOpen: Boolean(hostsWindow),
@@ -1835,6 +2017,24 @@ async function main() {
     report.generatedScopedStorage.deniedAuditHasSdkDenial,
     report.generatedScopedStorage.deniedAuditOmitsValue,
     report.generatedScopedStorage.noGeneratedLocalStorageKeys,
+    report.generatedWindowSdk.available,
+    report.generatedWindowSdk.stateStatus === 'window-sdk-ok',
+    report.generatedWindowSdk.titleText === 'SDK Window Contract',
+    report.generatedWindowSdk.windowBadge === 'SDK',
+    report.generatedWindowSdk.windowStatus === 'runtime-ready',
+    report.generatedWindowSdk.windowPreferredSize?.includes('"minWidth":480'),
+    report.generatedWindowSdk.taskbarBadge === 'SDK',
+    report.generatedWindowSdk.taskbarStatus === 'runtime-ready',
+    report.generatedWindowSdk.taskbarPreferredSize?.includes('"maxHeight":700'),
+    report.generatedWindowSdk.initialWindowMatches,
+    report.generatedWindowSdk.titleApplied,
+    report.generatedWindowSdk.badgeApplied,
+    report.generatedWindowSdk.statusApplied,
+    report.generatedWindowSdk.preferredSizeApplied,
+    report.generatedWindowSdk.malformedDenied,
+    report.generatedWindowSdk.malformedMentionsSize,
+    report.generatedWindowSdk.auditHasSdkDenial,
+    report.generatedWindowSdk.auditSanitized,
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
     report.menuAffordances.desktopMenu.iconCount >= 6,
