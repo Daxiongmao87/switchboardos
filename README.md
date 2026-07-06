@@ -45,6 +45,8 @@ Every app exposes structured state and actions for agent/automation consumption.
 
 See [docs/spec/switchboardos-design-doc.md](docs/spec/switchboardos-design-doc.md)
 for the full design specification.
+UX-facing work is also governed by
+[docs/spec/switchboardos-ux-principles.md](docs/spec/switchboardos-ux-principles.md).
 
 ## Project Structure
 

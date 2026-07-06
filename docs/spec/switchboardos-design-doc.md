@@ -1169,6 +1169,11 @@ Caches may be useful, but should be bounded and clearable:
 
 ## 17. UX Model
 
+UI-facing work is governed by the SwitchboardOS UX and human-design foundation:
+`docs/spec/switchboardos-ux-principles.md`. Future implementation and validation
+tasks that affect visible workflows must apply its checklist and product-path
+smoke requirements.
+
 ### 17.1 First-run flow
 
 Required first-run behavior:
