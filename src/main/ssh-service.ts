@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { createHash } from 'crypto';
 import type {
   AuditEvent,
   CreateAuditEventInput,
@@ -10,6 +11,8 @@ import type {
   SshExecInput,
   SshExecResult,
   SshExecStatus,
+  SshFileDeleteInput,
+  SshFileDeleteResult,
   SshFileEntry,
   SshFileListInput,
   SshFileListResult,
@@ -40,6 +43,7 @@ export interface SshProvider {
   stat(input: SshProviderFileStatInput): Promise<SshFileStatResult>;
   upload(input: SshProviderFileTransferInput): Promise<SshFileTransferResult>;
   download(input: SshProviderFileTransferInput): Promise<SshFileTransferResult>;
+  delete(input: SshProviderFileDeleteInput): Promise<SshFileDeleteResult>;
 }
 
 export interface SshProviderFileListInput {
@@ -59,6 +63,13 @@ export interface SshProviderFileTransferInput {
   host: HostRecord;
   localPath: string;
   remotePath: string;
+  timeoutMs: number;
+}
+
+export interface SshProviderFileDeleteInput {
+  host: HostRecord;
+  path: string;
+  recursive: boolean;
   timeoutMs: number;
 }
 
@@ -256,6 +267,43 @@ export class SystemSshProvider implements SshProvider {
     return this.runScpTransfer(input, 'download');
   }
 
+  async delete(input: SshProviderFileDeleteInput): Promise<SshFileDeleteResult> {
+    const command = input.recursive ? `delete recursive ${input.path}` : `delete ${input.path}`;
+    const script = [
+      'set -eu',
+      `target=${shellQuote(input.path)}`,
+      'if [ "$target" = "/" ]; then',
+      '  echo "refusing to delete filesystem root" >&2',
+      '  exit 4',
+      'fi',
+      'if [ ! -e "$target" ] && [ ! -L "$target" ]; then',
+      '  echo "target does not exist" >&2',
+      '  exit 2',
+      'fi',
+      input.recursive
+        ? 'rm -rf -- "$target"'
+        : [
+          'if [ -d "$target" ] && [ ! -L "$target" ]; then',
+          '  echo "target is a directory; recursive delete is required" >&2',
+          '  exit 3',
+          'fi',
+          'rm -f -- "$target"',
+        ].join('\n'),
+      'if [ -e "$target" ] || [ -L "$target" ]; then',
+      '  echo "target still exists after delete" >&2',
+      '  exit 5',
+      'fi',
+      'printf "deleted=true\\n"',
+    ].join('\n');
+    const execResult = await this.exec({
+      host: input.host,
+      command,
+      remoteCommand: script,
+      timeoutMs: input.timeoutMs,
+    });
+    return fileDeleteBase(input.host.id, input.path, input.recursive, command, execResult);
+  }
+
   private async runScpTransfer(
     input: SshProviderFileTransferInput,
     direction: 'upload' | 'download',
@@ -442,6 +490,36 @@ export class SshService {
     return this.transfer(input, 'download');
   }
 
+  async delete(input: SshFileDeleteInput): Promise<SshFileDeleteResult> {
+    const host = this.resolveHost(input.hostId);
+    const path = input.path.trim();
+    const recursive = Boolean(input.recursive);
+    if (!host) {
+      const result = this.fileDeleteFailure(input.hostId, path, recursive, 'Host record was not found.');
+      void this.auditFileDelete(result);
+      return result;
+    }
+    try {
+      const result = await this.provider.delete({
+        host,
+        path,
+        recursive,
+        timeoutMs: normalizeTimeout(input.timeoutMs),
+      });
+      void this.auditFileDelete(result);
+      return result;
+    } catch (error) {
+      const result = this.fileDeleteFailure(
+        host.id,
+        path,
+        recursive,
+        error instanceof Error ? error.message : 'SSH file delete failed.',
+      );
+      void this.auditFileDelete(result);
+      return result;
+    }
+  }
+
   listFiles(input: Omit<HostOperationInput, 'kind'>): Promise<HostOperationResult> {
     return this.runHostOperation({ ...input, kind: 'files' });
   }
@@ -535,6 +613,30 @@ export class SshService {
       status: 'failed',
       error,
       direction,
+    };
+  }
+
+  private fileDeleteFailure(
+    hostId: string,
+    path: string,
+    recursive: boolean,
+    error: string,
+  ): SshFileDeleteResult {
+    const now = new Date().toISOString();
+    return {
+      hostId,
+      path,
+      recursive,
+      command: recursive ? `delete recursive ${path}` : `delete ${path}`,
+      stdout: '',
+      stderr: '',
+      exitCode: null,
+      durationMs: 0,
+      startedAt: now,
+      completedAt: now,
+      status: 'failed',
+      error,
+      deleted: false,
     };
   }
 
@@ -721,6 +823,39 @@ export class SshService {
       });
     } catch (error) {
       console.error('Unable to write SSH file transfer audit event.', error);
+    }
+  }
+
+  private async auditFileDelete(result: SshFileDeleteResult): Promise<void> {
+    try {
+      await this.logAuditEvent({
+        type: result.status === 'success'
+          ? 'ssh.file_delete_succeeded'
+          : 'ssh.file_delete_failed',
+        entityType: 'host',
+        entityId: result.hostId,
+        message: `SSH file delete ${result.status} for host ${result.hostId}.`,
+        metadata: {
+          hostId: result.hostId,
+          operation: 'delete',
+          pathHash: hashPathForAudit(result.path),
+          pathLength: result.path.length,
+          recursive: result.recursive,
+          deleted: result.deleted,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          status: result.status,
+          error: result.error,
+          backend: this.provider.name,
+          remotePathLogged: false,
+          commandTextLogged: false,
+          commandOutputLogged: false,
+          fileContentsLogged: false,
+          secretsLogged: false,
+        },
+      });
+    } catch (error) {
+      console.error('Unable to write SSH file delete audit event.', error);
     }
   }
 }
@@ -921,6 +1056,34 @@ function fileStatBase(
     status: result.status,
     error: result.error,
   };
+}
+
+function fileDeleteBase(
+  hostId: string,
+  path: string,
+  recursive: boolean,
+  command: string,
+  result: SshExecResult,
+): SshFileDeleteResult {
+  return {
+    hostId,
+    path,
+    recursive,
+    command,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
+    status: result.status,
+    error: result.error,
+    deleted: result.status === 'success',
+  };
+}
+
+function hashPathForAudit(path: string): string {
+  return createHash('sha256').update(path).digest('hex').slice(0, 16);
 }
 
 function remoteScpTarget(host: HostRecord, remotePath: string): string {

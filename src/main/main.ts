@@ -84,6 +84,7 @@ import {
   validateSecretStoreInput,
   validateSettingsUpdate,
   validateSshExecInput,
+  validateSshFileDeleteInput,
   validateSshFileListInput,
   validateSshFileStatInput,
   validateSshFileTransferInput,
@@ -145,6 +146,8 @@ import type {
   OperatorProposeResult,
   SshExecInput,
   SshExecResult,
+  SshFileDeleteInput,
+  SshFileDeleteResult,
   SshFileListInput,
   SshFileListResult,
   SshFileStatInput,
@@ -1144,6 +1147,28 @@ function sshFileTransferRouteSuccessMetadata(result: SshFileTransferResult): Rec
     fileContentsLogged: false,
     secretsLogged: false,
   };
+}
+
+function sshFileDeleteRouteSuccessMetadata(result: SshFileDeleteResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    operation: 'delete',
+    recursive: result.recursive,
+    deleted: result.deleted,
+    pathHash: hashAuditPath(result.path),
+    pathLength: result.path.length,
+    remotePathLogged: false,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function hashAuditPath(path: string): string {
+  return createHash('sha256').update(path).digest('hex').slice(0, 16);
 }
 
 function runTerminalIpcRoute<TResult>(
@@ -3754,6 +3779,21 @@ ipcMain.handle('ssh-file:upload', async (_event, input: SshFileTransferInput) =>
     validatedInput,
     () => sshService.upload(validatedInput),
     sshFileTransferRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('ssh-file:delete', async (_event, input: SshFileDeleteInput) => {
+  const validatedInput = validateSshFileDeleteInput(input);
+  return runSshIpcRoute(
+    'ipc:ssh-file:delete',
+    {
+      route: 'ssh-file:delete',
+      action: 'ssh-file:delete',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => sshService.delete(validatedInput),
+    sshFileDeleteRouteSuccessMetadata,
   );
 });
 

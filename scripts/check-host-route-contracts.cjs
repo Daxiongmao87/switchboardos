@@ -146,6 +146,11 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:ssh-file:delete',
+    routeMarker: "'ssh-file:delete'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:terminal:start',
     routeMarker: "'terminal:start'",
     contextFile: 'src/main/main.ts',
@@ -562,6 +567,10 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:POST:/api/ssh-files/upload',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/ssh-files/delete',
     contextFile: 'src/main/hosted-server.ts',
   },
   {
@@ -1326,7 +1335,8 @@ function validateHostedDispatches() {
   if (hostedText.includes('this.options.sshService.listDir(validateSshFileListInput(body))')
     || hostedText.includes('this.options.sshService.stat(validateSshFileStatInput(body))')
     || hostedText.includes('this.options.sshService.download(validateSshFileTransferInput(body))')
-    || hostedText.includes('this.options.sshService.upload(validateSshFileTransferInput(body))')) {
+    || hostedText.includes('this.options.sshService.upload(validateSshFileTransferInput(body))')
+    || hostedText.includes('this.options.sshService.delete(validateSshFileDeleteInput(body))')) {
     fail('Direct hosted SSH file fallback detected in hosted-server.ts. SSH file provider routes must execute through runHostRouteContract.');
   }
 
@@ -1342,7 +1352,8 @@ function validateHostedDispatches() {
   if (mainText.includes("ipcMain.handle('ssh-file:list', async (_event, input) => sshService.listDir")
     || mainText.includes("ipcMain.handle('ssh-file:stat', async (_event, input) => sshService.stat")
     || mainText.includes("ipcMain.handle('ssh-file:download', async (_event, input) => sshService.download")
-    || mainText.includes("ipcMain.handle('ssh-file:upload', async (_event, input) => sshService.upload")) {
+    || mainText.includes("ipcMain.handle('ssh-file:upload', async (_event, input) => sshService.upload")
+    || mainText.includes("ipcMain.handle('ssh-file:delete', async (_event, input) => sshService.delete")) {
     fail('Direct IPC SSH file fallback detected in main.ts. SSH file routes must execute through runHostRouteContract.');
   }
 
@@ -1353,14 +1364,16 @@ function validateHostedDispatches() {
   if (!mainText.includes("ipcMain.handle('ssh-file:list'")
     || !mainText.includes("ipcMain.handle('ssh-file:stat'")
     || !mainText.includes("ipcMain.handle('ssh-file:download'")
-    || !mainText.includes("ipcMain.handle('ssh-file:upload'")) {
-    fail('IPC SSH file provider handlers for list/stat/download/upload are missing.');
+    || !mainText.includes("ipcMain.handle('ssh-file:upload'")
+    || !mainText.includes("ipcMain.handle('ssh-file:delete'")) {
+    fail('IPC SSH file provider handlers for list/stat/download/upload/delete are missing.');
   }
 
   if (!hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/list'")
     || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/stat'")
     || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/download'")
-    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/upload'")) {
+    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/upload'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/delete'")) {
     fail('Hosted SSH file provider routes must reference all route contracts.');
   }
 
@@ -1368,8 +1381,9 @@ function validateHostedDispatches() {
     || !preloadText.includes("invoke('ssh-file:list'")
     || !preloadText.includes("invoke('ssh-file:stat'")
     || !preloadText.includes("invoke('ssh-file:download'")
-    || !preloadText.includes("invoke('ssh-file:upload'")) {
-    fail('Preload API must expose sshFile list/stat/download/upload IPC routes.');
+    || !preloadText.includes("invoke('ssh-file:upload'")
+    || !preloadText.includes("invoke('ssh-file:delete'")) {
+    fail('Preload API must expose sshFile list/stat/download/upload/delete IPC routes.');
   }
 
   if (!switchboardApiText.includes('sshFile: {')
@@ -1377,7 +1391,8 @@ function validateHostedDispatches() {
     || !hostedApiText.includes("request('/api/ssh-files/list'")
     || !hostedApiText.includes("request('/api/ssh-files/stat'")
     || !hostedApiText.includes("request('/api/ssh-files/download'")
-    || !hostedApiText.includes("request('/api/ssh-files/upload'")) {
+    || !hostedApiText.includes("request('/api/ssh-files/upload'")
+    || !hostedApiText.includes("request('/api/ssh-files/delete'")) {
     fail('SwitchboardApi and hosted-api must expose structured sshFile provider methods.');
   }
 
@@ -1399,7 +1414,7 @@ function validateHostedDispatches() {
   if (remoteScpTargetBody.includes('shellQuote(remotePath)')) {
     fail('SCP transfer targets must not embed shellQuote(remotePath) into spawn argv; it becomes a literal remote filename.');
   }
-  for (const method of ['stat', 'download', 'upload']) {
+  for (const method of ['stat', 'download', 'upload', 'delete']) {
     if (!hostOperationsText.includes(`api.sshFile.${method}`)) {
       fail(`File Browser files mode must expose sshFile.${method} through the structured provider API.`);
     }
@@ -1409,10 +1424,15 @@ function validateHostedDispatches() {
     'data-testid="ssh-file-stat-action"',
     'data-testid="ssh-file-download-action"',
     'data-testid="ssh-file-upload-action"',
+    'data-testid="ssh-file-delete-action"',
     'data-selected-path',
     'data-stat-provider-route',
     'data-download-provider-route',
     'data-upload-provider-route',
+    'data-delete-provider-route',
+    'data-delete-status',
+    'data-delete-confirmation',
+    'data-delete-result-deleted',
     'data-transfer-direction',
     'data-transfer-status',
   ]) {
@@ -1427,6 +1447,9 @@ function validateHostedDispatches() {
     'require(\'node:fs\')',
     'require("node:fs")',
     'localStorage',
+    'rm -f',
+    'rm -rf',
+    'hostOperations.run({',
   ]) {
     if (hostOperationsText.includes(forbidden)) {
       fail(`File Browser SSH transfer UI must not use renderer filesystem or local persistence shortcut ${forbidden}.`);

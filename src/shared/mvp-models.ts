@@ -766,6 +766,13 @@ export interface SshFileTransferInput {
   timeoutMs?: number;
 }
 
+export interface SshFileDeleteInput {
+  hostId: string;
+  path: string;
+  recursive?: boolean;
+  timeoutMs?: number;
+}
+
 export interface SshFileEntry {
   name: string;
   path: string;
@@ -821,6 +828,22 @@ export interface SshFileTransferResult {
   status: SshExecStatus;
   error: string | null;
   direction: 'upload' | 'download';
+}
+
+export interface SshFileDeleteResult {
+  hostId: string;
+  path: string;
+  recursive: boolean;
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  status: SshExecStatus;
+  error: string | null;
+  deleted: boolean;
 }
 
 // ============================================================

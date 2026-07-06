@@ -38,6 +38,7 @@ import {
   validateOperatorProposeInput,
   validateSettingsUpdate,
   validateSshExecInput,
+  validateSshFileDeleteInput,
   validateSshFileListInput,
   validateSshFileStatInput,
   validateSshFileTransferInput,
@@ -87,6 +88,7 @@ import type {
   OperatorActionExecuteResult,
   OperatorProposeResult,
   SshExecResult,
+  SshFileDeleteResult,
   SshFileListResult,
   SshFileStatResult,
   SshFileTransferResult,
@@ -2195,6 +2197,21 @@ export class HostedServer {
       });
     }
 
+    if (action === 'delete') {
+      const validatedInput = validateSshFileDeleteInput(body);
+      return this.runHostedSshRoute({
+        contractId: 'hosted:POST:/api/ssh-files/delete',
+        session,
+        route: '/api/ssh-files/delete',
+        action: 'POST /api/ssh-files/delete',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.sshService.delete(validatedInput),
+        successAuditMetadata: sshFileDeleteRouteSuccessMetadata,
+      });
+    }
+
     throw new HttpError(404, `No hosted SSH file route for ${method}.`);
   }
 
@@ -2654,6 +2671,28 @@ function sshFileTransferRouteSuccessMetadata(result: SshFileTransferResult): Rec
     fileContentsLogged: false,
     secretsLogged: false,
   };
+}
+
+function sshFileDeleteRouteSuccessMetadata(result: SshFileDeleteResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    operation: 'delete',
+    recursive: result.recursive,
+    deleted: result.deleted,
+    pathHash: hashAuditPath(result.path),
+    pathLength: result.path.length,
+    remotePathLogged: false,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function hashAuditPath(path: string): string {
+  return createHash('sha256').update(path).digest('hex').slice(0, 16);
 }
 
 function terminalRouteSuccessMetadata(

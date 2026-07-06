@@ -949,6 +949,47 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:ssh-file:delete',
+    transport: 'ipc',
+    route: {
+      channel: 'ssh-file:delete',
+    },
+    requestValidator: 'validateSshFileDeleteInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host:file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'ssh_file.delete_route_completed',
+      entityType: 'host',
+      entityIdSource: 'input-host-id',
+      message: 'SSH file delete route completed.',
+      metadata: {
+        actionClass: 'ssh-file-route',
+        mutatingOperation: true,
+        operation: 'delete',
+        remotePathLogged: false,
+        commandTextLogged: false,
+        commandOutputLogged: false,
+        fileContentsLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/ssh-files/delete',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'ipc:terminal:start',
     transport: 'ipc',
     route: {
@@ -5291,6 +5332,48 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     parity: {
       kind: 'paired',
       peerRouteId: 'ipc:ssh-file:upload',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/ssh-files/delete',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/ssh-files/delete',
+    },
+    requestValidator: 'validateSshFileDeleteInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'host:file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'ssh_file.delete_route_completed',
+      entityType: 'host',
+      entityIdSource: 'input-host-id',
+      message: 'SSH file delete route completed.',
+      metadata: {
+        actionClass: 'ssh-file-route',
+        mutatingOperation: true,
+        operation: 'delete',
+        remotePathLogged: false,
+        commandTextLogged: false,
+        commandOutputLogged: false,
+        fileContentsLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:ssh-file:delete',
     },
     mutatesState: true,
   },

@@ -37,6 +37,7 @@ import type {
   OperatorProposalRisk,
   OperatorProposalSource,
   OperatorProposalStatus,
+  SshFileDeleteInput,
   SshFileListInput,
   SshFileStatInput,
   SshFileTransferInput,
@@ -175,6 +176,21 @@ export function validateSshFileTransferInput(value: unknown): SshFileTransferInp
     localPath: requireNonEmptyString(record.localPath, 'localPath'),
     remotePath: requireNonEmptyString(record.remotePath, 'remotePath'),
   };
+  if (record.timeoutMs !== undefined) {
+    input.timeoutMs = requireInteger(record.timeoutMs, 'timeoutMs', 1000, 120000);
+  }
+  return input;
+}
+
+export function validateSshFileDeleteInput(value: unknown): SshFileDeleteInput {
+  const record = requireRecord(value, 'SSH file delete input');
+  const input: SshFileDeleteInput = {
+    hostId: requireNonEmptyString(record.hostId, 'hostId'),
+    path: requireNonEmptyString(record.path, 'path'),
+  };
+  if (record.recursive !== undefined) {
+    input.recursive = requireBoolean(record.recursive, 'recursive');
+  }
   if (record.timeoutMs !== undefined) {
     input.timeoutMs = requireInteger(record.timeoutMs, 'timeoutMs', 1000, 120000);
   }

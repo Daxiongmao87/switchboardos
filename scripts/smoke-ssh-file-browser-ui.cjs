@@ -21,7 +21,8 @@ const electronUserDataDir = join(configDir, 'electron-user-data');
 const runId = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 const uploadSourcePath = join(tmpdir(), `switchboardos-file-browser-upload-source-${runId}.txt`);
 const downloadTargetPath = join(tmpdir(), `switchboardos-file-browser-download-${runId}.json`);
-const remoteUploadPath = `/tmp/switchboardos-file-browser-upload-target-${runId}.txt`;
+const remoteUploadDir = `/tmp/switchboardos-file-browser-upload-dir-${runId}`;
+const remoteUploadPath = `${remoteUploadDir}/target.txt`;
 
 writeFileSync(uploadSourcePath, `SwitchboardOS SSH file browser upload smoke ${runId}\n`, 'utf8');
 
@@ -172,7 +173,7 @@ async function browserSmoke(params) {
     const deadline = Date.now() + timeout;
     let snapshot = null;
     while (Date.now() < deadline) {
-      const value = predicate();
+      const value = await predicate();
       if (value) {
         return value;
       }
@@ -197,6 +198,10 @@ async function browserSmoke(params) {
             downloadStatus: panel?.getAttribute('data-download-status') || '',
             uploadRoute: panel?.getAttribute('data-upload-provider-route') || '',
             uploadStatus: panel?.getAttribute('data-upload-status') || '',
+            deleteRoute: panel?.getAttribute('data-delete-provider-route') || '',
+            deleteStatus: panel?.getAttribute('data-delete-status') || '',
+            deleteConfirmation: panel?.getAttribute('data-delete-confirmation') || '',
+            deleteResultDeleted: panel?.getAttribute('data-delete-result-deleted') || '',
             transferDirection: panel?.getAttribute('data-transfer-direction') || '',
             transferStatus: panel?.getAttribute('data-transfer-status') || '',
             actionText: (panel?.textContent || '').replace(/\s+/g, ' ').slice(0, 400),
@@ -283,6 +288,15 @@ async function browserSmoke(params) {
   });
 
   try {
+    const quotedUploadDir = `'${params.remoteUploadDir.replace(/'/g, `'\\''`)}'`;
+    const mkdirResult = await api.ssh.exec({
+      hostId: host.id,
+      command: `mkdir -p ${quotedUploadDir}`,
+    });
+    if (mkdirResult.status !== 'success') {
+      throw new Error(`Unable to create remote upload directory: ${mkdirResult.error || mkdirResult.stderr}`);
+    }
+
     click(document.querySelector('[data-testid="app-launcher-button"]'));
     const launcher = await waitFor(() => document.querySelector('[data-testid="app-launcher"]'), 'start menu');
     click(buttonByText(launcher, 'Host launcher'));
@@ -307,6 +321,7 @@ async function browserSmoke(params) {
     );
 
     await runFileList(runtime, params.remoteListPath);
+    const rowCountBeforeDelete = Number(runtime.getAttribute('data-row-count') || '0');
     const packageRow = await waitFor(
       () => [...runtime.querySelectorAll('tr[data-remote-path]')]
         .find((row) => row.getAttribute('data-remote-path') === params.remotePackagePath),
@@ -350,23 +365,72 @@ async function browserSmoke(params) {
       hostId: host.id,
       path: params.remoteUploadPath,
     });
+    const selectedPathBeforeDelete = actionPanel.getAttribute('data-selected-path') || '';
+
+    await runFileList(runtime, params.remoteUploadDir);
+    const uploadedRow = await waitFor(
+      () => [...runtime.querySelectorAll('tr[data-remote-path]')]
+        .find((row) => row.getAttribute('data-remote-path') === params.remoteUploadPath),
+      'uploaded file row',
+      30000,
+    );
+    click(uploadedRow);
+    const deletePanel = await waitFor(() => runtime.querySelector('[data-testid="ssh-file-actions"]'), 'SSH file delete action panel');
+    await waitFor(() => deletePanel.getAttribute('data-selected-path') === params.remoteUploadPath, 'uploaded file selected for delete');
+    click(deletePanel.querySelector('[data-testid="ssh-file-delete-action"]'));
+    await waitFor(() => deletePanel.getAttribute('data-delete-confirmation') === 'pending'
+      && (deletePanel.textContent || '').includes('Permanent delete pending'), 'delete confirmation pending', 30000);
+    click(deletePanel.querySelector('[data-testid="ssh-file-delete-action"]'));
+    await waitFor(() => deletePanel.getAttribute('data-delete-provider-route') === 'ssh-file:delete'
+      && deletePanel.getAttribute('data-delete-status') === 'success'
+      && deletePanel.getAttribute('data-delete-result-deleted') === 'true', 'ssh-file:delete success', 45000);
+
+    const deletedStat = await api.sshFile.stat({
+      hostId: host.id,
+      path: params.remoteUploadPath,
+    });
+    const auditEvents = await waitFor(async () => {
+      const events = await api.audit.list();
+      const routeAudit = events.find((event) => event.type === 'ssh_file.delete_route_completed'
+        && event.metadata?.contractId === 'ipc:ssh-file:delete');
+      const serviceAudit = events.find((event) => event.type === 'ssh.file_delete_succeeded'
+        && event.entityId === host.id);
+      return routeAudit && serviceAudit ? events : null;
+    }, 'delete route and service audit records', 30000);
+    const deleteRouteAudit = auditEvents.find((event) => event.type === 'ssh_file.delete_route_completed'
+      && event.metadata?.contractId === 'ipc:ssh-file:delete');
+    const deleteServiceAudit = auditEvents.find((event) => event.type === 'ssh.file_delete_succeeded'
+      && event.entityId === host.id);
+    const deleteAuditJson = JSON.stringify([deleteRouteAudit, deleteServiceAudit]);
 
     return {
       hostId: host.id,
       providerRoute: runtime.getAttribute('data-provider-route') || '',
-      selectedPath: actionPanel.getAttribute('data-selected-path') || '',
+      selectedPath: selectedPathBeforeDelete,
+      selectedPathAfterDelete: deletePanel.getAttribute('data-selected-path') || '',
       statRoute: transferStatusBeforeRelist.statRoute,
       statStatus: transferStatusBeforeRelist.statStatus,
       downloadRoute: transferStatusBeforeRelist.downloadRoute,
       uploadRoute: transferStatusBeforeRelist.uploadRoute,
+      deleteRoute: deletePanel.getAttribute('data-delete-provider-route') || '',
+      deleteStatus: deletePanel.getAttribute('data-delete-status') || '',
+      deleteResultDeleted: deletePanel.getAttribute('data-delete-result-deleted') || '',
       uploadedStatStatus: uploadedStat.status,
       uploadedStatPath: uploadedStat.entry?.path || '',
+      deletedStatStatus: deletedStat.status,
+      deletedStatEntryFound: Boolean(deletedStat.entry),
+      deleteRouteAuditPresent: Boolean(deleteRouteAudit),
+      deleteServiceAuditPresent: Boolean(deleteServiceAudit),
+      deleteAuditRemotePathLogged: deleteRouteAudit?.metadata?.remotePathLogged,
+      deleteAuditPathHashType: typeof deleteRouteAudit?.metadata?.pathHash,
+      deleteAuditIncludesRemotePath: deleteAuditJson.includes(params.remoteUploadPath),
       transferStatusBeforeRelist,
-      actionText: actionPanel.textContent || '',
-      rowCount: Number(runtime.getAttribute('data-row-count') || '0'),
+      actionText: deletePanel.textContent || '',
+      rowCount: rowCountBeforeDelete,
       fileWindowTitle: fileWindow.querySelector('.window-title')?.textContent?.trim() || '',
     };
   } finally {
+    await api.sshFile.delete({ hostId: host.id, path: params.remoteUploadDir, recursive: true }).catch(() => null);
     await api.host.remove(host.id).catch(() => false);
   }
 }
@@ -386,6 +450,7 @@ async function main() {
       uploadSourcePath,
       downloadTargetPath,
       remoteUploadPath,
+      remoteUploadDir,
     })})`);
 
     assert.equal(report.providerRoute, 'ssh-file:list', 'File Browser uses ssh-file:list route marker');
@@ -394,12 +459,24 @@ async function main() {
     assert.equal(report.statStatus, 'success', 'File Browser stat action succeeded');
     assert.equal(report.downloadRoute, 'ssh-file:download', 'File Browser download action used ssh-file:download route');
     assert.equal(report.uploadRoute, 'ssh-file:upload', 'File Browser upload action used ssh-file:upload route');
+    assert.equal(report.deleteRoute, 'ssh-file:delete', 'File Browser delete action used ssh-file:delete route');
+    assert.equal(report.deleteStatus, 'success', 'File Browser delete action succeeded');
+    assert.equal(report.deleteResultDeleted, 'true', 'File Browser delete result reports deleted');
     assert.equal(report.transferStatusBeforeRelist.downloadStatus, 'success', 'File Browser download action succeeded');
     assert.equal(report.transferStatusBeforeRelist.uploadStatus, 'success', 'File Browser upload action succeeded');
     assert.equal(report.transferStatusBeforeRelist.transferDirection, 'upload', 'last File Browser transfer direction is upload');
     assert.equal(report.transferStatusBeforeRelist.transferStatus, 'success', 'last File Browser transfer status is success');
     assert.equal(report.uploadedStatStatus, 'success', 'uploaded file exists after File Browser upload');
     assert.equal(report.uploadedStatPath, remoteUploadPath, 'uploaded file stat returns the uploaded remote path');
+    assert.equal(report.deletedStatStatus, 'failed', 'deleted file stat fails after File Browser delete');
+    assert.equal(report.deletedStatEntryFound, false, 'deleted file stat has no entry');
+    assert.equal(report.selectedPathAfterDelete, '', 'File Browser clears selected object after delete');
+    assert.equal(report.actionText.includes('Deleted'), true, 'File Browser shows object-local delete status');
+    assert.equal(report.deleteRouteAuditPresent, true, 'delete route audit is present');
+    assert.equal(report.deleteServiceAuditPresent, true, 'delete service audit is present');
+    assert.equal(report.deleteAuditRemotePathLogged, false, 'delete route audit marks remote path as not logged');
+    assert.equal(report.deleteAuditPathHashType, 'string', 'delete route audit records a path hash');
+    assert.equal(report.deleteAuditIncludesRemotePath, false, 'delete audit does not include the remote target path');
     assert.ok(report.rowCount > 0, 'File Browser listing has visible rows');
     assert.equal(existsSync(downloadTargetPath), true, 'download target exists on local filesystem after backend download');
     assert.equal(readFileSync(downloadTargetPath, 'utf8').includes('"scripts"'), true, 'download target contains package.json content');
@@ -410,6 +487,7 @@ async function main() {
       downloadTargetPath,
       uploadSourcePath,
       remoteUploadPath,
+      remoteUploadDir,
     }, null, 2));
   } finally {
     cdp.close();

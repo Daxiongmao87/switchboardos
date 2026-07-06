@@ -4,6 +4,7 @@ import type {
   HostOperationKind,
   HostOperationResult,
   HostRecord,
+  SshFileDeleteResult,
   SshFileEntry,
   SshFileListResult,
   SshFileStatResult,
@@ -125,6 +126,10 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
           [attr.data-download-status]="fileDownloadResult?.status || ''"
           [attr.data-upload-provider-route]="fileUploadResult ? 'ssh-file:upload' : ''"
           [attr.data-upload-status]="fileUploadResult?.status || ''"
+          [attr.data-delete-provider-route]="fileDeleteResult ? 'ssh-file:delete' : ''"
+          [attr.data-delete-status]="fileDeleteResult?.status || ''"
+          [attr.data-delete-confirmation]="deleteConfirmationPending ? 'pending' : ''"
+          [attr.data-delete-result-deleted]="fileDeleteResult?.deleted === true ? 'true' : ''"
           [attr.data-transfer-direction]="lastTransferDirection"
           [attr.data-transfer-status]="lastTransferStatus"
         >
@@ -132,6 +137,9 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
             <div>
               <h3>Selected remote object</h3>
               <p data-testid="ssh-file-selected-path">{{ selectedFilePath || 'Select a row to inspect or transfer.' }}</p>
+              <p *ngIf="selectedFileEntry" class="file-object-kind" data-testid="ssh-file-selected-kind">
+                {{ selectedFileEntry.type === 'directory' ? 'Folder' : 'File' }} action target.
+              </p>
             </div>
             <button
               type="button"
@@ -141,6 +149,15 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
               [disabled]="isFileActionRunning || !selectedFilePath || !selectedHostId"
             >
               Get info
+            </button>
+            <button
+              type="button"
+              class="danger-action"
+              data-testid="ssh-file-delete-action"
+              (click)="deleteSelectedFile()"
+              [disabled]="isFileActionRunning || !selectedFilePath || !selectedHostId"
+            >
+              {{ deleteConfirmationPending ? 'Confirm permanent delete' : 'Delete' }}
             </button>
           </header>
 
@@ -318,6 +335,12 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
       background: #315fd1;
     }
 
+    .danger-action {
+      border-color: #b94a55;
+      background: #5c1f2a;
+      color: #ffd9de;
+    }
+
     .operation-result {
       display: grid;
       grid-template-rows: auto 1fr auto auto;
@@ -397,6 +420,10 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
       line-height: 1.45;
     }
 
+    .file-actions .file-object-kind {
+      color: #cbd6e7;
+    }
+
     details {
       border-top: 1px solid #2c3546;
       padding: 10px 12px;
@@ -442,9 +469,11 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   fileStatResult: SshFileStatResult | null = null;
   fileDownloadResult: SshFileTransferResult | null = null;
   fileUploadResult: SshFileTransferResult | null = null;
+  fileDeleteResult: SshFileDeleteResult | null = null;
   fileActionMessage = '';
   fileActionError = '';
   isFileActionRunning = false;
+  pendingDeletePath = '';
   downloadLocalPath = '/tmp/switchboardos-file-browser-download';
   uploadLocalPath = '';
   uploadRemotePath = '/tmp/switchboardos-file-browser-upload';
@@ -486,6 +515,10 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   get lastTransferStatus(): string {
     return this.fileUploadResult?.status || this.fileDownloadResult?.status || '';
+  }
+
+  get deleteConfirmationPending(): boolean {
+    return Boolean(this.selectedFilePath && this.pendingDeletePath === this.selectedFilePath);
   }
 
   ngOnInit(): void {
@@ -572,7 +605,8 @@ export class HostOperationsComponent implements OnInit, OnChanges {
       return;
     }
     const name = this.rowText(row, 'name') || this.fileNameFromPath(remotePath);
-    const type = this.rowText(row, 'type') === 'directory' ? 'directory' : 'file';
+    const rawType = this.rowText(row, 'type');
+    const type = this.normalizedFileType(rawType);
     this.selectedFileEntry = {
       name,
       path: remotePath,
@@ -586,6 +620,8 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.fileStatResult = null;
     this.fileDownloadResult = null;
     this.fileUploadResult = null;
+    this.fileDeleteResult = null;
+    this.pendingDeletePath = '';
     this.fileActionMessage = '';
     this.fileActionError = '';
     this.lastTransferDirection = '';
@@ -676,6 +712,48 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     }
   }
 
+  async deleteSelectedFile(): Promise<void> {
+    const api = getSwitchboardApi();
+    if (!api || !this.selectedHostId || !this.selectedFilePath) {
+      this.fileActionError = 'Select a remote file or folder before deleting.';
+      return;
+    }
+
+    const targetPath = this.selectedFilePath;
+    const recursive = this.selectedFileEntry?.type === 'directory';
+    if (this.pendingDeletePath !== targetPath) {
+      this.fileDeleteResult = null;
+      this.pendingDeletePath = targetPath;
+      this.fileActionError = '';
+      this.fileActionMessage = recursive
+        ? `Permanent delete pending for folder ${targetPath}. Confirm permanent delete to remove this folder and its contents. This cannot be undone in SwitchboardOS.`
+        : `Permanent delete pending for file ${targetPath}. Confirm permanent delete to remove it. This cannot be undone in SwitchboardOS.`;
+      return;
+    }
+
+    this.isFileActionRunning = true;
+    this.fileActionError = '';
+    this.fileActionMessage = `Deleting ${targetPath} through the SSH file provider.`;
+    try {
+      this.fileDeleteResult = await api.sshFile.delete({
+        hostId: this.selectedHostId,
+        path: targetPath,
+        recursive,
+      });
+      if (this.fileDeleteResult.status === 'success') {
+        await this.refreshFileListAfterMutation(targetPath);
+        this.fileActionMessage = `Deleted ${targetPath}. The file list was refreshed.`;
+      } else {
+        this.fileActionMessage = `Delete failed for ${targetPath}. The object is still selected for retry.`;
+      }
+    } catch (error) {
+      this.fileActionError = this.errorText(error, 'Unable to delete remote file.');
+    } finally {
+      this.pendingDeletePath = '';
+      this.isFileActionRunning = false;
+    }
+  }
+
   private applyHostContext(): void {
     if (this.hostContextId) {
       this.selectedHostId = this.hostContextId;
@@ -726,8 +804,10 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.fileStatResult = null;
     this.fileDownloadResult = null;
     this.fileUploadResult = null;
+    this.fileDeleteResult = null;
     this.fileActionMessage = '';
     this.fileActionError = '';
+    this.pendingDeletePath = '';
     this.lastTransferDirection = '';
   }
 
@@ -735,6 +815,24 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.selectedFileEntry = null;
     this.downloadLocalPath = '/tmp/switchboardos-file-browser-download';
     this.uploadRemotePath = this.joinRemotePath(this.path || '.', 'switchboardos-upload.txt');
+    this.pendingDeletePath = '';
+  }
+
+  private async refreshFileListAfterMutation(deletedPath: string): Promise<void> {
+    const api = getSwitchboardApi();
+    if (!api || !this.selectedHostId) {
+      return;
+    }
+    const fileResult = await api.sshFile.list({
+      hostId: this.selectedHostId,
+      path: this.path || '.',
+      limit: this.limit,
+    });
+    this.result = this.mapSshFileListResult(fileResult);
+    this.statusMessage = this.result.summary;
+    if (this.selectedFilePath === deletedPath) {
+      this.clearFileSelection();
+    }
   }
 
   private rowText(row: Record<string, string | number | boolean | null>, key: string): string {
@@ -745,6 +843,13 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   private rowNumber(row: Record<string, string | number | boolean | null>, key: string): number | null {
     const value = Number(row[key]);
     return Number.isFinite(value) ? value : null;
+  }
+
+  private normalizedFileType(value: string): SshFileEntry['type'] {
+    if (value === 'file' || value === 'directory' || value === 'symlink' || value === 'other' || value === 'unknown') {
+      return value;
+    }
+    return 'unknown';
   }
 
   private fileNameFromPath(remotePath: string): string {
