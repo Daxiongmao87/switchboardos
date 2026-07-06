@@ -259,10 +259,12 @@ Core requirements:
 - Do not expose raw SSH credentials, OS keychain access, or arbitrary host command execution directly to browser code.
 - Use typed request/response contracts equivalent to desktop IPC contracts.
 - Support a configurable bind address and port, defaulting to localhost.
-- Require authentication for browser sessions, especially for LAN or remote binding.
-- Apply CSRF, session timeout, and rate-limit protections where relevant.
+- MVP test/LAN browser access does not require access-token login. Session auth
+  is an explicit opt-in backend mode, not the default test workflow.
+- Apply CSRF, session timeout, and rate-limit protections when session auth is
+  explicitly enabled.
 - Support TLS directly or document reverse-proxy deployment for non-local access.
-- Record hosted-mode login, privileged action, approval, and failure events in the audit log.
+- Record hosted-mode auth, privileged action, approval, and failure events in the audit log.
 
 This mode is not the same as browser-only direct SSH. Browser clients should operate through the SwitchboardOS backend, which remains the privileged execution boundary.
 
@@ -1112,12 +1114,11 @@ Do not log raw secrets.
 
 ### 15.6 Hosted web mode security
 
-Hosted web mode increases the blast radius because browser clients can reach SwitchboardOS through a network port. It should therefore be secure by default:
+Hosted web mode increases the blast radius because browser clients can reach SwitchboardOS through a network port. Its MVP test posture keeps the LAN workflow usable while preserving backend ownership, typed route contracts, policy enforcement, and audit:
 
 - Bind to localhost unless the user explicitly enables LAN or remote access.
-- Require login for all browser access.
-- Use short-lived sessions with explicit logout and idle timeout.
-- Enforce CSRF protection for state-changing requests.
+- Do not require access-token login for MVP test/LAN access.
+- Keep session login, short-lived sessions, explicit logout, idle timeout, CSRF, and rate limiting as an explicit opt-in hosted-auth mode.
 - Require capability and policy checks for every privileged API call.
 - Treat browser clients as untrusted UI surfaces.
 - Warn clearly before exposing the service beyond localhost.

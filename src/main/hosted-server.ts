@@ -419,10 +419,11 @@ export class HostedServer {
     const method = request.method ?? 'GET';
     if (url.pathname === '/api/auth/session' && method === 'GET') {
       const session = this.getSessionFromRequest(request);
+      const loginRequired = this.options.auth.required;
       this.sendJson(response, 200, {
-        loginRequired: this.options.auth.required,
-        authenticated: Boolean(session),
-        expiresAt: session ? new Date(session.expiresAt).toISOString() : null,
+        loginRequired,
+        authenticated: loginRequired ? Boolean(session) : true,
+        expiresAt: loginRequired && session ? new Date(session.expiresAt).toISOString() : null,
       });
       return;
     }
@@ -511,7 +512,10 @@ export class HostedServer {
       response.end();
       return;
     }
-    this.sendJson(response, 200, { authenticated: false, loginRequired: this.options.auth.required });
+    this.sendJson(response, 200, {
+      authenticated: !this.options.auth.required,
+      loginRequired: this.options.auth.required,
+    });
   }
 
   private requireHostedSession(

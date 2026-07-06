@@ -20,6 +20,9 @@ const switchboardApiText = read('src/renderer/app/switchboard-api.ts');
 const hostedApiText = read('src/renderer/app/hosted-api.ts');
 const hostOperationsText = read('src/renderer/app/host-operations/host-operations.component.ts');
 const sshServiceText = read('src/main/ssh-service.ts');
+const hostedNoAuthSmokeText = read('scripts/smoke-hosted-no-auth.cjs');
+const readmeText = read('README.md');
+const designDocText = read('docs/spec/switchboardos-design-doc.md');
 
 const REQUIRED_HOST_CONTRACTS = [
   {
@@ -1662,6 +1665,37 @@ function validatePolicyCapabilities() {
   }
 }
 
+function validateHostedNoAuthDefaults() {
+  if (mainText.includes('const authRequired = !authDisabled || !isLocalHostedHost(host);')) {
+    fail('Hosted LAN/test mode must not force access-token auth by default.');
+  }
+
+  if (!mainText.includes('const authRequired = HOSTED_ENABLED_VALUES.has(authFlag);')) {
+    fail('Hosted auth must be explicit opt-in through SWITCHBOARDOS_HOSTED_AUTH_REQUIRED.');
+  }
+
+  if (!mainText.includes('SwitchboardOS hosted auth: disabled for MVP testing; no access token required.')) {
+    fail('Hosted startup log must state no-token MVP testing mode when auth is disabled.');
+  }
+
+  if (!hostedText.includes('authenticated: loginRequired ? Boolean(session) : true')) {
+    fail('/api/auth/session must report authenticated true when hosted auth is disabled.');
+  }
+
+  if (!hostedNoAuthSmokeText.includes('required: false')
+    || !hostedNoAuthSmokeText.includes('state-changing hosted API succeeds without token, session cookie, or CSRF header')) {
+    fail('Hosted no-auth smoke must prove token-free state-changing hosted API behavior.');
+  }
+
+  if (readmeText.includes('After token login, `/api/auth/session` returns `authenticated: true`.')) {
+    fail('README LAN availability gate must not require token login for MVP testing.');
+  }
+
+  if (!designDocText.includes('MVP test/LAN browser access does not require access-token login')) {
+    fail('Design spec must document no-token MVP test/LAN hosted access.');
+  }
+}
+
 const contracts = parseContractsFromSource();
 const contractIds = validateContractMetadata(contracts);
 const requiredContractIds = new Set(REQUIRED_HOST_CONTRACTS.map((entry) => entry.id));
@@ -1674,6 +1708,7 @@ for (const required of requiredContractIds) {
 validatePolicyCapabilities();
 validateIpcHostHandlers();
 validateHostedDispatches();
+validateHostedNoAuthDefaults();
 
 if (contractIds.size === 0) {
   fail('No host route contracts parsed from route-access-contracts.ts.');

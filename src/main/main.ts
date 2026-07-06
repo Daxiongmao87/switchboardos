@@ -290,9 +290,10 @@ function getHostedConfig(): HostedConfig {
     : HOSTED_DEFAULT_PORT;
   const tokenFromEnv = process.env.SWITCHBOARDOS_HOSTED_AUTH_TOKEN?.trim() || null;
   const authFlag = (process.env.SWITCHBOARDOS_HOSTED_AUTH_REQUIRED ?? '').toLowerCase();
-  const authDisabled = HOSTED_DISABLED_VALUES.has(authFlag);
-  const authRequired = !authDisabled || !isLocalHostedHost(host);
-  const authToken = tokenFromEnv ?? (authRequired ? randomBytes(24).toString('base64url') : null);
+  const authRequired = HOSTED_ENABLED_VALUES.has(authFlag);
+  const authToken = authRequired
+    ? tokenFromEnv ?? randomBytes(24).toString('base64url')
+    : null;
   const sessionMinutesRaw = Number(process.env.SWITCHBOARDOS_HOSTED_SESSION_IDLE_MINUTES ?? '');
   const sessionMinutes = Number.isFinite(sessionMinutesRaw) && sessionMinutesRaw > 0
     ? sessionMinutesRaw
@@ -322,9 +323,9 @@ function buildHostedAppInfo(config: HostedConfig): HostedServerAppInfo {
     hostedSecurity: {
       authRequired: config.authRequired,
       lanEnabled: config.lanEnabled,
-      tlsGuidance: config.lanEnabled || !isLocalHostedHost(config.host)
-        ? 'Non-local hosted access should be placed behind TLS or a trusted reverse proxy.'
-        : 'Localhost hosted access uses token login, session cookies, and CSRF checks.',
+      tlsGuidance: config.authRequired
+        ? 'Hosted auth is explicitly enabled; use TLS or a trusted reverse proxy for non-local access.'
+        : 'MVP hosted test access uses no access token; bind only on trusted test networks.',
     },
   };
 }
@@ -386,6 +387,8 @@ async function startHostedServer(config: HostedConfig): Promise<void> {
       if (config.authTokenGenerated && config.authToken) {
         console.log(`SwitchboardOS hosted login token: ${config.authToken}`);
       }
+    } else {
+      console.log('SwitchboardOS hosted auth: disabled for MVP testing; no access token required.');
     }
     if (!isLocalHostedHost(config.host)) {
       console.warn('SwitchboardOS hosted LAN mode is enabled. Keep this on a trusted network and prefer TLS or a reverse proxy for non-local access.');

@@ -25,7 +25,7 @@ automating approved actions.
 - **Electron** — Desktop runtime (privileged host operations, SSH transport,
   local filesystem access, OS keychain, IPC boundaries)
 - **Hosted web mode** — Optional local/LAN web server for browser access through
-  a configurable port and authenticated backend API
+  a configurable port and backend-owned API surfaces
 - **Angular + TypeScript** — Application shell and app platform
 - **xterm.js** — Terminal rendering
 - **Monaco Editor** — Built-in code editing
@@ -35,7 +35,9 @@ automating approved actions.
 
 The Electron main process owns privileged operations in desktop mode. In hosted
 web mode, an equivalent SwitchboardOS backend owns those operations and serves
-browser clients over authenticated HTTP/WebSocket APIs on a configurable port.
+browser clients over HTTP/WebSocket APIs on a configurable port. MVP test/LAN
+mode does not require access-token login; session auth remains an explicit
+opt-in backend mode.
 Renderers communicate via typed IPC or typed web APIs through narrow boundaries.
 Every app exposes structured state and actions for agent/automation consumption.
 
@@ -133,20 +135,22 @@ build.
 After each validated commit that refreshes the hosted product path, keep the
 latest committed build reachable on the LAN unless a concrete blocker is
 recorded. The active daemon must be identified by tmux session name, port, LAN
-URL, and hosted token location or value.
+URL, and authentication mode.
 
 The availability check must verify:
 
 - A listener on `0.0.0.0:<port>`.
-- `GET /api/auth/session` on the LAN URL returns HTTP 200.
-- The hosted login page or authenticated app shell returns HTTP 200.
-- After token login, `/api/auth/session` returns `authenticated: true`.
+- `GET /` on the LAN URL returns the hosted app shell without token login.
+- `GET /api/auth/session` on the LAN URL returns HTTP 200 with
+  `loginRequired: false` and `authenticated: true` in MVP test mode.
 - The hosted `main.js` bundle returns HTTP 200.
+- A state-changing hosted API smoke succeeds without access-token, session
+  cookie, or CSRF headers while policy and audit enforcement remain active.
 
 If the latest hosted daemon is down and no newer validation daemon is already
 running, start a new daemon for the latest committed build without stopping
 unrelated services. Record the exact tmux session, command environment, port,
-LAN URL, token, and verification results in the task report.
+LAN URL, authentication mode, and verification results in the task report.
 
 ## License
 
