@@ -151,6 +151,11 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:ssh-file:move',
+    routeMarker: "'ssh-file:move'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:terminal:start',
     routeMarker: "'terminal:start'",
     contextFile: 'src/main/main.ts',
@@ -571,6 +576,10 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:POST:/api/ssh-files/delete',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/ssh-files/move',
     contextFile: 'src/main/hosted-server.ts',
   },
   {
@@ -1336,7 +1345,8 @@ function validateHostedDispatches() {
     || hostedText.includes('this.options.sshService.stat(validateSshFileStatInput(body))')
     || hostedText.includes('this.options.sshService.download(validateSshFileTransferInput(body))')
     || hostedText.includes('this.options.sshService.upload(validateSshFileTransferInput(body))')
-    || hostedText.includes('this.options.sshService.delete(validateSshFileDeleteInput(body))')) {
+    || hostedText.includes('this.options.sshService.delete(validateSshFileDeleteInput(body))')
+    || hostedText.includes('this.options.sshService.move(validateSshFileMoveInput(body))')) {
     fail('Direct hosted SSH file fallback detected in hosted-server.ts. SSH file provider routes must execute through runHostRouteContract.');
   }
 
@@ -1353,7 +1363,8 @@ function validateHostedDispatches() {
     || mainText.includes("ipcMain.handle('ssh-file:stat', async (_event, input) => sshService.stat")
     || mainText.includes("ipcMain.handle('ssh-file:download', async (_event, input) => sshService.download")
     || mainText.includes("ipcMain.handle('ssh-file:upload', async (_event, input) => sshService.upload")
-    || mainText.includes("ipcMain.handle('ssh-file:delete', async (_event, input) => sshService.delete")) {
+    || mainText.includes("ipcMain.handle('ssh-file:delete', async (_event, input) => sshService.delete")
+    || mainText.includes("ipcMain.handle('ssh-file:move', async (_event, input) => sshService.move")) {
     fail('Direct IPC SSH file fallback detected in main.ts. SSH file routes must execute through runHostRouteContract.');
   }
 
@@ -1365,15 +1376,17 @@ function validateHostedDispatches() {
     || !mainText.includes("ipcMain.handle('ssh-file:stat'")
     || !mainText.includes("ipcMain.handle('ssh-file:download'")
     || !mainText.includes("ipcMain.handle('ssh-file:upload'")
-    || !mainText.includes("ipcMain.handle('ssh-file:delete'")) {
-    fail('IPC SSH file provider handlers for list/stat/download/upload/delete are missing.');
+    || !mainText.includes("ipcMain.handle('ssh-file:delete'")
+    || !mainText.includes("ipcMain.handle('ssh-file:move'")) {
+    fail('IPC SSH file provider handlers for list/stat/download/upload/delete/move are missing.');
   }
 
   if (!hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/list'")
     || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/stat'")
     || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/download'")
     || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/upload'")
-    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/delete'")) {
+    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/delete'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/move'")) {
     fail('Hosted SSH file provider routes must reference all route contracts.');
   }
 
@@ -1382,8 +1395,9 @@ function validateHostedDispatches() {
     || !preloadText.includes("invoke('ssh-file:stat'")
     || !preloadText.includes("invoke('ssh-file:download'")
     || !preloadText.includes("invoke('ssh-file:upload'")
-    || !preloadText.includes("invoke('ssh-file:delete'")) {
-    fail('Preload API must expose sshFile list/stat/download/upload/delete IPC routes.');
+    || !preloadText.includes("invoke('ssh-file:delete'")
+    || !preloadText.includes("invoke('ssh-file:move'")) {
+    fail('Preload API must expose sshFile list/stat/download/upload/delete/move IPC routes.');
   }
 
   if (!switchboardApiText.includes('sshFile: {')
@@ -1392,7 +1406,8 @@ function validateHostedDispatches() {
     || !hostedApiText.includes("request('/api/ssh-files/stat'")
     || !hostedApiText.includes("request('/api/ssh-files/download'")
     || !hostedApiText.includes("request('/api/ssh-files/upload'")
-    || !hostedApiText.includes("request('/api/ssh-files/delete'")) {
+    || !hostedApiText.includes("request('/api/ssh-files/delete'")
+    || !hostedApiText.includes("request('/api/ssh-files/move'")) {
     fail('SwitchboardApi and hosted-api must expose structured sshFile provider methods.');
   }
 
@@ -1414,7 +1429,7 @@ function validateHostedDispatches() {
   if (remoteScpTargetBody.includes('shellQuote(remotePath)')) {
     fail('SCP transfer targets must not embed shellQuote(remotePath) into spawn argv; it becomes a literal remote filename.');
   }
-  for (const method of ['stat', 'download', 'upload', 'delete']) {
+  for (const method of ['stat', 'download', 'upload', 'delete', 'move']) {
     if (!hostOperationsText.includes(`api.sshFile.${method}`)) {
       fail(`File Browser files mode must expose sshFile.${method} through the structured provider API.`);
     }
@@ -1425,14 +1440,20 @@ function validateHostedDispatches() {
     'data-testid="ssh-file-download-action"',
     'data-testid="ssh-file-upload-action"',
     'data-testid="ssh-file-delete-action"',
+    'data-testid="ssh-file-move-action"',
+    'data-testid="ssh-file-move-target-path"',
     'data-selected-path',
     'data-stat-provider-route',
     'data-download-provider-route',
     'data-upload-provider-route',
     'data-delete-provider-route',
+    'data-move-provider-route',
     'data-delete-status',
+    'data-move-status',
     'data-delete-confirmation',
     'data-delete-result-deleted',
+    'data-move-result-moved',
+    'data-move-target-path',
     'data-transfer-direction',
     'data-transfer-status',
   ]) {
@@ -1449,6 +1470,7 @@ function validateHostedDispatches() {
     'localStorage',
     'rm -f',
     'rm -rf',
+    'mv --',
     'hostOperations.run({',
   ]) {
     if (hostOperationsText.includes(forbidden)) {

@@ -990,6 +990,48 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:ssh-file:move',
+    transport: 'ipc',
+    route: {
+      channel: 'ssh-file:move',
+    },
+    requestValidator: 'validateSshFileMoveInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'host:file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'ssh_file.move_route_completed',
+      entityType: 'host',
+      entityIdSource: 'input-host-id',
+      message: 'SSH file move route completed.',
+      metadata: {
+        actionClass: 'ssh-file-route',
+        mutatingOperation: true,
+        operation: 'move',
+        sourcePathLogged: false,
+        targetPathLogged: false,
+        commandTextLogged: false,
+        commandOutputLogged: false,
+        fileContentsLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:POST:/api/ssh-files/move',
+    },
+    mutatesState: true,
+  },
+  {
     id: 'ipc:terminal:start',
     transport: 'ipc',
     route: {
@@ -5374,6 +5416,49 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     parity: {
       kind: 'paired',
       peerRouteId: 'ipc:ssh-file:delete',
+    },
+    mutatesState: true,
+  },
+  {
+    id: 'hosted:POST:/api/ssh-files/move',
+    transport: 'hosted',
+    route: {
+      method: 'POST',
+      path: '/api/ssh-files/move',
+    },
+    requestValidator: 'validateSshFileMoveInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'host:file:write',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: true,
+      eventType: 'ssh_file.move_route_completed',
+      entityType: 'host',
+      entityIdSource: 'input-host-id',
+      message: 'SSH file move route completed.',
+      metadata: {
+        actionClass: 'ssh-file-route',
+        mutatingOperation: true,
+        operation: 'move',
+        sourcePathLogged: false,
+        targetPathLogged: false,
+        commandTextLogged: false,
+        commandOutputLogged: false,
+        fileContentsLogged: false,
+        secretsLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:ssh-file:move',
     },
     mutatesState: true,
   },

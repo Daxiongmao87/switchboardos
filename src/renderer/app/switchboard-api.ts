@@ -38,6 +38,8 @@ import type {
   SshFileDeleteResult,
   SshFileListInput,
   SshFileListResult,
+  SshFileMoveInput,
+  SshFileMoveResult,
   SshFileStatInput,
   SshFileStatResult,
   SshFileTransferInput,
@@ -229,6 +231,7 @@ export interface SwitchboardApi {
     download: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
     upload: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
     delete: (input: SshFileDeleteInput) => Promise<SshFileDeleteResult>;
+    move: (input: SshFileMoveInput) => Promise<SshFileMoveResult>;
   };
 }
 

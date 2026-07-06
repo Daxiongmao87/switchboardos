@@ -773,6 +773,14 @@ export interface SshFileDeleteInput {
   timeoutMs?: number;
 }
 
+export interface SshFileMoveInput {
+  hostId: string;
+  sourcePath: string;
+  targetPath: string;
+  overwrite?: boolean;
+  timeoutMs?: number;
+}
+
 export interface SshFileEntry {
   name: string;
   path: string;
@@ -844,6 +852,23 @@ export interface SshFileDeleteResult {
   status: SshExecStatus;
   error: string | null;
   deleted: boolean;
+}
+
+export interface SshFileMoveResult {
+  hostId: string;
+  sourcePath: string;
+  targetPath: string;
+  overwrite: boolean;
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  status: SshExecStatus;
+  error: string | null;
+  moved: boolean;
 }
 
 // ============================================================

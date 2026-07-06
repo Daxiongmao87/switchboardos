@@ -16,6 +16,8 @@ import type {
   SshFileEntry,
   SshFileListInput,
   SshFileListResult,
+  SshFileMoveInput,
+  SshFileMoveResult,
   SshFileStatInput,
   SshFileStatResult,
   SshFileTransferInput,
@@ -44,6 +46,7 @@ export interface SshProvider {
   upload(input: SshProviderFileTransferInput): Promise<SshFileTransferResult>;
   download(input: SshProviderFileTransferInput): Promise<SshFileTransferResult>;
   delete(input: SshProviderFileDeleteInput): Promise<SshFileDeleteResult>;
+  move(input: SshProviderFileMoveInput): Promise<SshFileMoveResult>;
 }
 
 export interface SshProviderFileListInput {
@@ -70,6 +73,14 @@ export interface SshProviderFileDeleteInput {
   host: HostRecord;
   path: string;
   recursive: boolean;
+  timeoutMs: number;
+}
+
+export interface SshProviderFileMoveInput {
+  host: HostRecord;
+  sourcePath: string;
+  targetPath: string;
+  overwrite: boolean;
   timeoutMs: number;
 }
 
@@ -304,6 +315,65 @@ export class SystemSshProvider implements SshProvider {
     return fileDeleteBase(input.host.id, input.path, input.recursive, command, execResult);
   }
 
+  async move(input: SshProviderFileMoveInput): Promise<SshFileMoveResult> {
+    const command = `move ${input.sourcePath} -> ${input.targetPath}`;
+    const script = [
+      'set -eu',
+      `source_path=${shellQuote(input.sourcePath)}`,
+      `target_path=${shellQuote(input.targetPath)}`,
+      'if [ "$source_path" = "/" ]; then',
+      '  echo "refusing to move filesystem root" >&2',
+      '  exit 4',
+      'fi',
+      'if [ "$source_path" = "$target_path" ]; then',
+      '  echo "source and target paths are the same" >&2',
+      '  exit 5',
+      'fi',
+      'if [ ! -e "$source_path" ] && [ ! -L "$source_path" ]; then',
+      '  echo "source does not exist" >&2',
+      '  exit 2',
+      'fi',
+      'target_parent="$(dirname -- "$target_path")"',
+      'if [ ! -d "$target_parent" ]; then',
+      '  echo "target parent does not exist" >&2',
+      '  exit 6',
+      'fi',
+      input.overwrite
+        ? [
+          'if [ -e "$target_path" ] || [ -L "$target_path" ]; then',
+          '  if [ -d "$target_path" ] && [ ! -L "$target_path" ]; then',
+          '    echo "refusing to overwrite existing directory" >&2',
+          '    exit 9',
+          '  fi',
+          'fi',
+          'mv -f -- "$source_path" "$target_path"',
+        ].join('\n')
+        : [
+          'if [ -e "$target_path" ] || [ -L "$target_path" ]; then',
+          '  echo "target already exists; overwrite is disabled" >&2',
+          '  exit 3',
+          'fi',
+          'mv -- "$source_path" "$target_path"',
+        ].join('\n'),
+      'if [ -e "$source_path" ] || [ -L "$source_path" ]; then',
+      '  echo "source still exists after move" >&2',
+      '  exit 7',
+      'fi',
+      'if [ ! -e "$target_path" ] && [ ! -L "$target_path" ]; then',
+      '  echo "target missing after move" >&2',
+      '  exit 8',
+      'fi',
+      'printf "moved=true\\n"',
+    ].join('\n');
+    const execResult = await this.exec({
+      host: input.host,
+      command,
+      remoteCommand: script,
+      timeoutMs: input.timeoutMs,
+    });
+    return fileMoveBase(input.host.id, input.sourcePath, input.targetPath, input.overwrite, command, execResult);
+  }
+
   private async runScpTransfer(
     input: SshProviderFileTransferInput,
     direction: 'upload' | 'download',
@@ -520,6 +590,39 @@ export class SshService {
     }
   }
 
+  async move(input: SshFileMoveInput): Promise<SshFileMoveResult> {
+    const host = this.resolveHost(input.hostId);
+    const sourcePath = input.sourcePath.trim();
+    const targetPath = input.targetPath.trim();
+    const overwrite = Boolean(input.overwrite);
+    if (!host) {
+      const result = this.fileMoveFailure(input.hostId, sourcePath, targetPath, overwrite, 'Host record was not found.');
+      void this.auditFileMove(result);
+      return result;
+    }
+    try {
+      const result = await this.provider.move({
+        host,
+        sourcePath,
+        targetPath,
+        overwrite,
+        timeoutMs: normalizeTimeout(input.timeoutMs),
+      });
+      void this.auditFileMove(result);
+      return result;
+    } catch (error) {
+      const result = this.fileMoveFailure(
+        host.id,
+        sourcePath,
+        targetPath,
+        overwrite,
+        error instanceof Error ? error.message : 'SSH file move failed.',
+      );
+      void this.auditFileMove(result);
+      return result;
+    }
+  }
+
   listFiles(input: Omit<HostOperationInput, 'kind'>): Promise<HostOperationResult> {
     return this.runHostOperation({ ...input, kind: 'files' });
   }
@@ -637,6 +740,32 @@ export class SshService {
       status: 'failed',
       error,
       deleted: false,
+    };
+  }
+
+  private fileMoveFailure(
+    hostId: string,
+    sourcePath: string,
+    targetPath: string,
+    overwrite: boolean,
+    error: string,
+  ): SshFileMoveResult {
+    const now = new Date().toISOString();
+    return {
+      hostId,
+      sourcePath,
+      targetPath,
+      overwrite,
+      command: `move ${sourcePath} -> ${targetPath}`,
+      stdout: '',
+      stderr: '',
+      exitCode: null,
+      durationMs: 0,
+      startedAt: now,
+      completedAt: now,
+      status: 'failed',
+      error,
+      moved: false,
     };
   }
 
@@ -856,6 +985,42 @@ export class SshService {
       });
     } catch (error) {
       console.error('Unable to write SSH file delete audit event.', error);
+    }
+  }
+
+  private async auditFileMove(result: SshFileMoveResult): Promise<void> {
+    try {
+      await this.logAuditEvent({
+        type: result.status === 'success'
+          ? 'ssh.file_move_succeeded'
+          : 'ssh.file_move_failed',
+        entityType: 'host',
+        entityId: result.hostId,
+        message: `SSH file move ${result.status} for host ${result.hostId}.`,
+        metadata: {
+          hostId: result.hostId,
+          operation: 'move',
+          sourcePathHash: hashPathForAudit(result.sourcePath),
+          targetPathHash: hashPathForAudit(result.targetPath),
+          sourcePathLength: result.sourcePath.length,
+          targetPathLength: result.targetPath.length,
+          overwrite: result.overwrite,
+          moved: result.moved,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          status: result.status,
+          error: result.error,
+          backend: this.provider.name,
+          sourcePathLogged: false,
+          targetPathLogged: false,
+          commandTextLogged: false,
+          commandOutputLogged: false,
+          fileContentsLogged: false,
+          secretsLogged: false,
+        },
+      });
+    } catch (error) {
+      console.error('Unable to write SSH file move audit event.', error);
     }
   }
 }
@@ -1079,6 +1244,32 @@ function fileDeleteBase(
     status: result.status,
     error: result.error,
     deleted: result.status === 'success',
+  };
+}
+
+function fileMoveBase(
+  hostId: string,
+  sourcePath: string,
+  targetPath: string,
+  overwrite: boolean,
+  command: string,
+  result: SshExecResult,
+): SshFileMoveResult {
+  return {
+    hostId,
+    sourcePath,
+    targetPath,
+    overwrite,
+    command,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
+    status: result.status,
+    error: result.error,
+    moved: result.status === 'success',
   };
 }
 

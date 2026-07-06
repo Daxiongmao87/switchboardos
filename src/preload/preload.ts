@@ -62,6 +62,8 @@ import type {
   SshFileDeleteResult,
   SshFileListInput,
   SshFileListResult,
+  SshFileMoveInput,
+  SshFileMoveResult,
   SshFileStatInput,
   SshFileStatResult,
   SshFileTransferInput,
@@ -425,6 +427,8 @@ contextBridge.exposeInMainWorld('sb', {
       invoke('ssh-file:upload', input),
     delete: (input: SshFileDeleteInput): Promise<SshFileDeleteResult> =>
       invoke('ssh-file:delete', input),
+    move: (input: SshFileMoveInput): Promise<SshFileMoveResult> =>
+      invoke('ssh-file:move', input),
   },
 
   // --- Bootstrap Generator ---
@@ -598,6 +602,7 @@ declare global {
         download: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
         upload: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
         delete: (input: SshFileDeleteInput) => Promise<SshFileDeleteResult>;
+        move: (input: SshFileMoveInput) => Promise<SshFileMoveResult>;
       };
       bootstrap: {
         presets: () => Promise<BootstrapPreset[]>;

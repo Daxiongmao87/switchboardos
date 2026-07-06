@@ -38,6 +38,8 @@ import type {
   SshFileDeleteResult,
   SshFileListInput,
   SshFileListResult,
+  SshFileMoveInput,
+  SshFileMoveResult,
   SshFileStatInput,
   SshFileStatResult,
   SshFileTransferInput,
@@ -217,6 +219,7 @@ interface HostedSwitchboardApi {
     download: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
     upload: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
     delete: (input: SshFileDeleteInput) => Promise<SshFileDeleteResult>;
+    move: (input: SshFileMoveInput) => Promise<SshFileMoveResult>;
   };
 }
 
@@ -365,6 +368,8 @@ function createHostedApi(): HostedSwitchboardApi {
         request('/api/ssh-files/upload', { method: 'POST', body: input }),
       delete: (input: SshFileDeleteInput) =>
         request('/api/ssh-files/delete', { method: 'POST', body: input }),
+      move: (input: SshFileMoveInput) =>
+        request('/api/ssh-files/move', { method: 'POST', body: input }),
     },
     appManifest: {
       list: () => request('/api/app-manifests'),

@@ -40,6 +40,7 @@ import {
   validateSshExecInput,
   validateSshFileDeleteInput,
   validateSshFileListInput,
+  validateSshFileMoveInput,
   validateSshFileStatInput,
   validateSshFileTransferInput,
   validateTerminalResizeInput,
@@ -90,6 +91,7 @@ import type {
   SshExecResult,
   SshFileDeleteResult,
   SshFileListResult,
+  SshFileMoveResult,
   SshFileStatResult,
   SshFileTransferResult,
   TerminalResizeResult,
@@ -2212,6 +2214,21 @@ export class HostedServer {
       });
     }
 
+    if (action === 'move') {
+      const validatedInput = validateSshFileMoveInput(body);
+      return this.runHostedSshRoute({
+        contractId: 'hosted:POST:/api/ssh-files/move',
+        session,
+        route: '/api/ssh-files/move',
+        action: 'POST /api/ssh-files/move',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.sshService.move(validatedInput),
+        successAuditMetadata: sshFileMoveRouteSuccessMetadata,
+      });
+    }
+
     throw new HttpError(404, `No hosted SSH file route for ${method}.`);
   }
 
@@ -2684,6 +2701,27 @@ function sshFileDeleteRouteSuccessMetadata(result: SshFileDeleteResult): Record<
     pathHash: hashAuditPath(result.path),
     pathLength: result.path.length,
     remotePathLogged: false,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileMoveRouteSuccessMetadata(result: SshFileMoveResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    operation: 'move',
+    overwrite: result.overwrite,
+    moved: result.moved,
+    sourcePathHash: hashAuditPath(result.sourcePath),
+    targetPathHash: hashAuditPath(result.targetPath),
+    sourcePathLength: result.sourcePath.length,
+    targetPathLength: result.targetPath.length,
+    sourcePathLogged: false,
+    targetPathLogged: false,
     commandTextLogged: false,
     commandOutputLogged: false,
     fileContentsLogged: false,

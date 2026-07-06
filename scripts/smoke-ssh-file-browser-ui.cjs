@@ -23,6 +23,7 @@ const uploadSourcePath = join(tmpdir(), `switchboardos-file-browser-upload-sourc
 const downloadTargetPath = join(tmpdir(), `switchboardos-file-browser-download-${runId}.json`);
 const remoteUploadDir = `/tmp/switchboardos-file-browser-upload-dir-${runId}`;
 const remoteUploadPath = `${remoteUploadDir}/target.txt`;
+const remoteMovedPath = `${remoteUploadDir}/renamed-target.txt`;
 
 writeFileSync(uploadSourcePath, `SwitchboardOS SSH file browser upload smoke ${runId}\n`, 'utf8');
 
@@ -200,6 +201,10 @@ async function browserSmoke(params) {
             uploadStatus: panel?.getAttribute('data-upload-status') || '',
             deleteRoute: panel?.getAttribute('data-delete-provider-route') || '',
             deleteStatus: panel?.getAttribute('data-delete-status') || '',
+            moveRoute: panel?.getAttribute('data-move-provider-route') || '',
+            moveStatus: panel?.getAttribute('data-move-status') || '',
+            moveTargetPath: panel?.getAttribute('data-move-target-path') || '',
+            moveResultMoved: panel?.getAttribute('data-move-result-moved') || '',
             deleteConfirmation: panel?.getAttribute('data-delete-confirmation') || '',
             deleteResultDeleted: panel?.getAttribute('data-delete-result-deleted') || '',
             transferDirection: panel?.getAttribute('data-transfer-direction') || '',
@@ -365,18 +370,56 @@ async function browserSmoke(params) {
       hostId: host.id,
       path: params.remoteUploadPath,
     });
-    const selectedPathBeforeDelete = actionPanel.getAttribute('data-selected-path') || '';
+    const selectedPathBeforeMove = actionPanel.getAttribute('data-selected-path') || '';
 
     await runFileList(runtime, params.remoteUploadDir);
     const uploadedRow = await waitFor(
       () => [...runtime.querySelectorAll('tr[data-remote-path]')]
         .find((row) => row.getAttribute('data-remote-path') === params.remoteUploadPath),
-      'uploaded file row',
+      'uploaded file row for move',
       30000,
     );
     click(uploadedRow);
+    const movePanel = await waitFor(() => runtime.querySelector('[data-testid="ssh-file-actions"]'), 'SSH file move action panel');
+    await waitFor(() => movePanel.getAttribute('data-selected-path') === params.remoteUploadPath, 'uploaded file selected for move');
+    setInputValue(movePanel.querySelector('[data-testid="ssh-file-move-target-path"]'), params.remoteMovedPath);
+    click(movePanel.querySelector('[data-testid="ssh-file-move-action"]'));
+    await waitFor(() => movePanel.getAttribute('data-move-provider-route') === 'ssh-file:move'
+      && movePanel.getAttribute('data-move-status') === 'success'
+      && movePanel.getAttribute('data-move-result-moved') === 'true'
+      && movePanel.getAttribute('data-selected-path') === params.remoteMovedPath, 'ssh-file:move success', 45000);
+    const moveStatusBeforeDelete = {
+      selectedPathAfterMove: movePanel.getAttribute('data-selected-path') || '',
+      moveRoute: movePanel.getAttribute('data-move-provider-route') || '',
+      moveStatus: movePanel.getAttribute('data-move-status') || '',
+      moveResultMoved: movePanel.getAttribute('data-move-result-moved') || '',
+      moveTargetPath: movePanel.getAttribute('data-move-target-path') || '',
+    };
+
+    const sourceAfterMoveStat = await api.sshFile.stat({
+      hostId: host.id,
+      path: params.remoteUploadPath,
+    });
+    const targetAfterMoveStat = await api.sshFile.stat({
+      hostId: host.id,
+      path: params.remoteMovedPath,
+    });
+    const moveAuditEvents = await waitFor(async () => {
+      const events = await api.audit.list();
+      const routeAudit = events.find((event) => event.type === 'ssh_file.move_route_completed'
+        && event.metadata?.contractId === 'ipc:ssh-file:move');
+      const serviceAudit = events.find((event) => event.type === 'ssh.file_move_succeeded'
+        && event.entityId === host.id);
+      return routeAudit && serviceAudit ? events : null;
+    }, 'move route and service audit records', 30000);
+    const moveRouteAudit = moveAuditEvents.find((event) => event.type === 'ssh_file.move_route_completed'
+      && event.metadata?.contractId === 'ipc:ssh-file:move');
+    const moveServiceAudit = moveAuditEvents.find((event) => event.type === 'ssh.file_move_succeeded'
+      && event.entityId === host.id);
+    const moveAuditJson = JSON.stringify([moveRouteAudit, moveServiceAudit]);
+
     const deletePanel = await waitFor(() => runtime.querySelector('[data-testid="ssh-file-actions"]'), 'SSH file delete action panel');
-    await waitFor(() => deletePanel.getAttribute('data-selected-path') === params.remoteUploadPath, 'uploaded file selected for delete');
+    await waitFor(() => deletePanel.getAttribute('data-selected-path') === params.remoteMovedPath, 'moved file selected for delete');
     click(deletePanel.querySelector('[data-testid="ssh-file-delete-action"]'));
     await waitFor(() => deletePanel.getAttribute('data-delete-confirmation') === 'pending'
       && (deletePanel.textContent || '').includes('Permanent delete pending'), 'delete confirmation pending', 30000);
@@ -387,7 +430,7 @@ async function browserSmoke(params) {
 
     const deletedStat = await api.sshFile.stat({
       hostId: host.id,
-      path: params.remoteUploadPath,
+      path: params.remoteMovedPath,
     });
     const auditEvents = await waitFor(async () => {
       const events = await api.audit.list();
@@ -406,24 +449,41 @@ async function browserSmoke(params) {
     return {
       hostId: host.id,
       providerRoute: runtime.getAttribute('data-provider-route') || '',
-      selectedPath: selectedPathBeforeDelete,
+      selectedPath: selectedPathBeforeMove,
+      selectedPathAfterMove: moveStatusBeforeDelete.selectedPathAfterMove,
       selectedPathAfterDelete: deletePanel.getAttribute('data-selected-path') || '',
       statRoute: transferStatusBeforeRelist.statRoute,
       statStatus: transferStatusBeforeRelist.statStatus,
       downloadRoute: transferStatusBeforeRelist.downloadRoute,
       uploadRoute: transferStatusBeforeRelist.uploadRoute,
+      moveRoute: moveStatusBeforeDelete.moveRoute,
+      moveStatus: moveStatusBeforeDelete.moveStatus,
+      moveResultMoved: moveStatusBeforeDelete.moveResultMoved,
+      moveTargetPath: moveStatusBeforeDelete.moveTargetPath,
       deleteRoute: deletePanel.getAttribute('data-delete-provider-route') || '',
       deleteStatus: deletePanel.getAttribute('data-delete-status') || '',
       deleteResultDeleted: deletePanel.getAttribute('data-delete-result-deleted') || '',
       uploadedStatStatus: uploadedStat.status,
       uploadedStatPath: uploadedStat.entry?.path || '',
+      sourceAfterMoveStatStatus: sourceAfterMoveStat.status,
+      sourceAfterMoveEntryFound: Boolean(sourceAfterMoveStat.entry),
+      targetAfterMoveStatStatus: targetAfterMoveStat.status,
+      targetAfterMoveStatPath: targetAfterMoveStat.entry?.path || '',
       deletedStatStatus: deletedStat.status,
       deletedStatEntryFound: Boolean(deletedStat.entry),
+      moveRouteAuditPresent: Boolean(moveRouteAudit),
+      moveServiceAuditPresent: Boolean(moveServiceAudit),
+      moveAuditSourcePathLogged: moveRouteAudit?.metadata?.sourcePathLogged,
+      moveAuditTargetPathLogged: moveRouteAudit?.metadata?.targetPathLogged,
+      moveAuditSourcePathHashType: typeof moveRouteAudit?.metadata?.sourcePathHash,
+      moveAuditTargetPathHashType: typeof moveRouteAudit?.metadata?.targetPathHash,
+      moveAuditIncludesSourcePath: moveAuditJson.includes(params.remoteUploadPath),
+      moveAuditIncludesTargetPath: moveAuditJson.includes(params.remoteMovedPath),
       deleteRouteAuditPresent: Boolean(deleteRouteAudit),
       deleteServiceAuditPresent: Boolean(deleteServiceAudit),
       deleteAuditRemotePathLogged: deleteRouteAudit?.metadata?.remotePathLogged,
       deleteAuditPathHashType: typeof deleteRouteAudit?.metadata?.pathHash,
-      deleteAuditIncludesRemotePath: deleteAuditJson.includes(params.remoteUploadPath),
+      deleteAuditIncludesRemotePath: deleteAuditJson.includes(params.remoteMovedPath),
       transferStatusBeforeRelist,
       actionText: deletePanel.textContent || '',
       rowCount: rowCountBeforeDelete,
@@ -450,6 +510,7 @@ async function main() {
       uploadSourcePath,
       downloadTargetPath,
       remoteUploadPath,
+      remoteMovedPath,
       remoteUploadDir,
     })})`);
 
@@ -459,6 +520,10 @@ async function main() {
     assert.equal(report.statStatus, 'success', 'File Browser stat action succeeded');
     assert.equal(report.downloadRoute, 'ssh-file:download', 'File Browser download action used ssh-file:download route');
     assert.equal(report.uploadRoute, 'ssh-file:upload', 'File Browser upload action used ssh-file:upload route');
+    assert.equal(report.moveRoute, 'ssh-file:move', 'File Browser move action used ssh-file:move route');
+    assert.equal(report.moveStatus, 'success', 'File Browser move action succeeded');
+    assert.equal(report.moveResultMoved, 'true', 'File Browser move result reports moved');
+    assert.equal(report.moveTargetPath, remoteMovedPath, 'File Browser move target path is retained for retry/recovery context');
     assert.equal(report.deleteRoute, 'ssh-file:delete', 'File Browser delete action used ssh-file:delete route');
     assert.equal(report.deleteStatus, 'success', 'File Browser delete action succeeded');
     assert.equal(report.deleteResultDeleted, 'true', 'File Browser delete result reports deleted');
@@ -468,10 +533,23 @@ async function main() {
     assert.equal(report.transferStatusBeforeRelist.transferStatus, 'success', 'last File Browser transfer status is success');
     assert.equal(report.uploadedStatStatus, 'success', 'uploaded file exists after File Browser upload');
     assert.equal(report.uploadedStatPath, remoteUploadPath, 'uploaded file stat returns the uploaded remote path');
+    assert.equal(report.selectedPathAfterMove, remoteMovedPath, 'File Browser selects moved target object after move');
+    assert.equal(report.sourceAfterMoveStatStatus, 'failed', 'source path stat fails after File Browser move');
+    assert.equal(report.sourceAfterMoveEntryFound, false, 'source path has no stat entry after File Browser move');
+    assert.equal(report.targetAfterMoveStatStatus, 'success', 'target path stat succeeds after File Browser move');
+    assert.equal(report.targetAfterMoveStatPath, remoteMovedPath, 'target path stat returns moved remote path');
     assert.equal(report.deletedStatStatus, 'failed', 'deleted file stat fails after File Browser delete');
     assert.equal(report.deletedStatEntryFound, false, 'deleted file stat has no entry');
     assert.equal(report.selectedPathAfterDelete, '', 'File Browser clears selected object after delete');
     assert.equal(report.actionText.includes('Deleted'), true, 'File Browser shows object-local delete status');
+    assert.equal(report.moveRouteAuditPresent, true, 'move route audit is present');
+    assert.equal(report.moveServiceAuditPresent, true, 'move service audit is present');
+    assert.equal(report.moveAuditSourcePathLogged, false, 'move route audit marks source path as not logged');
+    assert.equal(report.moveAuditTargetPathLogged, false, 'move route audit marks target path as not logged');
+    assert.equal(report.moveAuditSourcePathHashType, 'string', 'move route audit records a source path hash');
+    assert.equal(report.moveAuditTargetPathHashType, 'string', 'move route audit records a target path hash');
+    assert.equal(report.moveAuditIncludesSourcePath, false, 'move audit does not include the source path');
+    assert.equal(report.moveAuditIncludesTargetPath, false, 'move audit does not include the target path');
     assert.equal(report.deleteRouteAuditPresent, true, 'delete route audit is present');
     assert.equal(report.deleteServiceAuditPresent, true, 'delete service audit is present');
     assert.equal(report.deleteAuditRemotePathLogged, false, 'delete route audit marks remote path as not logged');
@@ -487,6 +565,7 @@ async function main() {
       downloadTargetPath,
       uploadSourcePath,
       remoteUploadPath,
+      remoteMovedPath,
       remoteUploadDir,
     }, null, 2));
   } finally {

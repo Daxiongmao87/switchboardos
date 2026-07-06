@@ -86,6 +86,7 @@ import {
   validateSshExecInput,
   validateSshFileDeleteInput,
   validateSshFileListInput,
+  validateSshFileMoveInput,
   validateSshFileStatInput,
   validateSshFileTransferInput,
   validateTerminalResizeInput,
@@ -150,6 +151,8 @@ import type {
   SshFileDeleteResult,
   SshFileListInput,
   SshFileListResult,
+  SshFileMoveInput,
+  SshFileMoveResult,
   SshFileStatInput,
   SshFileStatResult,
   SshFileTransferInput,
@@ -1160,6 +1163,27 @@ function sshFileDeleteRouteSuccessMetadata(result: SshFileDeleteResult): Record<
     pathHash: hashAuditPath(result.path),
     pathLength: result.path.length,
     remotePathLogged: false,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileMoveRouteSuccessMetadata(result: SshFileMoveResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    operation: 'move',
+    overwrite: result.overwrite,
+    moved: result.moved,
+    sourcePathHash: hashAuditPath(result.sourcePath),
+    targetPathHash: hashAuditPath(result.targetPath),
+    sourcePathLength: result.sourcePath.length,
+    targetPathLength: result.targetPath.length,
+    sourcePathLogged: false,
+    targetPathLogged: false,
     commandTextLogged: false,
     commandOutputLogged: false,
     fileContentsLogged: false,
@@ -3794,6 +3818,21 @@ ipcMain.handle('ssh-file:delete', async (_event, input: SshFileDeleteInput) => {
     validatedInput,
     () => sshService.delete(validatedInput),
     sshFileDeleteRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('ssh-file:move', async (_event, input: SshFileMoveInput) => {
+  const validatedInput = validateSshFileMoveInput(input);
+  return runSshIpcRoute(
+    'ipc:ssh-file:move',
+    {
+      route: 'ssh-file:move',
+      action: 'ssh-file:move',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => sshService.move(validatedInput),
+    sshFileMoveRouteSuccessMetadata,
   );
 });
 

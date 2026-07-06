@@ -149,6 +149,27 @@ class FakeSshFileService {
       deleted: true,
     };
   }
+
+  async move(input) {
+    this.calls.push({ method: 'move', input });
+    const now = new Date(0).toISOString();
+    return {
+      hostId: input.hostId,
+      sourcePath: input.sourcePath,
+      targetPath: input.targetPath,
+      overwrite: Boolean(input.overwrite),
+      command: 'move',
+      stdout: SECRET_MARKER,
+      stderr: '',
+      exitCode: 0,
+      durationMs: 6,
+      startedAt: now,
+      completedAt: now,
+      status: 'success',
+      error: null,
+      moved: true,
+    };
+  }
 }
 
 function emptyWorkspaceFile() {
@@ -285,6 +306,15 @@ async function main() {
     assert.equal(deniedDelete.status, 403, 'safe policy denies host:file:write delete');
     assert.equal(sshService.calls.some((call) => call.method === 'delete'), false, 'denied delete does not dispatch to SSH service');
 
+    const deniedMove = await jsonRequest(baseUrl, '/api/ssh-files/move', {
+      method: 'POST',
+      cookie,
+      csrfToken,
+      body: { hostId: HOST_ID, sourcePath: '/tmp/move-source.txt', targetPath: '/tmp/move-target.txt' },
+    });
+    assert.equal(deniedMove.status, 403, 'safe policy denies host:file:write move');
+    assert.equal(sshService.calls.some((call) => call.method === 'move'), false, 'denied move does not dispatch to SSH service');
+
     policyMode = 'balanced';
     const upload = await jsonRequest(baseUrl, '/api/ssh-files/upload', {
       method: 'POST',
@@ -308,11 +338,24 @@ async function main() {
     assert.equal(deleteResult.json.path, '/tmp/delete-target.txt');
     assert.equal(sshService.calls.some((call) => call.method === 'delete'), true, 'permitted delete dispatches to SSH file service');
 
+    const moveResult = await jsonRequest(baseUrl, '/api/ssh-files/move', {
+      method: 'POST',
+      cookie,
+      csrfToken,
+      body: { hostId: HOST_ID, sourcePath: '/tmp/move-source.txt', targetPath: '/tmp/move-target.txt' },
+    });
+    assert.equal(moveResult.status, 200, 'balanced policy allows SSH file move through hosted API');
+    assert.equal(moveResult.json.moved, true);
+    assert.equal(moveResult.json.sourcePath, '/tmp/move-source.txt');
+    assert.equal(moveResult.json.targetPath, '/tmp/move-target.txt');
+    assert.equal(sshService.calls.some((call) => call.method === 'move'), true, 'permitted move dispatches to SSH file service');
+
     const listAudit = store.auditEvents.find((event) => event.type === 'ssh_file.list_route_completed');
     const statAudit = store.auditEvents.find((event) => event.type === 'ssh_file.stat_route_completed');
     const downloadAudit = store.auditEvents.find((event) => event.type === 'ssh_file.download_route_completed');
     const uploadAudit = store.auditEvents.find((event) => event.type === 'ssh_file.upload_route_completed');
     const deleteAudit = store.auditEvents.find((event) => event.type === 'ssh_file.delete_route_completed');
+    const moveAudit = store.auditEvents.find((event) => event.type === 'ssh_file.move_route_completed');
     const policyDenied = store.auditEvents.find((event) => event.type === 'policy.denied'
       && event.metadata?.capability === 'host:file:write');
     assert.ok(listAudit, 'list route audit was written');
@@ -320,17 +363,20 @@ async function main() {
     assert.ok(downloadAudit, 'download route audit was written');
     assert.ok(uploadAudit, 'upload route audit was written');
     assert.ok(deleteAudit, 'delete route audit was written');
+    assert.ok(moveAudit, 'move route audit was written');
     assert.ok(policyDenied, 'upload policy denial audit was written');
     assert.equal(listAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/list');
     assert.equal(statAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/stat');
     assert.equal(downloadAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/download');
     assert.equal(uploadAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/upload');
     assert.equal(deleteAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/delete');
+    assert.equal(moveAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/move');
     assert.equal(listAudit.metadata.policyCapability, 'host:file:read');
     assert.equal(statAudit.metadata.policyCapability, 'host:file:read');
     assert.equal(downloadAudit.metadata.policyCapability, 'host:file:read');
     assert.equal(uploadAudit.metadata.policyCapability, 'host:file:write');
     assert.equal(deleteAudit.metadata.policyCapability, 'host:file:write');
+    assert.equal(moveAudit.metadata.policyCapability, 'host:file:write');
     assert.equal(listAudit.metadata.fileContentsLogged, false);
     assert.equal(statAudit.metadata.commandTextLogged, false);
     assert.equal(downloadAudit.metadata.localPathLogged, false);
@@ -342,6 +388,13 @@ async function main() {
     assert.equal(deleteAudit.metadata.fileContentsLogged, false);
     assert.equal(deleteAudit.metadata.deleted, true);
     assert.equal(typeof deleteAudit.metadata.pathHash, 'string');
+    assert.equal(moveAudit.metadata.sourcePathLogged, false);
+    assert.equal(moveAudit.metadata.targetPathLogged, false);
+    assert.equal(moveAudit.metadata.commandTextLogged, false);
+    assert.equal(moveAudit.metadata.fileContentsLogged, false);
+    assert.equal(moveAudit.metadata.moved, true);
+    assert.equal(typeof moveAudit.metadata.sourcePathHash, 'string');
+    assert.equal(typeof moveAudit.metadata.targetPathHash, 'string');
     assert.equal(policyDenied.metadata.secretsLogged, false);
 
     const auditJson = JSON.stringify(store.auditEvents);
@@ -349,8 +402,10 @@ async function main() {
     assert.equal(auditJson.includes('listDir /var/log'), false, 'audit does not include SSH file command text');
     assert.equal(auditJson.includes('/tmp/local.txt'), false, 'audit does not include denied local transfer path');
     assert.equal(auditJson.includes('/tmp/delete-target.txt'), false, 'audit does not include delete target path');
+    assert.equal(auditJson.includes('/tmp/move-source.txt'), false, 'audit does not include move source path');
+    assert.equal(auditJson.includes('/tmp/move-target.txt'), false, 'audit does not include move target path');
 
-    console.log('ssh file route smoke: hosted auth, CSRF, policy, list/stat/download/upload/delete dispatch, and sanitized audit passed');
+    console.log('ssh file route smoke: hosted auth, CSRF, policy, list/stat/download/upload/delete/move dispatch, and sanitized audit passed');
   } finally {
     server.close();
   }

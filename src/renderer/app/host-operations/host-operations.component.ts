@@ -7,6 +7,7 @@ import type {
   SshFileDeleteResult,
   SshFileEntry,
   SshFileListResult,
+  SshFileMoveResult,
   SshFileStatResult,
   SshFileTransferResult,
 } from '../../../shared/mvp-models';
@@ -130,6 +131,10 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
           [attr.data-delete-status]="fileDeleteResult?.status || ''"
           [attr.data-delete-confirmation]="deleteConfirmationPending ? 'pending' : ''"
           [attr.data-delete-result-deleted]="fileDeleteResult?.deleted === true ? 'true' : ''"
+          [attr.data-move-provider-route]="fileMoveResult ? 'ssh-file:move' : ''"
+          [attr.data-move-status]="fileMoveResult?.status || ''"
+          [attr.data-move-result-moved]="fileMoveResult?.moved === true ? 'true' : ''"
+          [attr.data-move-target-path]="moveTargetPath"
           [attr.data-transfer-direction]="lastTransferDirection"
           [attr.data-transfer-status]="lastTransferStatus"
         >
@@ -160,6 +165,26 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
               {{ deleteConfirmationPending ? 'Confirm permanent delete' : 'Delete' }}
             </button>
           </header>
+
+          <div class="file-move-row">
+            <label>
+              Rename or move target
+              <input
+                name="sshFileMoveTargetPath"
+                data-testid="ssh-file-move-target-path"
+                [(ngModel)]="moveTargetPath"
+                placeholder="/tmp/renamed-file.txt"
+              />
+            </label>
+            <button
+              type="button"
+              data-testid="ssh-file-move-action"
+              (click)="moveSelectedFile()"
+              [disabled]="isFileActionRunning || !selectedFilePath || !moveTargetPath || !selectedHostId"
+            >
+              Rename / Move
+            </button>
+          </div>
 
           <div class="file-transfer-grid">
             <label>
@@ -401,6 +426,7 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
     }
 
     .file-actions header,
+    .file-move-row,
     .file-transfer-grid {
       display: flex;
       align-items: end;
@@ -470,10 +496,12 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   fileDownloadResult: SshFileTransferResult | null = null;
   fileUploadResult: SshFileTransferResult | null = null;
   fileDeleteResult: SshFileDeleteResult | null = null;
+  fileMoveResult: SshFileMoveResult | null = null;
   fileActionMessage = '';
   fileActionError = '';
   isFileActionRunning = false;
   pendingDeletePath = '';
+  moveTargetPath = '';
   downloadLocalPath = '/tmp/switchboardos-file-browser-download';
   uploadLocalPath = '';
   uploadRemotePath = '/tmp/switchboardos-file-browser-upload';
@@ -621,11 +649,13 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.fileDownloadResult = null;
     this.fileUploadResult = null;
     this.fileDeleteResult = null;
+    this.fileMoveResult = null;
     this.pendingDeletePath = '';
     this.fileActionMessage = '';
     this.fileActionError = '';
     this.lastTransferDirection = '';
     this.downloadLocalPath = `/tmp/switchboardos-file-browser-${this.safeFileName(name)}`;
+    this.moveTargetPath = remotePath;
     this.uploadRemotePath = type === 'directory'
       ? this.joinRemotePath(remotePath, 'switchboardos-upload.txt')
       : remotePath;
@@ -754,6 +784,45 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     }
   }
 
+  async moveSelectedFile(): Promise<void> {
+    const api = getSwitchboardApi();
+    const sourcePath = this.selectedFilePath;
+    const targetPath = this.moveTargetPath.trim();
+    if (!api || !this.selectedHostId || !sourcePath || !targetPath) {
+      this.fileActionError = 'Select a remote object and provide a rename or move target.';
+      return;
+    }
+    if (sourcePath === targetPath) {
+      this.fileActionError = 'Move target must be different from the selected path.';
+      return;
+    }
+
+    this.isFileActionRunning = true;
+    this.fileActionError = '';
+    this.fileActionMessage = `Moving ${sourcePath} through the SSH file provider. Existing target paths are not overwritten.`;
+    try {
+      this.fileMoveResult = await api.sshFile.move({
+        hostId: this.selectedHostId,
+        sourcePath,
+        targetPath,
+      });
+      if (this.fileMoveResult.status === 'success') {
+        const moveResult = this.fileMoveResult;
+        this.path = this.parentRemotePath(targetPath);
+        await this.refreshFileListAfterMove(targetPath);
+        this.fileMoveResult = moveResult;
+        this.moveTargetPath = targetPath;
+        this.fileActionMessage = `Moved ${sourcePath} to ${targetPath}. The file list was refreshed.`;
+      } else {
+        this.fileActionMessage = `Move failed for ${sourcePath}. Check the target path and retry.`;
+      }
+    } catch (error) {
+      this.fileActionError = this.errorText(error, 'Unable to move remote file.');
+    } finally {
+      this.isFileActionRunning = false;
+    }
+  }
+
   private applyHostContext(): void {
     if (this.hostContextId) {
       this.selectedHostId = this.hostContextId;
@@ -805,6 +874,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.fileDownloadResult = null;
     this.fileUploadResult = null;
     this.fileDeleteResult = null;
+    this.fileMoveResult = null;
     this.fileActionMessage = '';
     this.fileActionError = '';
     this.pendingDeletePath = '';
@@ -815,6 +885,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.selectedFileEntry = null;
     this.downloadLocalPath = '/tmp/switchboardos-file-browser-download';
     this.uploadRemotePath = this.joinRemotePath(this.path || '.', 'switchboardos-upload.txt');
+    this.moveTargetPath = '';
     this.pendingDeletePath = '';
   }
 
@@ -833,6 +904,27 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     if (this.selectedFilePath === deletedPath) {
       this.clearFileSelection();
     }
+  }
+
+  private async refreshFileListAfterMove(targetPath: string): Promise<void> {
+    const api = getSwitchboardApi();
+    if (!api || !this.selectedHostId) {
+      return;
+    }
+    const fileResult = await api.sshFile.list({
+      hostId: this.selectedHostId,
+      path: this.path || '.',
+      limit: this.limit,
+    });
+    this.result = this.mapSshFileListResult(fileResult);
+    this.statusMessage = this.result.summary;
+    const movedRow = this.result.rows.find((row) => this.rowText(row, 'path') === targetPath);
+    if (movedRow) {
+      this.selectFileRow(movedRow);
+    } else {
+      this.clearFileSelection();
+    }
+    this.moveTargetPath = targetPath;
   }
 
   private rowText(row: Record<string, string | number | boolean | null>, key: string): string {
@@ -854,6 +946,19 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   private fileNameFromPath(remotePath: string): string {
     return remotePath.split('/').filter(Boolean).pop() || 'remote-file';
+  }
+
+  private parentRemotePath(remotePath: string): string {
+    const trimmed = remotePath.trim();
+    if (!trimmed || trimmed === '/') {
+      return '.';
+    }
+    const normalized = trimmed.replace(/\/+$/, '');
+    const index = normalized.lastIndexOf('/');
+    if (index <= 0) {
+      return '.';
+    }
+    return normalized.slice(0, index);
   }
 
   private safeFileName(name: string): string {
