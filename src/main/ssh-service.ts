@@ -926,7 +926,8 @@ function fileStatBase(
 function remoteScpTarget(host: HostRecord, remotePath: string): string {
   const address = host.address || host.hostname;
   const target = host.username ? `${host.username}@${address}` : address;
-  return `${target}:${shellQuote(remotePath)}`;
+  // scp receives this as a spawn argv element; shell quoting would become part of the remote filename.
+  return `${target}:${remotePath}`;
 }
 
 function parseProviderFileEntries(stdout: string, parentPath: string): SshFileEntry[] {

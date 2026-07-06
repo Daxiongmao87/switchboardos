@@ -19,6 +19,7 @@ const preloadText = read('src/preload/preload.ts');
 const switchboardApiText = read('src/renderer/app/switchboard-api.ts');
 const hostedApiText = read('src/renderer/app/hosted-api.ts');
 const hostOperationsText = read('src/renderer/app/host-operations/host-operations.component.ts');
+const sshServiceText = read('src/main/ssh-service.ts');
 
 const REQUIRED_HOST_CONTRACTS = [
   {
@@ -1387,6 +1388,46 @@ function validateHostedDispatches() {
   }
   if (filesBranch.includes('api.hostOperations.run')) {
     fail('File Browser files mode must not use hostOperations.run command-string inspection.');
+  }
+  const remoteScpTargetStart = sshServiceText.indexOf('function remoteScpTarget');
+  const remoteScpTargetBody = remoteScpTargetStart === -1
+    ? ''
+    : sshServiceText.slice(remoteScpTargetStart, remoteScpTargetStart + 500);
+  if (remoteScpTargetBody.includes('shellQuote(remotePath)')) {
+    fail('SCP transfer targets must not embed shellQuote(remotePath) into spawn argv; it becomes a literal remote filename.');
+  }
+  for (const method of ['stat', 'download', 'upload']) {
+    if (!hostOperationsText.includes(`api.sshFile.${method}`)) {
+      fail(`File Browser files mode must expose sshFile.${method} through the structured provider API.`);
+    }
+  }
+  for (const marker of [
+    'data-testid="ssh-file-actions"',
+    'data-testid="ssh-file-stat-action"',
+    'data-testid="ssh-file-download-action"',
+    'data-testid="ssh-file-upload-action"',
+    'data-selected-path',
+    'data-stat-provider-route',
+    'data-download-provider-route',
+    'data-upload-provider-route',
+    'data-transfer-direction',
+    'data-transfer-status',
+  ]) {
+    if (!hostOperationsText.includes(marker)) {
+      fail(`File Browser SSH transfer UI is missing stable route/state marker ${marker}.`);
+    }
+  }
+  for (const forbidden of [
+    'showOpenFilePicker',
+    'showSaveFilePicker',
+    'window.fs',
+    'require(\'node:fs\')',
+    'require("node:fs")',
+    'localStorage',
+  ]) {
+    if (hostOperationsText.includes(forbidden)) {
+      fail(`File Browser SSH transfer UI must not use renderer filesystem or local persistence shortcut ${forbidden}.`);
+    }
   }
 
   if (hostedText.includes("requireHostedCapability(request, session, 'terminal:")) {

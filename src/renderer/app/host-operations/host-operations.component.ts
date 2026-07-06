@@ -6,6 +6,8 @@ import type {
   HostRecord,
   SshFileEntry,
   SshFileListResult,
+  SshFileStatResult,
+  SshFileTransferResult,
 } from '../../../shared/mvp-models';
 import { getSwitchboardApi } from '../switchboard-api';
 
@@ -35,7 +37,9 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
         <div>
           <span class="operation-icon">{{ copy.icon }}</span>
           <h1>{{ copy.title }}</h1>
-          <p>Read-only host inspection through backend-owned ssh BatchMode. No browser-side command execution or secrets.</p>
+          <p>{{ mode === 'files'
+            ? 'Backend-owned SSH file provider routes. No browser-side filesystem access, command construction, or secrets.'
+            : 'Read-only host inspection through backend-owned ssh BatchMode. No browser-side command execution or secrets.' }}</p>
         </div>
         <button type="button" class="secondary-action" (click)="loadHosts()" [disabled]="isLoading">
           Refresh hosts
@@ -95,12 +99,104 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let row of result.rows; trackBy: trackRow">
+              <tr
+                *ngFor="let row of result.rows; trackBy: trackRow"
+                [class.selectable-row]="mode === 'files'"
+                [class.is-selected]="mode === 'files' && row['path'] === selectedFilePath"
+                [attr.data-remote-path]="mode === 'files' ? row['path'] : null"
+                [attr.data-selected]="mode === 'files' && row['path'] === selectedFilePath ? 'true' : null"
+                (click)="mode === 'files' ? selectFileRow(row) : null"
+              >
                 <td *ngFor="let key of rowKeys">{{ row[key] }}</td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        <section
+          *ngIf="mode === 'files'"
+          class="file-actions"
+          data-testid="ssh-file-actions"
+          [attr.data-selected-path]="selectedFilePath"
+          [attr.data-file-action-state]="fileActionState"
+          [attr.data-stat-provider-route]="fileStatResult ? 'ssh-file:stat' : ''"
+          [attr.data-stat-status]="fileStatResult?.status || ''"
+          [attr.data-download-provider-route]="fileDownloadResult ? 'ssh-file:download' : ''"
+          [attr.data-download-status]="fileDownloadResult?.status || ''"
+          [attr.data-upload-provider-route]="fileUploadResult ? 'ssh-file:upload' : ''"
+          [attr.data-upload-status]="fileUploadResult?.status || ''"
+          [attr.data-transfer-direction]="lastTransferDirection"
+          [attr.data-transfer-status]="lastTransferStatus"
+        >
+          <header>
+            <div>
+              <h3>Selected remote object</h3>
+              <p data-testid="ssh-file-selected-path">{{ selectedFilePath || 'Select a row to inspect or transfer.' }}</p>
+            </div>
+            <button
+              type="button"
+              class="secondary-action"
+              data-testid="ssh-file-stat-action"
+              (click)="statSelectedFile()"
+              [disabled]="isFileActionRunning || !selectedFilePath || !selectedHostId"
+            >
+              Get info
+            </button>
+          </header>
+
+          <div class="file-transfer-grid">
+            <label>
+              Download target
+              <input
+                name="sshFileDownloadLocalPath"
+                data-testid="ssh-file-download-local-path"
+                [(ngModel)]="downloadLocalPath"
+                placeholder="/tmp/switchboardos-download"
+              />
+            </label>
+            <button
+              type="button"
+              data-testid="ssh-file-download-action"
+              (click)="downloadSelectedFile()"
+              [disabled]="isFileActionRunning || !selectedFilePath || !downloadLocalPath || !selectedHostId"
+            >
+              Download
+            </button>
+            <label>
+              Upload source
+              <input
+                name="sshFileUploadLocalPath"
+                data-testid="ssh-file-upload-local-path"
+                [(ngModel)]="uploadLocalPath"
+                placeholder="/tmp/local-file.txt"
+              />
+            </label>
+            <label>
+              Upload destination
+              <input
+                name="sshFileUploadRemotePath"
+                data-testid="ssh-file-upload-remote-path"
+                [(ngModel)]="uploadRemotePath"
+                placeholder="/tmp/remote-file.txt"
+              />
+            </label>
+            <button
+              type="button"
+              data-testid="ssh-file-upload-action"
+              (click)="uploadFile()"
+              [disabled]="isFileActionRunning || !uploadLocalPath || !uploadRemotePath || !selectedHostId"
+            >
+              Upload
+            </button>
+          </div>
+
+          <p *ngIf="fileActionMessage" class="status-message" data-testid="ssh-file-action-message">
+            {{ fileActionMessage }}
+          </p>
+          <p *ngIf="fileActionError" class="error-message" data-testid="ssh-file-action-error">
+            {{ fileActionError }}
+          </p>
+        </section>
 
         <details>
           <summary>Raw stdout/stderr</summary>
@@ -224,7 +320,7 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
 
     .operation-result {
       display: grid;
-      grid-template-rows: auto 1fr auto;
+      grid-template-rows: auto 1fr auto auto;
       min-height: 0;
       border: 1px solid #2c3546;
       border-radius: 8px;
@@ -262,6 +358,43 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
       top: 0;
       background: #161d2a;
       color: #b8c3d5;
+    }
+
+    .selectable-row {
+      cursor: pointer;
+    }
+
+    .selectable-row:hover,
+    .selectable-row.is-selected {
+      background: #18243a;
+    }
+
+    .file-actions {
+      display: grid;
+      gap: 10px;
+      border-top: 1px solid #2c3546;
+      padding: 12px;
+      background: #111827;
+    }
+
+    .file-actions header,
+    .file-transfer-grid {
+      display: flex;
+      align-items: end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .file-actions h3 {
+      margin: 0;
+      font-size: 13px;
+    }
+
+    .file-actions p {
+      margin: 4px 0 0;
+      color: #9eaabd;
+      font-size: 12px;
+      line-height: 1.45;
     }
 
     details {
@@ -305,6 +438,17 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   isRunning = false;
   statusMessage = '';
   errorMessage = '';
+  selectedFileEntry: SshFileEntry | null = null;
+  fileStatResult: SshFileStatResult | null = null;
+  fileDownloadResult: SshFileTransferResult | null = null;
+  fileUploadResult: SshFileTransferResult | null = null;
+  fileActionMessage = '';
+  fileActionError = '';
+  isFileActionRunning = false;
+  downloadLocalPath = '/tmp/switchboardos-file-browser-download';
+  uploadLocalPath = '';
+  uploadRemotePath = '/tmp/switchboardos-file-browser-upload';
+  lastTransferDirection = '';
 
   get copy() {
     return MODE_COPY[this.mode];
@@ -321,6 +465,27 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   get semanticSummary(): string {
     const host = this.selectedHost;
     return `${this.mode}:${host?.id ?? 'unscoped'}:${this.result?.rows.length ?? 0}`;
+  }
+
+  get selectedFilePath(): string {
+    return this.selectedFileEntry?.path ?? '';
+  }
+
+  get fileActionState(): string {
+    if (this.isFileActionRunning) {
+      return 'running';
+    }
+    if (this.fileActionError) {
+      return 'error';
+    }
+    if (this.fileActionMessage) {
+      return 'ready';
+    }
+    return 'idle';
+  }
+
+  get lastTransferStatus(): string {
+    return this.fileUploadResult?.status || this.fileDownloadResult?.status || '';
   }
 
   ngOnInit(): void {
@@ -369,6 +534,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.isRunning = true;
     this.errorMessage = '';
     this.statusMessage = `Running read-only ${this.mode} inspection through backend ssh.`;
+    this.resetFileActionState();
     try {
       if (this.mode === 'files') {
         const fileResult = await api.sshFile.list({
@@ -377,6 +543,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
           limit: input.limit,
         });
         this.result = this.mapSshFileListResult(fileResult);
+        this.clearFileSelection();
       } else {
         this.result = await api.hostOperations.run(input);
       }
@@ -394,6 +561,119 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   trackRow(index: number): number {
     return index;
+  }
+
+  selectFileRow(row: Record<string, string | number | boolean | null>): void {
+    if (this.mode !== 'files') {
+      return;
+    }
+    const remotePath = this.rowText(row, 'path');
+    if (!remotePath) {
+      return;
+    }
+    const name = this.rowText(row, 'name') || this.fileNameFromPath(remotePath);
+    const type = this.rowText(row, 'type') === 'directory' ? 'directory' : 'file';
+    this.selectedFileEntry = {
+      name,
+      path: remotePath,
+      type,
+      size: this.rowNumber(row, 'size'),
+      modified: this.rowText(row, 'modified'),
+      permissions: this.rowText(row, 'permissions'),
+      owner: this.rowText(row, 'owner'),
+      group: this.rowText(row, 'group'),
+    };
+    this.fileStatResult = null;
+    this.fileDownloadResult = null;
+    this.fileUploadResult = null;
+    this.fileActionMessage = '';
+    this.fileActionError = '';
+    this.lastTransferDirection = '';
+    this.downloadLocalPath = `/tmp/switchboardos-file-browser-${this.safeFileName(name)}`;
+    this.uploadRemotePath = type === 'directory'
+      ? this.joinRemotePath(remotePath, 'switchboardos-upload.txt')
+      : remotePath;
+  }
+
+  async statSelectedFile(): Promise<void> {
+    const api = getSwitchboardApi();
+    if (!api || !this.selectedHostId || !this.selectedFilePath) {
+      this.fileActionError = 'Select a remote file before requesting file info.';
+      return;
+    }
+
+    this.isFileActionRunning = true;
+    this.fileActionError = '';
+    this.fileActionMessage = '';
+    try {
+      this.fileStatResult = await api.sshFile.stat({
+        hostId: this.selectedHostId,
+        path: this.selectedFilePath,
+      });
+      this.fileActionMessage = this.fileStatResult.status === 'success'
+        ? `File info loaded for ${this.selectedFilePath}.`
+        : `File info failed for ${this.selectedFilePath}.`;
+    } catch (error) {
+      this.fileActionError = this.errorText(error, 'Unable to load remote file info.');
+    } finally {
+      this.isFileActionRunning = false;
+    }
+  }
+
+  async downloadSelectedFile(): Promise<void> {
+    const api = getSwitchboardApi();
+    if (!api || !this.selectedHostId || !this.selectedFilePath || !this.downloadLocalPath.trim()) {
+      this.fileActionError = 'Select a remote file and provide a local download target.';
+      return;
+    }
+
+    this.isFileActionRunning = true;
+    this.fileActionError = '';
+    this.fileActionMessage = '';
+    try {
+      this.fileDownloadResult = await api.sshFile.download({
+        hostId: this.selectedHostId,
+        remotePath: this.selectedFilePath,
+        localPath: this.downloadLocalPath.trim(),
+      });
+      this.lastTransferDirection = 'download';
+      this.fileActionMessage = this.fileDownloadResult.status === 'success'
+        ? `Downloaded ${this.selectedFilePath}.`
+        : `Download failed for ${this.selectedFilePath}.`;
+    } catch (error) {
+      this.fileActionError = this.errorText(error, 'Unable to download remote file.');
+    } finally {
+      this.isFileActionRunning = false;
+    }
+  }
+
+  async uploadFile(): Promise<void> {
+    const api = getSwitchboardApi();
+    const localPath = this.uploadLocalPath.trim();
+    const remotePath = this.uploadRemotePath.trim();
+    if (!api || !this.selectedHostId || !localPath || !remotePath) {
+      this.fileActionError = 'Provide a local upload source and remote destination.';
+      return;
+    }
+
+    this.isFileActionRunning = true;
+    this.fileActionError = '';
+    this.fileActionMessage = '';
+    try {
+      this.fileUploadResult = await api.sshFile.upload({
+        hostId: this.selectedHostId,
+        localPath,
+        remotePath,
+      });
+      this.lastTransferDirection = 'upload';
+      this.fileActionMessage = this.fileUploadResult.status === 'success'
+        ? `Uploaded ${remotePath}.`
+        : `Upload failed for ${remotePath}.`;
+    } catch (error) {
+      this.fileActionError = this.errorText(error, 'Unable to upload remote file.');
+    } finally {
+      this.isFileActionRunning = false;
+    }
   }
 
   private applyHostContext(): void {
@@ -440,5 +720,46 @@ export class HostOperationsComponent implements OnInit, OnChanges {
       owner: entry.owner,
       group: entry.group,
     };
+  }
+
+  private resetFileActionState(): void {
+    this.fileStatResult = null;
+    this.fileDownloadResult = null;
+    this.fileUploadResult = null;
+    this.fileActionMessage = '';
+    this.fileActionError = '';
+    this.lastTransferDirection = '';
+  }
+
+  private clearFileSelection(): void {
+    this.selectedFileEntry = null;
+    this.downloadLocalPath = '/tmp/switchboardos-file-browser-download';
+    this.uploadRemotePath = this.joinRemotePath(this.path || '.', 'switchboardos-upload.txt');
+  }
+
+  private rowText(row: Record<string, string | number | boolean | null>, key: string): string {
+    const value = row[key];
+    return value === null || value === undefined ? '' : String(value);
+  }
+
+  private rowNumber(row: Record<string, string | number | boolean | null>, key: string): number | null {
+    const value = Number(row[key]);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  private fileNameFromPath(remotePath: string): string {
+    return remotePath.split('/').filter(Boolean).pop() || 'remote-file';
+  }
+
+  private safeFileName(name: string): string {
+    return name.replace(/[^A-Za-z0-9._-]/g, '_') || 'remote-file';
+  }
+
+  private joinRemotePath(basePath: string, childPath: string): string {
+    const base = basePath.trim() || '.';
+    if (base === '/') {
+      return `/${childPath}`;
+    }
+    return `${base.replace(/\/+$/, '')}/${childPath}`;
   }
 }

@@ -138,8 +138,9 @@ function emptyWorkspaceFile() {
 async function main() {
   const store = new FakeStore();
   const sshService = new FakeSshFileService();
+  let policyMode = 'safe';
   const policyService = new PolicyService(
-    () => ({ operator: { policy: 'safe' } }),
+    () => ({ operator: { policy: policyMode } }),
     (event) => store.logAuditEvent(event),
   );
   const server = new HostedServer({
@@ -235,6 +236,17 @@ async function main() {
     assert.equal(stat.status, 200, 'SSH file stat route succeeds through hosted API');
     assert.equal(stat.json.entry.name, 'app.log');
 
+    const download = await jsonRequest(baseUrl, '/api/ssh-files/download', {
+      method: 'POST',
+      cookie,
+      csrfToken,
+      body: { hostId: HOST_ID, remotePath: '/var/log/app.log', localPath: '/tmp/downloaded-app.log' },
+    });
+    assert.equal(download.status, 200, 'SSH file download route succeeds through hosted API');
+    assert.equal(download.json.direction, 'download');
+    assert.equal(download.json.remotePath, '/var/log/app.log');
+    assert.equal(sshService.calls.some((call) => call.method === 'download'), true, 'download dispatches to SSH file service');
+
     const deniedUpload = await jsonRequest(baseUrl, '/api/ssh-files/upload', {
       method: 'POST',
       cookie,
@@ -244,19 +256,43 @@ async function main() {
     assert.equal(deniedUpload.status, 403, 'safe policy denies host:file:write upload');
     assert.equal(sshService.calls.some((call) => call.method === 'upload'), false, 'denied upload does not dispatch to SSH service');
 
+    policyMode = 'balanced';
+    const upload = await jsonRequest(baseUrl, '/api/ssh-files/upload', {
+      method: 'POST',
+      cookie,
+      csrfToken,
+      body: { hostId: HOST_ID, localPath: '/tmp/local.txt', remotePath: '/tmp/remote.txt' },
+    });
+    assert.equal(upload.status, 200, 'balanced policy allows SSH file upload through hosted API');
+    assert.equal(upload.json.direction, 'upload');
+    assert.equal(upload.json.remotePath, '/tmp/remote.txt');
+    assert.equal(sshService.calls.some((call) => call.method === 'upload'), true, 'permitted upload dispatches to SSH file service');
+
     const listAudit = store.auditEvents.find((event) => event.type === 'ssh_file.list_route_completed');
     const statAudit = store.auditEvents.find((event) => event.type === 'ssh_file.stat_route_completed');
+    const downloadAudit = store.auditEvents.find((event) => event.type === 'ssh_file.download_route_completed');
+    const uploadAudit = store.auditEvents.find((event) => event.type === 'ssh_file.upload_route_completed');
     const policyDenied = store.auditEvents.find((event) => event.type === 'policy.denied'
       && event.metadata?.capability === 'host:file:write');
     assert.ok(listAudit, 'list route audit was written');
     assert.ok(statAudit, 'stat route audit was written');
+    assert.ok(downloadAudit, 'download route audit was written');
+    assert.ok(uploadAudit, 'upload route audit was written');
     assert.ok(policyDenied, 'upload policy denial audit was written');
     assert.equal(listAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/list');
     assert.equal(statAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/stat');
+    assert.equal(downloadAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/download');
+    assert.equal(uploadAudit.metadata.contractId, 'hosted:POST:/api/ssh-files/upload');
     assert.equal(listAudit.metadata.policyCapability, 'host:file:read');
     assert.equal(statAudit.metadata.policyCapability, 'host:file:read');
+    assert.equal(downloadAudit.metadata.policyCapability, 'host:file:read');
+    assert.equal(uploadAudit.metadata.policyCapability, 'host:file:write');
     assert.equal(listAudit.metadata.fileContentsLogged, false);
     assert.equal(statAudit.metadata.commandTextLogged, false);
+    assert.equal(downloadAudit.metadata.localPathLogged, false);
+    assert.equal(downloadAudit.metadata.remotePathLogged, false);
+    assert.equal(uploadAudit.metadata.localPathLogged, false);
+    assert.equal(uploadAudit.metadata.remotePathLogged, false);
     assert.equal(policyDenied.metadata.secretsLogged, false);
 
     const auditJson = JSON.stringify(store.auditEvents);
@@ -264,7 +300,7 @@ async function main() {
     assert.equal(auditJson.includes('listDir /var/log'), false, 'audit does not include SSH file command text');
     assert.equal(auditJson.includes('/tmp/local.txt'), false, 'audit does not include denied local transfer path');
 
-    console.log('ssh file route smoke: hosted auth, CSRF, policy, list/stat dispatch, and sanitized audit passed');
+    console.log('ssh file route smoke: hosted auth, CSRF, policy, list/stat/download/upload dispatch, and sanitized audit passed');
   } finally {
     server.close();
   }
