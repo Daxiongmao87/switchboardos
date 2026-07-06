@@ -15,6 +15,10 @@ const contractText = read('src/main/route-access-contracts.ts');
 const policyText = read('src/main/policy-service.ts');
 const agentsText = read('src/renderer/app/agents/agents.component.ts');
 const generatedRuntimeText = read('src/renderer/app/generated-app-runtime/generated-app-runtime.component.ts');
+const preloadText = read('src/preload/preload.ts');
+const switchboardApiText = read('src/renderer/app/switchboard-api.ts');
+const hostedApiText = read('src/renderer/app/hosted-api.ts');
+const hostOperationsText = read('src/renderer/app/host-operations/host-operations.component.ts');
 
 const REQUIRED_HOST_CONTRACTS = [
   {
@@ -115,6 +119,26 @@ const REQUIRED_HOST_CONTRACTS = [
   {
     id: 'ipc:ssh:exec',
     routeMarker: "'ssh:exec'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:ssh-file:list',
+    routeMarker: "'ssh-file:list'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:ssh-file:stat',
+    routeMarker: "'ssh-file:stat'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:ssh-file:download',
+    routeMarker: "'ssh-file:download'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:ssh-file:upload',
+    routeMarker: "'ssh-file:upload'",
     contextFile: 'src/main/main.ts',
   },
   {
@@ -521,6 +545,22 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:POST:/api/ssh-files/list',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/ssh-files/stat',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/ssh-files/download',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/ssh-files/upload',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:POST:/api/terminal/start',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -751,6 +791,8 @@ const REQUIRED_HOST_CAPABILITIES = [
   'host:update',
   'host:delete',
   'host:test-connection',
+  'host:file:read',
+  'host:file:write',
   'host:updateGroup',
   'host:setFavorite',
   'host:duplicate',
@@ -1277,8 +1319,74 @@ function validateHostedDispatches() {
     fail('Direct hosted SSH exec fallback detected in hosted-server.ts. SSH exec must execute through runHostRouteContract.');
   }
 
+  if (hostedText.includes('this.options.sshService.listDir(validateSshFileListInput(body))')
+    || hostedText.includes('this.options.sshService.stat(validateSshFileStatInput(body))')
+    || hostedText.includes('this.options.sshService.download(validateSshFileTransferInput(body))')
+    || hostedText.includes('this.options.sshService.upload(validateSshFileTransferInput(body))')) {
+    fail('Direct hosted SSH file fallback detected in hosted-server.ts. SSH file provider routes must execute through runHostRouteContract.');
+  }
+
   if (mainText.includes("policyService.assertAllowed('ssh:exec'")) {
     fail('IPC ssh:exec still uses direct policyService.assertAllowed instead of SSH route contract enforcement.');
+  }
+
+  if (mainText.includes("policyService.assertAllowed('host:file:")
+    || mainText.includes("policyService.assertAllowed('ssh:file:")) {
+    fail('IPC SSH file routes must use route contract enforcement instead of direct policyService.assertAllowed.');
+  }
+
+  if (mainText.includes("ipcMain.handle('ssh-file:list', async (_event, input) => sshService.listDir")
+    || mainText.includes("ipcMain.handle('ssh-file:stat', async (_event, input) => sshService.stat")
+    || mainText.includes("ipcMain.handle('ssh-file:download', async (_event, input) => sshService.download")
+    || mainText.includes("ipcMain.handle('ssh-file:upload', async (_event, input) => sshService.upload")) {
+    fail('Direct IPC SSH file fallback detected in main.ts. SSH file routes must execute through runHostRouteContract.');
+  }
+
+  if (!hostedText.includes("if (resource === 'ssh-files')")) {
+    fail('Hosted SSH file provider namespace /api/ssh-files is missing.');
+  }
+
+  if (!mainText.includes("ipcMain.handle('ssh-file:list'")
+    || !mainText.includes("ipcMain.handle('ssh-file:stat'")
+    || !mainText.includes("ipcMain.handle('ssh-file:download'")
+    || !mainText.includes("ipcMain.handle('ssh-file:upload'")) {
+    fail('IPC SSH file provider handlers for list/stat/download/upload are missing.');
+  }
+
+  if (!hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/list'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/stat'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/download'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/ssh-files/upload'")) {
+    fail('Hosted SSH file provider routes must reference all route contracts.');
+  }
+
+  if (!preloadText.includes('sshFile: {')
+    || !preloadText.includes("invoke('ssh-file:list'")
+    || !preloadText.includes("invoke('ssh-file:stat'")
+    || !preloadText.includes("invoke('ssh-file:download'")
+    || !preloadText.includes("invoke('ssh-file:upload'")) {
+    fail('Preload API must expose sshFile list/stat/download/upload IPC routes.');
+  }
+
+  if (!switchboardApiText.includes('sshFile: {')
+    || !hostedApiText.includes('sshFile: {')
+    || !hostedApiText.includes("request('/api/ssh-files/list'")
+    || !hostedApiText.includes("request('/api/ssh-files/stat'")
+    || !hostedApiText.includes("request('/api/ssh-files/download'")
+    || !hostedApiText.includes("request('/api/ssh-files/upload'")) {
+    fail('SwitchboardApi and hosted-api must expose structured sshFile provider methods.');
+  }
+
+  const filesBranchStart = hostOperationsText.indexOf("if (this.mode === 'files')");
+  const filesBranchEnd = filesBranchStart === -1 ? -1 : hostOperationsText.indexOf('} else {', filesBranchStart);
+  const filesBranch = filesBranchStart === -1 || filesBranchEnd === -1
+    ? ''
+    : hostOperationsText.slice(filesBranchStart, filesBranchEnd);
+  if (!filesBranch.includes('api.sshFile.list')) {
+    fail('File Browser files mode must use the structured sshFile.list provider API.');
+  }
+  if (filesBranch.includes('api.hostOperations.run')) {
+    fail('File Browser files mode must not use hostOperations.run command-string inspection.');
   }
 
   if (hostedText.includes("requireHostedCapability(request, session, 'terminal:")) {

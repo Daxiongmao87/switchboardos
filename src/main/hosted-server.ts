@@ -87,6 +87,9 @@ import type {
   OperatorActionExecuteResult,
   OperatorProposeResult,
   SshExecResult,
+  SshFileListResult,
+  SshFileStatResult,
+  SshFileTransferResult,
   TerminalResizeResult,
   TerminalStartResult,
   TerminalStopResult,
@@ -775,6 +778,10 @@ export class HostedServer {
 
     if (resource === 'ssh') {
       return this.routeSshApi(method, actionOrId, body, session);
+    }
+
+    if (resource === 'ssh-files') {
+      return this.routeSshFileApi(method, actionOrId, body, session);
     }
 
     if (resource === 'bootstrap') {
@@ -2114,6 +2121,79 @@ export class HostedServer {
     throw new HttpError(404, `No hosted SSH route for ${method}.`);
   }
 
+  private routeSshFileApi(
+    method: string,
+    action: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): Promise<unknown> {
+    if (method !== 'POST') {
+      throw new HttpError(405, 'SSH file hosted API only accepts POST commands.');
+    }
+
+    if (action === 'list') {
+      const validatedInput = validateSshFileListInput(body);
+      return this.runHostedSshRoute({
+        contractId: 'hosted:POST:/api/ssh-files/list',
+        session,
+        route: '/api/ssh-files/list',
+        action: 'POST /api/ssh-files/list',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.sshService.listDir(validatedInput),
+        successAuditMetadata: sshFileListRouteSuccessMetadata,
+      });
+    }
+
+    if (action === 'stat') {
+      const validatedInput = validateSshFileStatInput(body);
+      return this.runHostedSshRoute({
+        contractId: 'hosted:POST:/api/ssh-files/stat',
+        session,
+        route: '/api/ssh-files/stat',
+        action: 'POST /api/ssh-files/stat',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.sshService.stat(validatedInput),
+        successAuditMetadata: sshFileStatRouteSuccessMetadata,
+      });
+    }
+
+    if (action === 'download') {
+      const validatedInput = validateSshFileTransferInput(body);
+      return this.runHostedSshRoute({
+        contractId: 'hosted:POST:/api/ssh-files/download',
+        session,
+        route: '/api/ssh-files/download',
+        action: 'POST /api/ssh-files/download',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.sshService.download(validatedInput),
+        successAuditMetadata: sshFileTransferRouteSuccessMetadata,
+      });
+    }
+
+    if (action === 'upload') {
+      const validatedInput = validateSshFileTransferInput(body);
+      return this.runHostedSshRoute({
+        contractId: 'hosted:POST:/api/ssh-files/upload',
+        session,
+        route: '/api/ssh-files/upload',
+        action: 'POST /api/ssh-files/upload',
+        hostId: validatedInput.hostId,
+        entityType: 'host',
+        input: validatedInput,
+        execute: () => this.options.sshService.upload(validatedInput),
+        successAuditMetadata: sshFileTransferRouteSuccessMetadata,
+      });
+    }
+
+    throw new HttpError(404, `No hosted SSH file route for ${method}.`);
+  }
+
   private routeTerminalApi(
     method: string,
     action: string | undefined,
@@ -2525,6 +2605,49 @@ function sshExecRouteSuccessMetadata(result: SshExecResult): Record<string, unkn
     durationMs: result.durationMs,
     commandTextLogged: false,
     commandOutputLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileListRouteSuccessMetadata(result: SshFileListResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    entryCount: result.entries.length,
+    path: result.path,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileStatRouteSuccessMetadata(result: SshFileStatResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    entryFound: Boolean(result.entry),
+    path: result.path,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileTransferRouteSuccessMetadata(result: SshFileTransferResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    direction: result.direction,
+    localPathLogged: false,
+    remotePathLogged: false,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
     secretsLogged: false,
   };
 }

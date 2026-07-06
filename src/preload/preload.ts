@@ -58,6 +58,12 @@ import type {
   OperatorProposeResult,
   SshExecInput,
   SshExecResult,
+  SshFileListInput,
+  SshFileListResult,
+  SshFileStatInput,
+  SshFileStatResult,
+  SshFileTransferInput,
+  SshFileTransferResult,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalResizeResult,
@@ -405,6 +411,18 @@ contextBridge.exposeInMainWorld('sb', {
     exec: (input: SshExecInput): Promise<SshExecResult> => invoke('ssh:exec', input),
   },
 
+  // --- Structured SSH File Provider ---
+  sshFile: {
+    list: (input: SshFileListInput): Promise<SshFileListResult> =>
+      invoke('ssh-file:list', input),
+    stat: (input: SshFileStatInput): Promise<SshFileStatResult> =>
+      invoke('ssh-file:stat', input),
+    download: (input: SshFileTransferInput): Promise<SshFileTransferResult> =>
+      invoke('ssh-file:download', input),
+    upload: (input: SshFileTransferInput): Promise<SshFileTransferResult> =>
+      invoke('ssh-file:upload', input),
+  },
+
   // --- Bootstrap Generator ---
   bootstrap: {
     presets: (): Promise<BootstrapPreset[]> =>
@@ -569,6 +587,12 @@ declare global {
       };
       ssh: {
         exec: (input: SshExecInput) => Promise<SshExecResult>;
+      };
+      sshFile: {
+        list: (input: SshFileListInput) => Promise<SshFileListResult>;
+        stat: (input: SshFileStatInput) => Promise<SshFileStatResult>;
+        download: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
+        upload: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
       };
       bootstrap: {
         presets: () => Promise<BootstrapPreset[]>;

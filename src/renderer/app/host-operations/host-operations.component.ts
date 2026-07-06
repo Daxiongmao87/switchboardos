@@ -4,6 +4,8 @@ import type {
   HostOperationKind,
   HostOperationResult,
   HostRecord,
+  SshFileEntry,
+  SshFileListResult,
 } from '../../../shared/mvp-models';
 import { getSwitchboardApi } from '../switchboard-api';
 
@@ -23,6 +25,7 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
       class="operation-app"
       data-testid="host-operation-runtime"
       [attr.data-operation-kind]="mode"
+      [attr.data-provider-route]="mode === 'files' && result ? 'ssh-file:list' : 'host-operation:run'"
       [attr.data-host-context-id]="hostContextId || null"
       [attr.data-selected-host-id]="selectedHostId || null"
       [attr.data-row-count]="result?.rows?.length || 0"
@@ -367,7 +370,16 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.errorMessage = '';
     this.statusMessage = `Running read-only ${this.mode} inspection through backend ssh.`;
     try {
-      this.result = await api.hostOperations.run(input);
+      if (this.mode === 'files') {
+        const fileResult = await api.sshFile.list({
+          hostId: input.hostId,
+          path: input.path,
+          limit: input.limit,
+        });
+        this.result = this.mapSshFileListResult(fileResult);
+      } else {
+        this.result = await api.hostOperations.run(input);
+      }
       this.statusMessage = this.result.summary;
     } catch (error) {
       this.errorMessage = this.errorText(error, `Unable to run ${this.mode} inspection.`);
@@ -395,5 +407,38 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   private errorText(error: unknown, fallback: string): string {
     return error instanceof Error ? error.message : fallback;
+  }
+
+  private mapSshFileListResult(result: SshFileListResult): HostOperationResult {
+    return {
+      hostId: result.hostId,
+      kind: 'files',
+      command: 'ssh-file:list',
+      stdout: '',
+      stderr: result.error ?? '',
+      exitCode: result.exitCode,
+      durationMs: result.durationMs,
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
+      status: result.status,
+      error: result.error,
+      summary: result.status === 'success'
+        ? `${result.entries.length} file provider row(s) returned.`
+        : `file provider listing failed: ${result.error ?? `exit code ${result.exitCode ?? 'unknown'}`}.`,
+      rows: result.entries.map((entry) => this.mapSshFileEntry(entry)),
+    };
+  }
+
+  private mapSshFileEntry(entry: SshFileEntry): Record<string, string | number | boolean | null> {
+    return {
+      name: entry.name,
+      path: entry.path,
+      type: entry.type,
+      size: entry.size,
+      modified: entry.modified,
+      permissions: entry.permissions,
+      owner: entry.owner,
+      group: entry.group,
+    };
   }
 }

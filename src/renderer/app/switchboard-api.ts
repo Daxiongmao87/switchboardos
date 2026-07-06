@@ -34,6 +34,12 @@ import type {
   OperatorProposeResult,
   SshExecInput,
   SshExecResult,
+  SshFileListInput,
+  SshFileListResult,
+  SshFileStatInput,
+  SshFileStatResult,
+  SshFileTransferInput,
+  SshFileTransferResult,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalResizeResult,
@@ -214,6 +220,12 @@ export interface SwitchboardApi {
   };
   ssh: {
     exec: (input: SshExecInput) => Promise<SshExecResult>;
+  };
+  sshFile: {
+    list: (input: SshFileListInput) => Promise<SshFileListResult>;
+    stat: (input: SshFileStatInput) => Promise<SshFileStatResult>;
+    download: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
+    upload: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
   };
 }
 

@@ -9,6 +9,8 @@ export type PolicyCapability =
   | 'host:test-connection'
   | 'host:read'
   | 'host:actions'
+  | 'host:file:read'
+  | 'host:file:write'
   | 'host:updateGroup'
   | 'host:setFavorite'
   | 'host:duplicate'
@@ -101,6 +103,8 @@ const FULL_CAPABILITIES: readonly PolicyCapability[] = [
   'host:test-connection',
   'host:read',
   'host:actions',
+  'host:file:read',
+  'host:file:write',
   'host:updateGroup',
   'host:setFavorite',
   'host:duplicate',
@@ -171,6 +175,7 @@ const SAFE_CAPABILITIES: readonly PolicyCapability[] = [
   'bootstrap:run:read',
   'command-history:read',
   'settings:read',
+  'host:file:read',
   'ssh:file:read',
   'workspace-file:read',
   'workspace-profile:read',

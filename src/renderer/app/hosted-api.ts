@@ -34,6 +34,12 @@ import type {
   OperatorProposeResult,
   SshExecInput,
   SshExecResult,
+  SshFileListInput,
+  SshFileListResult,
+  SshFileStatInput,
+  SshFileStatResult,
+  SshFileTransferInput,
+  SshFileTransferResult,
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalResizeResult,
@@ -203,6 +209,12 @@ interface HostedSwitchboardApi {
   ssh: {
     exec: (input: SshExecInput) => Promise<SshExecResult>;
   };
+  sshFile: {
+    list: (input: SshFileListInput) => Promise<SshFileListResult>;
+    stat: (input: SshFileStatInput) => Promise<SshFileStatResult>;
+    download: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
+    upload: (input: SshFileTransferInput) => Promise<SshFileTransferResult>;
+  };
 }
 
 interface HostedRequestOptions {
@@ -338,6 +350,16 @@ function createHostedApi(): HostedSwitchboardApi {
     hostOperations: {
       run: (input: HostOperationInput) =>
         request('/api/host-operations/run', { method: 'POST', body: input }),
+    },
+    sshFile: {
+      list: (input: SshFileListInput) =>
+        request('/api/ssh-files/list', { method: 'POST', body: input }),
+      stat: (input: SshFileStatInput) =>
+        request('/api/ssh-files/stat', { method: 'POST', body: input }),
+      download: (input: SshFileTransferInput) =>
+        request('/api/ssh-files/download', { method: 'POST', body: input }),
+      upload: (input: SshFileTransferInput) =>
+        request('/api/ssh-files/upload', { method: 'POST', body: input }),
     },
     appManifest: {
       list: () => request('/api/app-manifests'),

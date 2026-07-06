@@ -146,8 +146,11 @@ import type {
   SshExecInput,
   SshExecResult,
   SshFileListInput,
+  SshFileListResult,
   SshFileStatInput,
+  SshFileStatResult,
   SshFileTransferInput,
+  SshFileTransferResult,
   TerminalResizeResult,
   TerminalStartResult,
   TerminalStopResult,
@@ -1093,6 +1096,49 @@ function sshExecRouteSuccessMetadata(result: SshExecResult): Record<string, unkn
     durationMs: result.durationMs,
     commandTextLogged: false,
     commandOutputLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileListRouteSuccessMetadata(result: SshFileListResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    entryCount: result.entries.length,
+    path: result.path,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileStatRouteSuccessMetadata(result: SshFileStatResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    entryFound: Boolean(result.entry),
+    path: result.path,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function sshFileTransferRouteSuccessMetadata(result: SshFileTransferResult): Record<string, unknown> {
+  return {
+    resultStatus: result.status,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    direction: result.direction,
+    localPathLogged: false,
+    remotePathLogged: false,
+    commandTextLogged: false,
+    commandOutputLogged: false,
+    fileContentsLogged: false,
     secretsLogged: false,
   };
 }
@@ -3645,6 +3691,66 @@ ipcMain.handle('ssh:exec', async (_event, input: SshExecInput) => {
     validatedInput,
     () => sshService.exec(validatedInput),
     sshExecRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('ssh-file:list', async (_event, input: SshFileListInput) => {
+  const validatedInput = validateSshFileListInput(input);
+  return runSshIpcRoute(
+    'ipc:ssh-file:list',
+    {
+      route: 'ssh-file:list',
+      action: 'ssh-file:list',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => sshService.listDir(validatedInput),
+    sshFileListRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('ssh-file:stat', async (_event, input: SshFileStatInput) => {
+  const validatedInput = validateSshFileStatInput(input);
+  return runSshIpcRoute(
+    'ipc:ssh-file:stat',
+    {
+      route: 'ssh-file:stat',
+      action: 'ssh-file:stat',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => sshService.stat(validatedInput),
+    sshFileStatRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('ssh-file:download', async (_event, input: SshFileTransferInput) => {
+  const validatedInput = validateSshFileTransferInput(input);
+  return runSshIpcRoute(
+    'ipc:ssh-file:download',
+    {
+      route: 'ssh-file:download',
+      action: 'ssh-file:download',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => sshService.download(validatedInput),
+    sshFileTransferRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('ssh-file:upload', async (_event, input: SshFileTransferInput) => {
+  const validatedInput = validateSshFileTransferInput(input);
+  return runSshIpcRoute(
+    'ipc:ssh-file:upload',
+    {
+      route: 'ssh-file:upload',
+      action: 'ssh-file:upload',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+    },
+    validatedInput,
+    () => sshService.upload(validatedInput),
+    sshFileTransferRouteSuccessMetadata,
   );
 });
 
