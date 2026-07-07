@@ -156,6 +156,7 @@ type LauncherTarget =
   | 'window'
   | 'launcher-row'
   | 'workspace-file'
+  | 'generated-app-element'
   | 'ssh-file-object'
   | 'ssh-file-row';
 
@@ -166,11 +167,12 @@ type ShellActionSource =
   | 'window-object'
   | 'host-object'
   | 'ssh-file-provider'
+  | 'generated-app-sdk'
   | 'applet-element-contribution'
   | (string & {});
 type PaletteTargetScope = 'command-palette' | 'focused-window' | 'global-keyboard';
 type KeyboardShortcutKind = 'shell' | 'app' | 'window-action';
-type ShellPrimitiveKind = 'panel' | 'tray-status' | 'taskbar-window' | 'notification' | 'ssh-file-object' | (string & {});
+type ShellPrimitiveKind = 'panel' | 'tray-status' | 'taskbar-window' | 'notification' | 'ssh-file-object' | 'generated-app-element' | (string & {});
 
 interface ShellPrimitiveObject {
   id: string;
@@ -676,7 +678,7 @@ interface ContextMenuState {
   workspaceArtifact?: WorkspaceArtifact;
   notification?: ShellNotificationContext;
   object?: ShellPrimitiveObject;
-  contributionSurface?: 'applet-element' | (string & {});
+  contributionSurface?: 'applet-element' | 'generated-app-sdk' | (string & {});
   focusReturnElement?: HTMLElement;
   items: ContextMenuItem[];
 }
@@ -2266,7 +2268,7 @@ export class AppComponent implements OnInit, OnDestroy {
       windowId: sourceWindowId,
       hostId: request.object.hostId,
       object,
-      contributionSurface: 'applet-element',
+      contributionSurface: request.object.source === 'generated-app-sdk' ? 'generated-app-sdk' : 'applet-element',
       focusReturnElement: request.focusReturnElement,
     });
   }
@@ -3873,6 +3875,7 @@ export class AppComponent implements OnInit, OnDestroy {
       manifest: windowItem.appDefinition.manifest ?? null,
       windowId: windowItem.windowId,
       hosts: this.hosts,
+      openAppletElementContextMenu: (request: AppletElementContextMenuRequest) => this.openAppletElementContextMenu(windowItem, request),
     };
   }
 
@@ -4784,6 +4787,7 @@ export class AppComponent implements OnInit, OnDestroy {
       'window',
       'launcher-row',
       'workspace-file',
+      'generated-app-element',
     ].includes(value);
   }
 
