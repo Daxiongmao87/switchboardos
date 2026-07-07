@@ -36,6 +36,35 @@ interface StudioDocument {
   value: string;
 }
 
+interface GeneratedAppManifestDraft {
+  appId: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  entrypoint: string;
+  icon: string;
+  category: string;
+  requestedCapabilities: string[];
+}
+
+interface GeneratedAppWorkspaceArtifact {
+  path: string;
+  kind: 'applet';
+  updatedAt: string;
+  size: number;
+}
+
+interface WorkspaceFileEntry {
+  id: string;
+  name: string;
+  kind: 'folder' | 'applet' | 'scriptlet' | 'note';
+  detail: string;
+  path: string;
+  updatedAt: string;
+  size?: number;
+}
+
 const STUDIO_DOCUMENTS: StudioDocument[] = [
   {
     kind: 'manifest',
@@ -399,8 +428,8 @@ export class AppStudioComponent implements AfterViewInit, OnDestroy {
     this.syncActiveDocumentFromEditor();
     this.approved = true;
     const api = getSwitchboardApi();
-    if (!api?.appManifest || !api.appPermission) {
-      this.errorMessage = 'SwitchboardOS app manifest APIs are unavailable.';
+    if (!api?.appManifest || !api.appPermission || !api.workspaceFile || !api.workspaceArtifactContent) {
+      this.errorMessage = 'SwitchboardOS app manifest and workspace artifact APIs are unavailable.';
       return;
     }
 
@@ -411,6 +440,7 @@ export class AppStudioComponent implements AfterViewInit, OnDestroy {
       const manifestDraft = this.parseManifestDraft();
       const sourceCode = this.documents.find((document) => document.kind === 'component')?.value ?? '';
       const existing = (await api.appManifest.list()).find((manifest) => manifest.appId === manifestDraft.appId);
+      const artifact = await this.persistGeneratedAppWorkspaceArtifact(manifestDraft, sourceCode, existing);
       const input = {
         appId: manifestDraft.appId,
         name: manifestDraft.name,
@@ -421,8 +451,17 @@ export class AppStudioComponent implements AfterViewInit, OnDestroy {
         icon: manifestDraft.icon,
         category: manifestDraft.category,
         capabilities: manifestDraft.requestedCapabilities,
-        sourceCode,
+        sourceCode: '',
         packageMetadata: {
+          ...(existing?.packageMetadata ?? {}),
+          artifactBacked: true,
+          artifactPath: artifact.path,
+          artifactKind: artifact.kind,
+          artifactContentRoute: 'workspaceArtifactContent',
+          artifactUpdatedAt: artifact.updatedAt,
+          artifactSize: artifact.size,
+          sourcePersistence: 'workspaceArtifactContent',
+          sourceCodeFallback: false,
           isolation: 'sandboxed-iframe-srcdoc',
           sdkBridge: 'postMessage',
           nodeAccess: false,
@@ -461,20 +500,25 @@ export class AppStudioComponent implements AfterViewInit, OnDestroy {
         type: 'app_studio.app_installed',
         entityType: 'app',
         entityId: manifest.appId,
-        message: 'Generated app approved and installed into the local launcher.',
+        message: 'Generated app approved, stored as a workspace applet artifact, and installed into the local launcher.',
         metadata: {
           appId: manifest.appId,
           manifestId: manifest.id,
           capabilities: manifestDraft.requestedCapabilities,
+          artifactPath: artifact.path,
+          artifactKind: artifact.kind,
+          artifactContentRoute: 'workspaceArtifactContent',
           isolation: 'sandboxed-iframe-srcdoc',
-          codePersisted: true,
+          sourcePersistedInManifest: false,
+          sourcePersistedInWorkspaceArtifact: true,
+          sourceCodeLogged: false,
           secretsLogged: false,
         },
       });
 
       this.installedAppId = manifest.appId;
       this.installStatus = 'installed';
-      this.statusMessage = `${manifest.name} installed into the launcher and desktop shortcuts.`;
+      this.statusMessage = `${manifest.name} installed from workspace artifact ${artifact.path}.`;
       window.postMessage({ type: 'sb:app-installed', appId: manifest.appId }, '*');
     } catch (error) {
       this.installStatus = 'failed';
@@ -484,17 +528,7 @@ export class AppStudioComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private parseManifestDraft(): {
-    appId: string;
-    name: string;
-    description: string;
-    version: string;
-    author: string;
-    entrypoint: string;
-    icon: string;
-    category: string;
-    requestedCapabilities: string[];
-  } {
+  private parseManifestDraft(): GeneratedAppManifestDraft {
     const manifestDoc = this.documents.find((document) => document.kind === 'manifest');
     const parsed = JSON.parse(manifestDoc?.value ?? '{}') as Partial<AppManifest> & {
       requestedCapabilities?: string[];
@@ -516,6 +550,114 @@ export class AppStudioComponent implements AfterViewInit, OnDestroy {
       category: stringField(parsed.category, 'visualization'),
       requestedCapabilities: capabilities,
     };
+  }
+
+  private async persistGeneratedAppWorkspaceArtifact(
+    manifestDraft: GeneratedAppManifestDraft,
+    sourceCode: string,
+    existing: AppManifest | undefined,
+  ): Promise<GeneratedAppWorkspaceArtifact> {
+    const api = getSwitchboardApi();
+    if (!api?.workspaceFile || !api.workspaceArtifactContent) {
+      throw new Error('SwitchboardOS workspace artifact APIs are unavailable.');
+    }
+
+    const artifactPath = await this.resolveGeneratedAppArtifactPath(manifestDraft, existing);
+    const now = new Date().toISOString();
+    const artifactManifest = {
+      schemaVersion: 1,
+      kind: 'applet',
+      appId: manifestDraft.appId,
+      name: manifestDraft.name,
+      description: manifestDraft.description,
+      version: manifestDraft.version,
+      author: manifestDraft.author,
+      entrypoint: manifestDraft.entrypoint,
+      icon: manifestDraft.icon,
+      category: manifestDraft.category,
+      capabilities: manifestDraft.requestedCapabilities,
+      sourceCode,
+      source: {
+        language: 'javascript',
+        entrypoint: manifestDraft.entrypoint,
+        code: sourceCode,
+      },
+      provenance: {
+        generatedBy: 'app-studio-demo',
+        approvedBy: 'local-operator',
+        approvedAt: now,
+        sourceCodeLogged: false,
+        secretsLogged: false,
+      },
+    };
+    const updated = await api.workspaceArtifactContent.update(artifactPath, JSON.stringify(artifactManifest, null, 2));
+    if (updated.kind !== 'applet') {
+      throw new Error('Generated app workspace artifact must be an applet manifest.');
+    }
+    return {
+      path: updated.path,
+      kind: updated.kind,
+      updatedAt: updated.updatedAt,
+      size: updated.size,
+    };
+  }
+
+  private async resolveGeneratedAppArtifactPath(
+    manifestDraft: GeneratedAppManifestDraft,
+    existing: AppManifest | undefined,
+  ): Promise<string> {
+    const api = getSwitchboardApi();
+    if (!api?.workspaceFile) {
+      throw new Error('SwitchboardOS workspace file API is unavailable.');
+    }
+
+    const existingPath = typeof existing?.packageMetadata?.['artifactPath'] === 'string'
+      ? existing.packageMetadata['artifactPath'].trim()
+      : '';
+    if (existingPath) {
+      try {
+        await api.workspaceArtifactContent.get(existingPath);
+        return existingPath;
+      } catch {
+        // The registry entry points at a missing artifact; create a replacement below.
+      }
+    }
+
+    const targetName = `${this.sanitizeArtifactFileBase(manifestDraft.appId)}.sbapplet.json`;
+    const existingArtifact = await this.findWorkspaceArtifactByName(targetName);
+    if (existingArtifact?.path) {
+      return existingArtifact.path;
+    }
+
+    const created = await api.workspaceFile.createFile('applet', '');
+    if (!created.path) {
+      throw new Error('Workspace applet artifact creation did not return a path.');
+    }
+
+    try {
+      const renamed = await api.workspaceFile.rename(created.path, targetName);
+      return renamed.path || created.path;
+    } catch {
+      return created.path;
+    }
+  }
+
+  private async findWorkspaceArtifactByName(targetName: string): Promise<WorkspaceFileEntry | null> {
+    const api = getSwitchboardApi();
+    if (!api?.workspaceFile) {
+      return null;
+    }
+    const rootFiles = await api.workspaceFile.list('');
+    return rootFiles.find((entry) => entry.kind === 'applet' && entry.name === targetName) ?? null;
+  }
+
+  private sanitizeArtifactFileBase(value: string): string {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      || 'generated-app';
   }
 
   private syncActiveDocumentFromEditor(): void {

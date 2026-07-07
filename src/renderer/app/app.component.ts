@@ -18,6 +18,7 @@ import type {
   ShellWindowRuntimeMetadata,
   ShellWindowSemanticState,
   ShellWindowSnapshot,
+  WorkspaceArtifactContentRecord,
   WorkspaceProfile,
   WorkspaceLayoutSnapshot,
   UpdateAppManifestInput,
@@ -79,6 +80,10 @@ interface ShellApi {
     restoreTrashItem: (id: string) => Promise<WorkspaceArtifact>;
     deleteTrashItemPermanent: (id: string) => Promise<boolean>;
     emptyTrash: () => Promise<boolean>;
+  };
+  workspaceArtifactContent?: {
+    get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
+    update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
   };
   appManifest: {
     list: () => Promise<AppManifest[]>;
@@ -609,6 +614,38 @@ function normalizeWorkspaceArtifact(value: unknown): WorkspaceArtifact | null {
     updatedAt,
     size,
   };
+}
+
+function stringPackageMetadata(manifest: AppManifest, key: string): string | null {
+  const value = manifest.packageMetadata[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function generatedAppArtifactPath(manifest: AppManifest): string | null {
+  return stringPackageMetadata(manifest, 'artifactPath');
+}
+
+function hasGeneratedAppContentReference(manifest: AppManifest): boolean {
+  return Boolean(manifest.sourceCode.trim() || generatedAppArtifactPath(manifest));
+}
+
+function generatedAppSourceFromArtifact(record: WorkspaceArtifactContentRecord): string {
+  const manifest = record.manifest;
+  const sourceCode = manifest['sourceCode'];
+  if (typeof sourceCode === 'string') {
+    return sourceCode;
+  }
+
+  const source = manifest['source'];
+  if (source && typeof source === 'object' && !Array.isArray(source)) {
+    const sourceRecord = source as Record<string, unknown>;
+    const code = sourceRecord['code'];
+    if (typeof code === 'string') {
+      return code;
+    }
+  }
+
+  return '';
 }
 
 interface DesktopIconPosition {
@@ -1797,11 +1834,84 @@ export class AppComponent implements OnInit, OnDestroy {
 
     try {
       const manifests = await api.appManifest.list();
-      this.installedAppDefinitions = manifests
-        .filter((manifest) => manifest.enabled && manifest.sourceCode.trim())
+      const resolvedManifests = await Promise.all(manifests
+        .filter((manifest) => manifest.enabled && hasGeneratedAppContentReference(manifest))
+        .map((manifest) => this.resolveInstalledGeneratedAppManifest(manifest)));
+      this.installedAppDefinitions = resolvedManifests
+        .filter((manifest): manifest is AppManifest => manifest !== null)
         .map((manifest) => this.definitionFromManifest(manifest));
     } catch (error) {
       this.errorMessage = this.errorText(error, 'Unable to load installed generated apps.');
+    }
+  }
+
+  private async resolveInstalledGeneratedAppManifest(manifest: AppManifest): Promise<AppManifest | null> {
+    const artifactPath = generatedAppArtifactPath(manifest);
+    if (!artifactPath) {
+      return manifest.sourceCode.trim() ? manifest : null;
+    }
+
+    const api = getSwitchboardApi();
+    if (!api?.workspaceArtifactContent) {
+      if (manifest.sourceCode.trim()) {
+        return {
+          ...manifest,
+          packageMetadata: {
+            ...manifest.packageMetadata,
+            artifactLoadStatus: 'fallback-manifest-source',
+            artifactLoadReason: 'workspace artifact content API unavailable',
+          },
+        };
+      }
+      return null;
+    }
+
+    try {
+      const artifact = await api.workspaceArtifactContent.get(artifactPath);
+      const sourceCode = generatedAppSourceFromArtifact(artifact);
+      if (!sourceCode.trim()) {
+        if (manifest.sourceCode.trim()) {
+          return {
+            ...manifest,
+            packageMetadata: {
+              ...manifest.packageMetadata,
+              artifactLoadStatus: 'fallback-manifest-source',
+              artifactLoadReason: 'workspace artifact did not contain generated app source',
+            },
+          };
+        }
+        return null;
+      }
+
+      return {
+        ...manifest,
+        sourceCode,
+        packageMetadata: {
+          ...manifest.packageMetadata,
+          artifactBacked: true,
+          artifactPath: artifact.path,
+          artifactKind: artifact.kind,
+          artifactContentRoute: 'workspaceArtifactContent',
+          artifactUpdatedAt: artifact.updatedAt,
+          artifactSize: artifact.size,
+          artifactLoadStatus: 'loaded',
+          sourcePersistence: 'workspaceArtifactContent',
+          sourceCodeFallback: Boolean(manifest.sourceCode.trim()),
+        },
+      };
+    } catch (error) {
+      if (manifest.sourceCode.trim()) {
+        return {
+          ...manifest,
+          packageMetadata: {
+            ...manifest.packageMetadata,
+            artifactLoadStatus: 'fallback-manifest-source',
+            artifactLoadReason: this.errorText(error, 'workspace artifact content unavailable'),
+          },
+        };
+      }
+      this.errorMessage = this.errorText(error, `Unable to load workspace artifact for ${manifest.name}.`);
+      return null;
     }
   }
 
@@ -5102,6 +5212,8 @@ export class AppComponent implements OnInit, OnDestroy {
     const generatedDefinition = this.getAppDefinition(appId);
     if (generatedDefinition?.generated && generatedDefinition.manifest) {
       const manifest = generatedDefinition.manifest;
+      const artifactPath = generatedAppArtifactPath(manifest);
+      const sourcePersistence = stringPackageMetadata(manifest, 'sourcePersistence') ?? 'appManifest.sourceCode';
       return {
         kind: 'generated-app',
         status: 'installed',
@@ -5109,7 +5221,14 @@ export class AppComponent implements OnInit, OnDestroy {
         metadata: {
           appId: manifest.appId,
           manifestId: manifest.id,
-          sourceCodePersisted: Boolean(manifest.sourceCode),
+          artifactBacked: Boolean(artifactPath),
+          artifactPath,
+          artifactKind: stringPackageMetadata(manifest, 'artifactKind'),
+          artifactContentRoute: stringPackageMetadata(manifest, 'artifactContentRoute'),
+          artifactLoadStatus: stringPackageMetadata(manifest, 'artifactLoadStatus'),
+          sourcePersistence,
+          sourceCodeLoaded: Boolean(manifest.sourceCode),
+          sourceCodePersisted: Boolean(manifest.sourceCode) && sourcePersistence !== 'workspaceArtifactContent',
           isolation: 'sandboxed-iframe-srcdoc',
           sdkBridge: 'postMessage',
           nodeAccess: false,

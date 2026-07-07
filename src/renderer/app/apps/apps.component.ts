@@ -71,6 +71,9 @@ interface AppPanel {
               <h3>{{ manifest.name }}</h3>
               <p>{{ manifest.description }}</p>
               <span>{{ manifest.category }} - v{{ manifest.version }}</span>
+              <span class="app-artifact-status" [attr.data-testid]="'app-artifact-status-' + manifest.appId">
+                {{ artifactStatusFor(manifest) }}
+              </span>
             </div>
             <button type="button" class="primary-action" (click)="launchApp(manifest)">
               Launch
@@ -466,6 +469,7 @@ interface AppPanel {
 })
 export class AppsComponent implements OnInit {
   manifests: SwitchboardAppManifest[] = [...BUILTIN_APP_MANIFESTS];
+  installedManifests: AppManifest[] = [];
   readonly exampleAppId = EXAMPLE_HOST_MAP_APP.id;
   context: SwitchboardAppContext = {
     hosts: [],
@@ -516,9 +520,10 @@ export class AppsComponent implements OnInit {
       this.manifests = [
         ...BUILTIN_APP_MANIFESTS,
         ...installedManifests
-          .filter((manifest) => manifest.enabled && manifest.sourceCode.trim())
+          .filter((manifest) => manifest.enabled && hasGeneratedAppContentReference(manifest))
           .map((manifest) => generatedManifestToSdkManifest(manifest)),
       ];
+      this.installedManifests = installedManifests;
       this.statusMessage = 'SDK context refreshed from local state.';
     } catch {
       this.errorMessage = 'Unable to load local SDK context.';
@@ -573,6 +578,21 @@ export class AppsComponent implements OnInit {
     return manifest.id;
   }
 
+  artifactStatusFor(manifest: SwitchboardAppManifest): string {
+    const installed = this.installedManifestByAppId(manifest.appId);
+    if (!installed) {
+      return 'Built-in app';
+    }
+    const artifactPath = stringPackageMetadata(installed, 'artifactPath');
+    return artifactPath
+      ? `Workspace artifact: ${artifactPath}`
+      : 'Legacy manifest source';
+  }
+
+  private installedManifestByAppId(appId: string): AppManifest | null {
+    return this.installedManifests.find((manifest) => manifest.appId === appId) ?? null;
+  }
+
   trackPanel(_index: number, panel: AppPanel): string {
     return panel.id;
   }
@@ -611,6 +631,15 @@ const APP_CATEGORIES: readonly SwitchboardAppCategory[] = [
   'authoring',
   'operations',
 ];
+
+function stringPackageMetadata(manifest: AppManifest, key: string): string | null {
+  const value = manifest.packageMetadata[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function hasGeneratedAppContentReference(manifest: AppManifest): boolean {
+  return Boolean(manifest.sourceCode.trim() || stringPackageMetadata(manifest, 'artifactPath'));
+}
 
 function generatedManifestToSdkManifest(manifest: AppManifest): SwitchboardAppManifest {
   const actionRegistry = manifest.packageMetadata['actionRegistry'];
