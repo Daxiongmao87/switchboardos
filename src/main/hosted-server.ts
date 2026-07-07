@@ -49,6 +49,8 @@ import {
   validateTerminalWriteInput,
   validateNoInput,
   validateWorkspaceFileCopyMoveInput,
+  validateWorkspaceArtifactContentGetInput,
+  validateWorkspaceArtifactContentUpdateInput,
   validateWorkspaceFileCreateFileInput,
   validateWorkspaceFileListInput,
   validateWorkspaceFilePathInput,
@@ -101,6 +103,7 @@ import type {
   TerminalExitEvent,
   TerminalOutputEvent,
   TerminalStatusEvent,
+  WorkspaceArtifactContentRecord,
 } from '../shared/mvp-models';
 
 type TerminalChannel = 'terminal:output' | 'terminal:status' | 'terminal:exit';
@@ -160,6 +163,8 @@ interface HostedServerOptions {
   listWorkspaceFiles: (relativePath: string) => WorkspaceFileEntry[];
   createWorkspaceFolder: (targetRelativePath?: string) => WorkspaceFileEntry;
   createWorkspaceFile: (kind: WorkspaceFileEntry['kind'], targetRelativePath?: string) => WorkspaceFileEntry;
+  readWorkspaceArtifactContent: (relativePath: string) => WorkspaceArtifactContentRecord;
+  updateWorkspaceArtifactContent: (input: { path: string; content: string }) => WorkspaceArtifactContentRecord;
   renameWorkspaceFile: (relativePath: string, newName: string) => WorkspaceFileEntry;
   duplicateWorkspaceFile: (relativePath: string) => WorkspaceFileEntry;
   copyWorkspaceFile: (relativePath: string, targetRelativePath?: string) => WorkspaceFileEntry;
@@ -730,6 +735,10 @@ export class HostedServer {
       return this.routeWorkspaceFileApi(method, segments, body, url, session);
     }
 
+    if (resource === 'workspace-artifacts') {
+      return this.routeWorkspaceArtifactApi(method, segments, body, url, session);
+    }
+
     if (resource === 'command-history') {
       return this.routeCommandHistoryApi(method, actionOrId, body, session);
     }
@@ -1290,6 +1299,7 @@ export class HostedServer {
       entityType: string;
       input: unknown;
       execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
     },
   ): Promise<TResult> {
     return runHostRouteContract({
@@ -1306,7 +1316,54 @@ export class HostedServer {
       },
       input: params.input,
       execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
     });
+  }
+
+  private routeWorkspaceArtifactApi(
+    method: string,
+    segments: string[],
+    body: unknown,
+    url: URL,
+    session: HostedSession | null,
+  ): unknown {
+    const [, action] = segments;
+    if (action !== 'content' || segments.length !== 2) {
+      throw new HttpError(404, `No hosted workspace artifact route for ${method} /api/${segments.join('/')}.`);
+    }
+
+    if (method === 'GET') {
+      validateHostedNoRequestBody(body);
+      const input = validateWorkspaceArtifactContentGetInput({ path: url.searchParams.get('path') });
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:GET:/api/workspace-artifacts/content',
+        session,
+        route: '/api/workspace-artifacts/content',
+        action: 'GET /api/workspace-artifacts/content',
+        entityId: workspaceArtifactContentEntityId(input.path),
+        entityType: 'workspace_artifact',
+        input,
+        execute: () => this.options.readWorkspaceArtifactContent(input.path),
+        successAuditMetadata: workspaceArtifactContentRouteSuccessMetadata,
+      });
+    }
+
+    if (method === 'PUT') {
+      const input = validateWorkspaceArtifactContentUpdateInput(asRecord(body));
+      return this.runHostedWorkspaceFileRoute({
+        contractId: 'hosted:PUT:/api/workspace-artifacts/content',
+        session,
+        route: '/api/workspace-artifacts/content',
+        action: 'PUT /api/workspace-artifacts/content',
+        entityId: workspaceArtifactContentEntityId(input.path),
+        entityType: 'workspace_artifact',
+        input,
+        execute: () => this.options.updateWorkspaceArtifactContent(input),
+        successAuditMetadata: workspaceArtifactContentRouteSuccessMetadata,
+      });
+    }
+
+    throw new HttpError(404, `No hosted workspace artifact route for ${method} /api/${segments.join('/')}.`);
   }
 
   private routeWorkspaceFileApi(
@@ -2827,6 +2884,32 @@ function appScopedStorageRouteSuccessMetadata(result: AppScopedStorageResult): R
     storageValueLogged: false,
     sourceCodeLogged: false,
     packageMetadataLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function workspaceArtifactContentPathHash(pathValue: string): string {
+  return createHash('sha256').update(pathValue).digest('hex').slice(0, 16);
+}
+
+function workspaceArtifactContentEntityId(pathValue: string): string {
+  return `workspace-artifact:${workspaceArtifactContentPathHash(pathValue)}`;
+}
+
+function workspaceArtifactContentRouteSuccessMetadata(result: WorkspaceArtifactContentRecord): Record<string, unknown> {
+  return {
+    pathHash: workspaceArtifactContentPathHash(result.path),
+    pathLength: result.path.length,
+    kind: result.kind,
+    size: result.size,
+    capabilityCount: result.capabilities.length,
+    contentLength: result.content.length,
+    contentType: result.contentType,
+    artifactContentLogged: false,
+    manifestLogged: false,
+    sourceCodeLogged: false,
+    fileContentsLogged: false,
     providerPayloadLogged: false,
     secretsLogged: false,
   };

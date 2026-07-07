@@ -391,6 +391,16 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:workspace-artifact-content:get',
+    routeMarker: "'workspace-artifact-content:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
+    id: 'ipc:workspace-artifact-content:update',
+    routeMarker: "'workspace-artifact-content:update'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:rename',
     routeMarker: "'workspace-file:rename'",
     contextFile: 'src/main/main.ts',
@@ -732,6 +742,14 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:POST:/api/workspace-files/file',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/workspace-artifacts/content',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PUT:/api/workspace-artifacts/content',
     contextFile: 'src/main/hosted-server.ts',
   },
   {
@@ -1190,14 +1208,14 @@ function validateHostedDispatches() {
     fail('Hosted route handlers are not using runHostRouteContract.');
   }
 
-  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/workspace-files'))) {
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/workspace-files') || entry.id.includes('/api/workspace-artifacts'))) {
     const workspaceHelperIndex = hostedText.indexOf('runHostedWorkspaceFileRoute');
     if (workspaceHelperIndex === -1) {
-      fail('Hosted workspace file routes are not using runHostedWorkspaceFileRoute.');
+      fail('Hosted workspace file/artifact routes are not using runHostedWorkspaceFileRoute.');
     } else {
       const helperBody = hostedText.slice(workspaceHelperIndex, workspaceHelperIndex + 1600);
       if (!helperBody.includes('runHostRouteContract({')) {
-        fail('Hosted workspace file helper is not backed by runHostRouteContract.');
+        fail('Hosted workspace file/artifact helper is not backed by runHostRouteContract.');
       }
     }
   }
@@ -1272,6 +1290,39 @@ function validateHostedDispatches() {
         fail('Hosted agent operator helper is not backed by runHostRouteContract.');
       }
     }
+  }
+
+  if (!mainText.includes("'workspace-artifact-content:get'")
+    || !mainText.includes("'workspace-artifact-content:update'")
+    || !mainText.includes('validateWorkspaceArtifactContentGetInput')
+    || !mainText.includes('validateWorkspaceArtifactContentUpdateInput')) {
+    fail('IPC workspace artifact content routes must expose validated get/update handlers in main.ts.');
+  }
+
+  if (!hostedText.includes("if (resource === 'workspace-artifacts')")
+    || !hostedText.includes("contractId: 'hosted:GET:/api/workspace-artifacts/content'")
+    || !hostedText.includes("contractId: 'hosted:PUT:/api/workspace-artifacts/content'")) {
+    fail('Hosted workspace artifact content routes must expose /api/workspace-artifacts/content with route contracts.');
+  }
+
+  if (!preloadText.includes('workspaceArtifactContent: {')
+    || !preloadText.includes("invoke('workspace-artifact-content:get'")
+    || !preloadText.includes("invoke('workspace-artifact-content:update'")) {
+    fail('Preload API must expose workspaceArtifactContent get/update IPC routes.');
+  }
+
+  if (!switchboardApiText.includes('workspaceArtifactContent: {')
+    || !hostedApiText.includes('workspaceArtifactContent: {')
+    || !hostedApiText.includes('/api/workspace-artifacts/content')) {
+    fail('SwitchboardApi and hosted-api must expose structured workspaceArtifactContent methods.');
+  }
+
+  if (!contractText.includes('workspace-artifact-content-route')
+    || !contractText.includes('artifactContentLogged: false')
+    || !contractText.includes('manifestLogged: false')
+    || !mainText.includes('artifactContentLogged: false')
+    || !hostedText.includes('artifactContentLogged: false')) {
+    fail('Workspace artifact content routes must keep sanitized audit metadata and never log raw content or manifests.');
   }
 
   if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/app-manifests')

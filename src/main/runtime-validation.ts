@@ -53,6 +53,7 @@ import type {
   UpdateCredentialRefInput,
   CreateWorkspaceProfileInput,
   UpdateWorkspaceProfileInput,
+  WorkspaceArtifactContentUpdateInput,
   WorkspaceLayoutSnapshot,
 } from '../shared/mvp-models';
 
@@ -109,8 +110,10 @@ const GENERATED_APP_HOST_SDK_METHODS: readonly GeneratedAppHostSdkMethod[] = [
   'host:testConnection',
 ];
 const WORKSPACE_FILE_KINDS = ['applet', 'scriptlet', 'note'] as const;
+const WORKSPACE_ARTIFACT_CONTENT_KINDS = ['applet', 'scriptlet'] as const;
 const CREDENTIAL_TYPES: readonly CredentialType[] = ['keychain_ref', 'file_path', 'ssh_agent', 'env_var'];
 const MAX_OPERATOR_ACTION_COMMAND_LENGTH = 4000;
+const MAX_WORKSPACE_ARTIFACT_CONTENT_LENGTH = 1_000_000;
 
 export type WorkspaceFileKindInput = typeof WORKSPACE_FILE_KINDS[number];
 
@@ -127,6 +130,10 @@ export interface WorkspaceFileRenameInput {
 export interface WorkspaceFileCopyMoveInput {
   path: string;
   targetPath: string;
+}
+
+export interface WorkspaceArtifactContentGetInput {
+  path: string;
 }
 
 export function validateSshExecInput(value: unknown): SshExecInput {
@@ -654,6 +661,33 @@ export function validateWorkspaceFileCopyMoveInput(value: unknown): WorkspaceFil
   return {
     path: requireNonEmptyString(record.path, 'path'),
     targetPath: optionalString(record.targetPath, 'targetPath'),
+  };
+}
+
+export function validateWorkspaceArtifactContentGetInput(value: unknown): WorkspaceArtifactContentGetInput {
+  const record = requireRecord(value, 'workspace artifact content get input');
+  return {
+    path: requireNonEmptyString(record.path, 'path'),
+  };
+}
+
+export function validateWorkspaceArtifactContentUpdateInput(value: unknown): WorkspaceArtifactContentUpdateInput {
+  const record = requireRecord(value, 'workspace artifact content update input');
+  const content = requireString(record.content, 'content');
+  if (content.length > MAX_WORKSPACE_ARTIFACT_CONTENT_LENGTH) {
+    throw new RuntimeValidationError(`content must be ${MAX_WORKSPACE_ARTIFACT_CONTENT_LENGTH} characters or fewer.`);
+  }
+  const parsed = parseWorkspaceArtifactManifest(content);
+  const kind = parsed.kind;
+  if (!WORKSPACE_ARTIFACT_CONTENT_KINDS.includes(kind as typeof WORKSPACE_ARTIFACT_CONTENT_KINDS[number])) {
+    throw new RuntimeValidationError('manifest kind must be applet or scriptlet.');
+  }
+  if (parsed.capabilities !== undefined) {
+    requireStringList(parsed.capabilities, 'manifest.capabilities');
+  }
+  return {
+    path: requireNonEmptyString(record.path, 'path'),
+    content,
   };
 }
 
@@ -1195,6 +1229,16 @@ function normalizeWorkspaceFileKind(value: unknown): WorkspaceFileKindInput {
   return WORKSPACE_FILE_KINDS.includes(value as WorkspaceFileKindInput)
     ? value as WorkspaceFileKindInput
     : 'note';
+}
+
+function parseWorkspaceArtifactManifest(content: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch {
+    throw new RuntimeValidationError('content must be a JSON applet or scriptlet manifest.');
+  }
+  return requireRecord(parsed, 'manifest');
 }
 
 function validateWorkspaceLayoutInput(value: unknown): WorkspaceLayoutSnapshot {

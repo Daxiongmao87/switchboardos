@@ -55,6 +55,7 @@ import type {
   UpdateAgentEndpointInput,
   UpdateHostInput,
   UpdateWorkspaceProfileInput,
+  WorkspaceArtifactContentRecord,
   WorkspaceProfile,
 } from '../../shared/mvp-models';
 import type { AppInfo } from './switchboard-api';
@@ -162,6 +163,10 @@ interface HostedSwitchboardApi {
     restoreTrashItem: (id: string) => Promise<WorkspaceFileEntry>;
     deleteTrashItemPermanent: (id: string) => Promise<boolean>;
     emptyTrash: () => Promise<boolean>;
+  };
+  workspaceArtifactContent: {
+    get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
+    update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
   };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;
@@ -340,6 +345,12 @@ function createHostedApi(): HostedSwitchboardApi {
         request<boolean>(`/api/workspace-files/trash/${encodeURIComponent(id)}`, { method: 'DELETE' }),
       emptyTrash: () =>
         request<boolean>('/api/workspace-files/trash', { method: 'DELETE' }),
+    },
+    workspaceArtifactContent: {
+      get: (path: string) =>
+        request(`/api/workspace-artifacts/content?path=${encodeURIComponent(path)}`),
+      update: (path: string, content: string) =>
+        request('/api/workspace-artifacts/content', { method: 'PUT', body: { path, content } }),
     },
     bootstrap: {
       presets: () => request('/api/bootstrap/presets'),

@@ -55,6 +55,7 @@ import type {
   UpdateAgentEndpointInput,
   UpdateHostInput,
   UpdateWorkspaceProfileInput,
+  WorkspaceArtifactContentRecord,
   WorkspaceProfile,
 } from '../../shared/mvp-models';
 
@@ -174,6 +175,10 @@ export interface SwitchboardApi {
     restoreTrashItem: (id: string) => Promise<WorkspaceFileEntry>;
     deleteTrashItemPermanent: (id: string) => Promise<boolean>;
     emptyTrash: () => Promise<boolean>;
+  };
+  workspaceArtifactContent: {
+    get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
+    update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
   };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;

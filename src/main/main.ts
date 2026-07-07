@@ -33,6 +33,7 @@ import {
   runHostRouteContract,
 } from './route-access-contracts';
 import {
+  RuntimeValidationError,
   validateAgentEndpointCreateInput,
   validateAgentEndpointIdInput,
   validateAgentEndpointUpdateInput,
@@ -94,6 +95,8 @@ import {
   validateTerminalStopInput,
   validateTerminalWriteInput,
   validateWorkspaceFileCopyMoveInput,
+  validateWorkspaceArtifactContentGetInput,
+  validateWorkspaceArtifactContentUpdateInput,
   validateWorkspaceFileCreateFileInput,
   validateWorkspaceFileListInput,
   validateWorkspaceFilePathInput,
@@ -169,6 +172,8 @@ import type {
   UpdateHostGroupInput,
   UpdateHostInput,
   UpdateHostTagInput,
+  WorkspaceArtifactContentRecord,
+  WorkspaceArtifactContentUpdateInput,
   UpdateWorkspaceProfileInput,
 } from '../shared/mvp-models';
 
@@ -362,6 +367,8 @@ async function startHostedServer(config: HostedConfig): Promise<void> {
     listWorkspaceFiles,
     createWorkspaceFolder,
     createWorkspaceFile,
+    readWorkspaceArtifactContent,
+    updateWorkspaceArtifactContent,
     renameWorkspaceFile,
     duplicateWorkspaceFile,
     copyWorkspaceFile,
@@ -519,6 +526,87 @@ function workspaceEntryForPath(root: string, absolutePath: string): WorkspaceFil
     updatedAt: stats.mtime.toISOString(),
     size: stats.size,
   };
+}
+
+function workspaceArtifactContentKindForName(name: string): WorkspaceArtifactContentRecord['kind'] | null {
+  const kind = artifactKindForName(name, false);
+  return kind === 'applet' || kind === 'scriptlet' ? kind : null;
+}
+
+function parseWorkspaceArtifactContentManifest(content: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch {
+    throw new RuntimeValidationError('Workspace artifact content must be a JSON manifest.');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new RuntimeValidationError('Workspace artifact manifest must be an object.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function capabilitiesFromWorkspaceArtifactManifest(manifest: Record<string, unknown>): string[] {
+  if (!Array.isArray(manifest.capabilities)) {
+    return [];
+  }
+  return manifest.capabilities.filter((capability): capability is string => typeof capability === 'string');
+}
+
+function workspaceArtifactContentPath(inputPath: string): { root: string; absolutePath: string; relativePath: string; kind: WorkspaceArtifactContentRecord['kind']; name: string } {
+  const root = workspaceRoot();
+  const absolutePath = workspaceUserPath(inputPath);
+  if (!existsSync(absolutePath)) {
+    throw new RuntimeValidationError(`Workspace artifact does not exist: "${inputPath}".`);
+  }
+  const stats = statSync(absolutePath);
+  if (!stats.isFile()) {
+    throw new RuntimeValidationError(`Workspace artifact content is available only for applet and scriptlet files: "${inputPath}".`);
+  }
+  const name = basename(absolutePath);
+  const kind = workspaceArtifactContentKindForName(name);
+  if (!kind) {
+    throw new RuntimeValidationError('Workspace artifact content route only supports applet and scriptlet manifests.');
+  }
+  return {
+    root,
+    absolutePath,
+    relativePath: relative(root, absolutePath),
+    kind,
+    name,
+  };
+}
+
+function readWorkspaceArtifactContent(inputPath: string): WorkspaceArtifactContentRecord {
+  const target = workspaceArtifactContentPath(inputPath);
+  const stats = statSync(target.absolutePath);
+  const content = readFileSync(target.absolutePath, 'utf8');
+  const manifest = parseWorkspaceArtifactContentManifest(content);
+  if (manifest.kind !== target.kind) {
+    throw new RuntimeValidationError(`Workspace artifact manifest kind must match ${target.kind}.`);
+  }
+  return {
+    path: target.relativePath,
+    name: target.name,
+    kind: target.kind,
+    content,
+    contentType: 'application/json',
+    manifest,
+    capabilities: capabilitiesFromWorkspaceArtifactManifest(manifest),
+    createdAt: stats.birthtime.toISOString(),
+    updatedAt: stats.mtime.toISOString(),
+    size: stats.size,
+  };
+}
+
+function updateWorkspaceArtifactContent(input: WorkspaceArtifactContentUpdateInput): WorkspaceArtifactContentRecord {
+  const target = workspaceArtifactContentPath(input.path);
+  const manifest = parseWorkspaceArtifactContentManifest(input.content);
+  if (manifest.kind !== target.kind) {
+    throw new RuntimeValidationError(`Workspace artifact manifest kind must match ${target.kind}.`);
+  }
+  writeFileSync(target.absolutePath, input.content, 'utf8');
+  return readWorkspaceArtifactContent(target.relativePath);
 }
 
 function listWorkspaceFiles(relativePath = ''): WorkspaceFileEntry[] {
@@ -957,6 +1045,7 @@ function runWorkspaceFileIpcRoute<TResult>(
   },
   input: unknown,
   execute: () => TResult,
+  successAuditMetadata?: (result: TResult) => Record<string, unknown>,
 ): Promise<TResult> {
   return runHostRouteContract({
     contract: requireRouteAccessContract(contractId),
@@ -968,6 +1057,7 @@ function runWorkspaceFileIpcRoute<TResult>(
     },
     input,
     execute,
+    successAuditMetadata,
   });
 }
 
@@ -1506,6 +1596,32 @@ function appScopedStorageRouteSuccessMetadata(result: AppScopedStorageResult): R
     storageValueLogged: false,
     sourceCodeLogged: false,
     packageMetadataLogged: false,
+    providerPayloadLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function workspaceArtifactContentPathHash(pathValue: string): string {
+  return createHash('sha256').update(pathValue).digest('hex').slice(0, 16);
+}
+
+function workspaceArtifactContentEntityId(pathValue: string): string {
+  return `workspace-artifact:${workspaceArtifactContentPathHash(pathValue)}`;
+}
+
+function workspaceArtifactContentRouteSuccessMetadata(result: WorkspaceArtifactContentRecord): Record<string, unknown> {
+  return {
+    pathHash: workspaceArtifactContentPathHash(result.path),
+    pathLength: result.path.length,
+    kind: result.kind,
+    size: result.size,
+    capabilityCount: result.capabilities.length,
+    contentLength: result.content.length,
+    contentType: result.contentType,
+    artifactContentLogged: false,
+    manifestLogged: false,
+    sourceCodeLogged: false,
+    fileContentsLogged: false,
     providerPayloadLogged: false,
     secretsLogged: false,
   };
@@ -2657,6 +2773,44 @@ ipcMain.handle(
       },
       validatedInput,
       () => createWorkspaceFile(validatedInput.kind, validatedInput.targetPath),
+    );
+  }
+);
+
+ipcMain.handle(
+  'workspace-artifact-content:get',
+  async (_event, input: unknown): Promise<WorkspaceArtifactContentRecord> => {
+    const validatedInput = validateWorkspaceArtifactContentGetInput(input);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-artifact-content:get',
+      {
+        route: 'workspace-artifact-content:get',
+        action: 'workspace-artifact-content:get',
+        entityId: workspaceArtifactContentEntityId(validatedInput.path),
+        entityType: 'workspace_artifact',
+      },
+      validatedInput,
+      () => readWorkspaceArtifactContent(validatedInput.path),
+      workspaceArtifactContentRouteSuccessMetadata,
+    );
+  }
+);
+
+ipcMain.handle(
+  'workspace-artifact-content:update',
+  async (_event, input: unknown): Promise<WorkspaceArtifactContentRecord> => {
+    const validatedInput = validateWorkspaceArtifactContentUpdateInput(input);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-artifact-content:update',
+      {
+        route: 'workspace-artifact-content:update',
+        action: 'workspace-artifact-content:update',
+        entityId: workspaceArtifactContentEntityId(validatedInput.path),
+        entityType: 'workspace_artifact',
+      },
+      validatedInput,
+      () => updateWorkspaceArtifactContent(validatedInput),
+      workspaceArtifactContentRouteSuccessMetadata,
     );
   }
 );

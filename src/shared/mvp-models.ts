@@ -402,6 +402,33 @@ export type CreateWorkspaceProfileInput = Pick<WorkspaceProfile, 'name' | 'layou
 export type UpdateWorkspaceProfileInput = Partial<Pick<WorkspaceProfile, 'name' | 'layout'>>;
 
 // ============================================================
+// Workspace Applet/Scriptlet Artifact Content
+// ============================================================
+
+export type WorkspaceArtifactContentKind = 'applet' | 'scriptlet';
+
+export interface WorkspaceArtifactContentRecord {
+  path: string;
+  name: string;
+  kind: WorkspaceArtifactContentKind;
+  content: string;
+  contentType: 'application/json';
+  manifest: Record<string, unknown>;
+  capabilities: string[];
+  createdAt: string;
+  updatedAt: string;
+  size: number;
+}
+
+export interface WorkspaceArtifactContentGetInput {
+  path: string;
+}
+
+export interface WorkspaceArtifactContentUpdateInput extends WorkspaceArtifactContentGetInput {
+  content: string;
+}
+
+// ============================================================
 // Host Groups
 // ============================================================
 

@@ -84,6 +84,7 @@ import type {
   UpdateHostInput,
   UpdateHostTagInput,
   UpdateWorkspaceProfileInput,
+  WorkspaceArtifactContentRecord,
   WorkspaceProfile,
 } from '../shared/mvp-models';
 
@@ -294,6 +295,14 @@ contextBridge.exposeInMainWorld('sb', {
       invoke('workspace-file:delete-trash-permanent', id),
     emptyTrash: (): Promise<boolean> =>
       invoke('workspace-file:empty-trash'),
+  },
+
+  // --- Workspace Applet/Scriptlet Artifact Content ---
+  workspaceArtifactContent: {
+    get: (path: string): Promise<WorkspaceArtifactContentRecord> =>
+      invoke('workspace-artifact-content:get', { path }),
+    update: (path: string, content: string): Promise<WorkspaceArtifactContentRecord> =>
+      invoke('workspace-artifact-content:update', { path, content }),
   },
 
   // --- Host Groups ---
@@ -514,6 +523,10 @@ declare global {
         restoreTrashItem: (id: string) => Promise<WorkspaceFileEntry>;
         deleteTrashItemPermanent: (id: string) => Promise<boolean>;
         emptyTrash: () => Promise<boolean>;
+      };
+      workspaceArtifactContent: {
+        get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
+        update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
       };
       hostGroup: {
         list: () => Promise<HostGroup[]>;
