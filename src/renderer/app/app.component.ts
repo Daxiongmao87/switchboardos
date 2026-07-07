@@ -1288,6 +1288,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private iconDragState: IconDragState | null = null;
   private workspaceProfilesLoadPromise: Promise<void> | null = null;
   private _navHandler: ((event: MessageEvent) => void) | null = null;
+  private pendingLegacyDesktopShortcutPins: DesktopShortcut[] = [];
 
   constructor() {
     // Profiles are loaded asynchronously from SQLite in ngOnInit.
@@ -4042,7 +4043,7 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
-  private restoreProfileLayout(profile: WorkspaceProfile): void {
+  private restoreProfileLayout(profile: WorkspaceProfile): boolean {
     const definitionFor = (appId: string): ShellAppDefinition | null => this.getAppDefinition(appId as ShellAppId);
     const layout = this.normalizeWorkspaceLayout(profile.layout ?? this.emptyWorkspaceLayout());
     this.desktopShortcuts = layout.desktopShortcutIds
@@ -4062,6 +4063,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.desktopShortcuts.length === 0) {
       this.desktopShortcuts = this.defaultDesktopShortcuts();
     }
+    const migratedDesktopShortcuts = this.reconcilePendingLegacyDesktopShortcutPins();
     this.desktopIconPositions = this.restoreShortcutPositionTargets(this.desktopIconPositions);
     this.ensureDefaultIconPositions();
     this.saveDesktopShortcuts();
@@ -4077,6 +4079,7 @@ export class AppComponent implements OnInit, OnDestroy {
       .filter((windowItem): windowItem is ShellWindow => Boolean(windowItem));
     this.nextZIndex = Math.max(10, ...this.windows.map((windowItem) => windowItem.zIndex + 1));
     this.focusTopWindow();
+    return migratedDesktopShortcuts;
   }
 
   private emptyWorkspaceLayout(): WorkspaceLayoutSnapshot {
@@ -5390,13 +5393,45 @@ export class AppComponent implements OnInit, OnDestroy {
       const stored = window.localStorage.getItem(DESKTOP_SHORTCUTS_STORAGE_KEY);
       const parsed = stored ? JSON.parse(stored) as unknown : null;
       if (Array.isArray(parsed)) {
+        const hasLegacyDefaultClutter = this.isLegacyDefaultShortcutSet(this.desktopShortcutAppIdsFromUnknownList(parsed));
         const shortcuts = this.normalizeDesktopShortcuts(parsed);
+        this.pendingLegacyDesktopShortcutPins = hasLegacyDefaultClutter
+          ? this.explicitUserShortcutPinsFrom(shortcuts)
+          : [];
         return shortcuts.length > 0 ? shortcuts : this.defaultDesktopShortcuts();
       }
     } catch {
+      this.pendingLegacyDesktopShortcutPins = [];
       return this.defaultDesktopShortcuts();
     }
+    this.pendingLegacyDesktopShortcutPins = [];
     return this.defaultDesktopShortcuts();
+  }
+
+  private desktopShortcutAppIdsFromUnknownList(value: unknown[]): ShellAppId[] {
+    return value
+      .map((item) => {
+        if (typeof item === 'string' && this.isShellAppId(item)) {
+          return item;
+        }
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          return null;
+        }
+        const appId = (item as Partial<DesktopShortcut>).appId;
+        return appId && this.isShellAppId(appId) ? appId : null;
+      })
+      .filter((appId): appId is ShellAppId => appId !== null);
+  }
+
+  private explicitUserShortcutPinsFrom(shortcuts: DesktopShortcut[]): DesktopShortcut[] {
+    return shortcuts
+      .filter((shortcut) => this.isExplicitUserDesktopShortcut(shortcut))
+      .map((shortcut) => ({
+        id: shortcut.id,
+        appId: shortcut.appId,
+        shellOwned: false,
+        ...(shortcut.label ? { label: shortcut.label } : {}),
+      }));
   }
 
   private async loadWorkspaceProfilesFromStore(): Promise<void> {
@@ -5456,7 +5491,10 @@ export class AppComponent implements OnInit, OnDestroy {
       }
 
       this.renameProfileName = this.activeProfile.name;
-      this.restoreProfileLayout(this.activeProfile);
+      const migratedDesktopShortcuts = this.restoreProfileLayout(this.activeProfile);
+      if (migratedDesktopShortcuts) {
+        await this.persistActiveProfileLayout(false);
+      }
     } catch (error) {
       this.errorMessage = this.errorText(error, 'Unable to load workspace profiles from store.');
       // Fallback to empty default
@@ -5638,10 +5676,41 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private isExplicitUserShortcut(entry: NormalizedRawShortcut): boolean {
+    return this.isExplicitUserDesktopShortcut(entry);
+  }
+
+  private isExplicitUserDesktopShortcut(entry: { appId: ShellAppId; id?: string; shellOwned?: boolean }): boolean {
     if (!entry.id || entry.shellOwned) {
       return false;
     }
     return entry.id.startsWith(`shortcut-${entry.appId}-`);
+  }
+
+  private reconcilePendingLegacyDesktopShortcutPins(): boolean {
+    if (this.pendingLegacyDesktopShortcutPins.length === 0) {
+      return false;
+    }
+
+    const usedIds = new Set(this.desktopShortcuts.map((shortcut) => shortcut.id));
+    let changed = false;
+    for (const pin of this.pendingLegacyDesktopShortcutPins) {
+      if (usedIds.has(pin.id) || !this.getAppDefinition(pin.appId)) {
+        continue;
+      }
+      usedIds.add(pin.id);
+      this.desktopShortcuts = [
+        ...this.desktopShortcuts,
+        {
+          id: pin.id,
+          appId: pin.appId,
+          shellOwned: false,
+          ...(pin.label ? { label: pin.label } : {}),
+        },
+      ];
+      changed = true;
+    }
+    this.pendingLegacyDesktopShortcutPins = [];
+    return changed;
   }
 
   private isLegacyDefaultShortcutSet(shortcutIds: string[]): boolean {

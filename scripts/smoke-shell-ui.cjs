@@ -259,6 +259,48 @@ async function runLegacyDefaultDesktopMigrationSmoke(cdp) {
             ? 'Bootstrap Pin'
             : shortcut.appId))
       .sort();
+    const profileShortcutReport = await (async () => {
+      const workspaceApi = window.sb && window.sb.workspace;
+      if (!workspaceApi || !workspaceApi.getActiveProfileId || !workspaceApi.getProfile) {
+        return {
+          labels: [],
+          sanitizedShortcutSet: false,
+          activeProfileId: null,
+        };
+      }
+      const deadline = Date.now() + 10000;
+      let latest = {
+        labels: [],
+        sanitizedShortcutSet: false,
+        activeProfileId: null,
+      };
+      while (Date.now() < deadline) {
+        const activeProfileId = await workspaceApi.getActiveProfileId();
+        const profile = activeProfileId ? await workspaceApi.getProfile(activeProfileId) : null;
+        const profileShortcuts = Array.isArray(profile?.layout?.desktopShortcutIds)
+          ? profile.layout.desktopShortcutIds
+          : [];
+        const labels = profileShortcuts
+          .map((shortcut) => shortcut.label || (shortcut.appId === 'workspace-files'
+            ? 'File Explorer'
+            : shortcut.appId === 'trash'
+              ? 'Recycle Bin'
+              : shortcut.appId === 'bootstrap'
+                ? 'Bootstrap Pin'
+                : shortcut.appId))
+          .sort();
+        latest = {
+          labels,
+          sanitizedShortcutSet: JSON.stringify(labels) === JSON.stringify(['Bootstrap Pin', 'File Explorer', 'Recycle Bin']),
+          activeProfileId,
+        };
+        if (latest.sanitizedShortcutSet) {
+          return latest;
+        }
+        await sleep(100);
+      }
+      return latest;
+    })();
     return {
       iconLabels,
       sortedLabels,
@@ -270,6 +312,7 @@ async function runLegacyDefaultDesktopMigrationSmoke(cdp) {
       storedShortcutLabels,
       storedLegacyClutterRemoved: !storedShortcutLabels.some((label) => forbiddenLegacyLabels.includes(label)),
       storedSanitizedShortcutSet: JSON.stringify(storedShortcutLabels) === JSON.stringify(['Bootstrap Pin', 'File Explorer', 'Recycle Bin']),
+      profileShortcutReport,
     };
   })()`);
 
@@ -2167,6 +2210,7 @@ async function main() {
     JSON.stringify(legacyDefaultDesktopMigration.sortedLabels) === JSON.stringify(legacyDefaultDesktopMigration.expectedLabels),
     legacyDefaultDesktopMigration.storedLegacyClutterRemoved,
     legacyDefaultDesktopMigration.storedSanitizedShortcutSet,
+    legacyDefaultDesktopMigration.profileShortcutReport.sanitizedShortcutSet,
     report.initial.desktopShell,
     report.initial.wallpaperMode === 'default',
     report.initial.wallpaperApplied,
