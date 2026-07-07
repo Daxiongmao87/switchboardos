@@ -14,6 +14,8 @@ if (typeof WebSocket !== 'function') {
 
 const repoRoot = join(__dirname, '..');
 const electronBin = join(repoRoot, 'node_modules', '.bin', 'electron');
+const hostOperationsSource = readFileSync(join(repoRoot, 'src/renderer/app/host-operations/host-operations.component.ts'), 'utf8');
+const appComponentSource = readFileSync(join(repoRoot, 'src/renderer/app/app.component.ts'), 'utf8');
 const port = 9800 + Math.floor(Math.random() * 400);
 const cdpCommandTimeoutMs = 180000;
 const configDir = mkdtempSync(join(tmpdir(), 'switchboardos-ssh-file-browser-ui-'));
@@ -24,6 +26,11 @@ const downloadTargetPath = join(tmpdir(), `switchboardos-file-browser-download-$
 const remoteUploadDir = `/tmp/switchboardos-file-browser-upload-dir-${runId}`;
 const remoteUploadPath = `${remoteUploadDir}/target.txt`;
 const remoteMovedPath = `${remoteUploadDir}/renamed-target.txt`;
+
+assert.equal(hostOperationsSource.includes('openShellFileContextMenu'), false, 'File Browser-specific shell menu callback is removed');
+assert.equal(hostOperationsSource.includes('SshFileObjectContextMenuRequest'), false, 'File Browser-specific context menu request type is removed');
+assert.equal(hostOperationsSource.includes('openAppletElementContextMenu'), true, 'File Browser uses generic applet element context menu input');
+assert.equal(appComponentSource.includes('openAppletElementContextMenu'), true, 'Shell exposes generic applet element context menu dispatcher');
 
 writeFileSync(uploadSourcePath, `SwitchboardOS SSH file browser upload smoke ${runId}\n`, 'utf8');
 
@@ -397,10 +404,13 @@ async function browserSmoke(params) {
       shellObjectSource: statContextMenu.getAttribute('data-shell-object-source') || '',
       shellObjectTargetScope: statContextMenu.getAttribute('data-shell-object-target-scope') || '',
       shellObjectSourceAppId: statContextMenu.getAttribute('data-shell-object-source-app-id') || '',
+      shellObjectWindowId: statContextMenu.getAttribute('data-shell-object-window-id') || '',
+      contributionSurface: statContextMenu.getAttribute('data-context-contribution-surface') || '',
       shellObjectActionIds: statContextMenu.getAttribute('data-shell-object-action-ids') || '',
       shellObjectCapabilities: statContextMenu.getAttribute('data-shell-object-capabilities') || '',
       actionIds: [...statContextMenu.querySelectorAll('button')].map((button) => button.getAttribute('data-action-id') || ''),
       statActionSource: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-action-source') || '',
+      statSourceWindowId: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-source-window-id') || '',
       targetScope: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-target-scope') || '',
       statRequiredCapabilities: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-required-capabilities') || '',
       statShortcut: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-shortcut') || '',
@@ -485,7 +495,9 @@ async function browserSmoke(params) {
       sharedContextMenu: moveContextMenu.getAttribute('data-testid') || '',
       contextTarget: moveContextMenu.getAttribute('data-context-target') || '',
       targetPath: moveContextMenu.getAttribute('data-target-path') || '',
+      contributionSurface: moveContextMenu.getAttribute('data-context-contribution-surface') || '',
       moveActionSource: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-action-source') || '',
+      moveSourceWindowId: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-source-window-id') || '',
       moveRequiredCapabilities: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-required-capabilities') || '',
       moveTargetScope: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-target-scope') || '',
       deleteDestructive: moveContextMenu.querySelector('[data-action-id="delete"]')?.classList.contains('is-danger') || false,
@@ -646,10 +658,13 @@ async function main() {
     assert.equal(report.statContextMenuReport.shellObjectSource, 'ssh-file-provider', 'File Browser shared context menu declares provider source');
     assert.equal(report.statContextMenuReport.shellObjectTargetScope, 'ssh-file-row', 'File Browser shared context menu declares row target scope');
     assert.equal(report.statContextMenuReport.shellObjectSourceAppId, 'file-browser', 'File Browser shared context menu declares source app id');
+    assert.equal(report.statContextMenuReport.contributionSurface, 'applet-element', 'File Browser shared context menu uses generic applet element contribution surface');
+    assert.equal(report.statContextMenuReport.shellObjectWindowId.startsWith('window-'), true, 'File Browser shared context menu declares source shell window id');
     assert.equal(report.statContextMenuReport.shellObjectActionIds.includes('stat'), true, 'File Browser shared context menu object action ids include stat');
     assert.equal(report.statContextMenuReport.shellObjectCapabilities.includes('host:file:read'), true, 'File Browser shared context menu object capabilities include read');
     assert.equal(report.statContextMenuReport.actionIds.includes('stat'), true, 'File Browser context menu exposes stat object action');
     assert.equal(report.statContextMenuReport.statActionSource, 'ssh-file-provider', 'File Browser stat context action declares provider source');
+    assert.equal(report.statContextMenuReport.statSourceWindowId, report.statContextMenuReport.shellObjectWindowId, 'File Browser stat context action declares source window id');
     assert.equal(report.statContextMenuReport.targetScope, 'ssh-file-row', 'File Browser stat context action declares row target scope');
     assert.equal(report.statContextMenuReport.statRequiredCapabilities, 'host:file:read', 'File Browser stat context action declares read capability');
     assert.equal(report.statContextMenuReport.statShortcut, 'Ctrl+I', 'File Browser stat context action declares shortcut');
@@ -666,7 +681,9 @@ async function main() {
     assert.equal(report.moveContextMenuReport.sharedContextMenu, 'context-menu', 'File Browser right-click context menu uses shared shell context menu');
     assert.equal(report.moveContextMenuReport.contextTarget, 'ssh-file-object', 'File Browser right-click context menu declares SSH file object target');
     assert.equal(report.moveContextMenuReport.targetPath, remoteUploadPath, 'File Browser move context menu targets uploaded file object');
+    assert.equal(report.moveContextMenuReport.contributionSurface, 'applet-element', 'File Browser move context menu uses generic applet element contribution surface');
     assert.equal(report.moveContextMenuReport.moveActionSource, 'ssh-file-provider', 'File Browser move context action declares provider source');
+    assert.equal(report.moveContextMenuReport.moveSourceWindowId.startsWith('window-'), true, 'File Browser move context action declares source window id');
     assert.equal(report.moveContextMenuReport.moveRequiredCapabilities, 'host:file:write', 'File Browser move context action declares write capability');
     assert.equal(report.moveContextMenuReport.moveTargetScope, 'ssh-file-row', 'File Browser move context action declares row target scope');
     assert.equal(report.moveContextMenuReport.deleteDestructive, true, 'File Browser shared context menu preserves destructive styling');

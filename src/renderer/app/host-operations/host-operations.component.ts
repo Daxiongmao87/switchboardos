@@ -11,6 +11,10 @@ import type {
   SshFileStatResult,
   SshFileTransferResult,
 } from '../../../shared/mvp-models';
+import type {
+  AppletElementContextMenuActionContribution,
+  OpenAppletElementContextMenu,
+} from '../applet-context-menu';
 import { getSwitchboardApi } from '../switchboard-api';
 
 const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaultPath: string; icon: string }> = {
@@ -31,22 +35,6 @@ export interface FileObjectAction {
   destructive?: boolean;
   disabledReason: string;
   requiredCapabilities: string[];
-}
-
-export interface SshFileObjectContextMenuRequest {
-  x: number;
-  y: number;
-  label: string;
-  targetPath: string;
-  hostId: string;
-  objectKind: 'ssh-file-object';
-  objectOwner: 'file-browser';
-  objectSource: 'ssh-file-provider';
-  sourceAppId: 'file-browser';
-  targetScope: 'ssh-file-row';
-  actions: FileObjectAction[];
-  focusReturnElement?: HTMLElement;
-  runAction: (actionId: FileObjectActionId) => void | Promise<void>;
 }
 
 @Component({
@@ -578,7 +566,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   @Input() hostContextId: string | null = null;
   @Input() hostContextTitle = '';
   @Input() hostContextLocked = false;
-  @Input() openShellFileContextMenu: ((request: SshFileObjectContextMenuRequest) => void) | null = null;
+  @Input() openAppletElementContextMenu: OpenAppletElementContextMenu | null = null;
 
   hosts: HostRecord[] = [];
   selectedHostId = '';
@@ -1189,24 +1177,46 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     const mouseEvent = event instanceof MouseEvent ? event : null;
     const x = mouseEvent && mouseEvent.clientX > 0 ? mouseEvent.clientX : (rect?.left ?? 24) + 24;
     const y = mouseEvent && mouseEvent.clientY > 0 ? mouseEvent.clientY : (rect?.top ?? 24) + 24;
-    if (!this.openShellFileContextMenu) {
-      this.fileActionError = 'SwitchboardOS shell context menu dispatcher is unavailable.';
+    if (!this.openAppletElementContextMenu) {
+      this.fileActionError = 'SwitchboardOS applet element context menu dispatcher is unavailable.';
       return;
     }
-    this.openShellFileContextMenu({
+    const actions: AppletElementContextMenuActionContribution<FileObjectActionId>[] = this.fileObjectActions.map((action) => ({
+      id: action.id,
+      label: action.label,
+      icon: action.icon,
+      shortcut: action.shortcut,
+      detail: action.disabledReason || undefined,
+      disabledReason: action.disabledReason || undefined,
+      disabled: Boolean(action.disabledReason),
+      destructive: Boolean(action.destructive),
+      source: 'ssh-file-provider',
+      sourceAppId: 'file-browser',
+      targetScope: 'ssh-file-row',
+      requiredCapabilities: [...action.requiredCapabilities],
+      handler: () => this.runFileObjectActionById(action.id),
+    }));
+    const requiredCapabilities = Array.from(new Set(actions.flatMap((action) => action.requiredCapabilities ?? [])));
+    this.openAppletElementContextMenu({
       x: Math.max(8, Math.min(x, window.innerWidth - 320)),
       y: Math.max(8, Math.min(y, window.innerHeight - 360)),
       label: `${this.selectedFileEntry?.name || 'Remote object'} actions`,
-      targetPath: this.selectedFilePath,
-      hostId: this.selectedHostId,
-      objectKind: 'ssh-file-object',
-      objectOwner: 'file-browser',
-      objectSource: 'ssh-file-provider',
-      sourceAppId: 'file-browser',
-      targetScope: 'ssh-file-row',
-      actions: this.fileObjectActions.map((action) => ({ ...action })),
+      target: 'ssh-file-object',
+      object: {
+        id: `${this.selectedHostId}:${this.selectedFilePath}`,
+        kind: 'ssh-file-object',
+        owner: 'file-browser',
+        source: 'ssh-file-provider',
+        targetScope: 'ssh-file-row',
+        label: `${this.selectedFileEntry?.name || 'Remote object'} actions`,
+        actionIds: actions.map((action) => action.id),
+        sourceAppId: 'file-browser',
+        hostId: this.selectedHostId,
+        remotePath: this.selectedFilePath,
+        requiredCapabilities,
+      },
+      actions,
       focusReturnElement: target ?? undefined,
-      runAction: (actionId) => this.runFileObjectActionById(actionId),
     });
   }
 

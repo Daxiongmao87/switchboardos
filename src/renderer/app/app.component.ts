@@ -31,13 +31,11 @@ import { CommandHistoryComponent } from './command-history/command-history.compo
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { ExampleHostMapComponent } from './example-host-map/example-host-map.component';
 import { GeneratedAppRuntimeComponent } from './generated-app-runtime/generated-app-runtime.component';
-import {
-  HostOperationsComponent,
-  type SshFileObjectContextMenuRequest,
-} from './host-operations/host-operations.component';
+import { HostOperationsComponent } from './host-operations/host-operations.component';
 import { HostsComponent } from './hosts/hosts.component';
 import { SettingsComponent } from './settings/settings.component';
 import { TerminalComponent } from './terminal/terminal.component';
+import type { AppletElementContextMenuRequest } from './applet-context-menu';
 
 interface AppInfo {
   version: string;
@@ -161,17 +159,25 @@ type LauncherTarget =
   | 'ssh-file-object'
   | 'ssh-file-row';
 
-type ShellActionSource = 'shell' | 'app-manifest' | 'window-object' | 'host-object' | 'ssh-file-provider';
+type ContextMenuTarget = LauncherTarget | 'notification' | (string & {});
+type ShellActionSource =
+  | 'shell'
+  | 'app-manifest'
+  | 'window-object'
+  | 'host-object'
+  | 'ssh-file-provider'
+  | 'applet-element-contribution'
+  | (string & {});
 type PaletteTargetScope = 'command-palette' | 'focused-window' | 'global-keyboard';
 type KeyboardShortcutKind = 'shell' | 'app' | 'window-action';
-type ShellPrimitiveKind = 'panel' | 'tray-status' | 'taskbar-window' | 'notification' | 'ssh-file-object';
+type ShellPrimitiveKind = 'panel' | 'tray-status' | 'taskbar-window' | 'notification' | 'ssh-file-object' | (string & {});
 
 interface ShellPrimitiveObject {
   id: string;
   kind: ShellPrimitiveKind;
-  owner: 'shell' | 'file-browser';
+  owner: 'shell' | 'file-browser' | (string & {});
   source: ShellActionSource;
-  targetScope: ContextMenuState['target'];
+  targetScope: ContextMenuTarget;
   label: string;
   actionIds: string[];
   sourceAppId?: ShellAppId;
@@ -651,7 +657,8 @@ interface ContextMenuItem {
   submenu?: ContextMenuItem[];
   source?: ShellActionSource;
   sourceAppId?: ShellAppId;
-  targetScope?: ContextMenuState['target'];
+  sourceWindowId?: string;
+  targetScope?: ContextMenuTarget;
   requiredCapabilities?: string[];
   actionId?: string;
   handler?: () => void | Promise<void>;
@@ -660,7 +667,7 @@ interface ContextMenuItem {
 interface ContextMenuState {
   x: number;
   y: number;
-  target: LauncherTarget | 'notification';
+  target: ContextMenuTarget;
   label: string;
   appId?: ShellAppId;
   shortcutId?: string;
@@ -669,6 +676,7 @@ interface ContextMenuState {
   workspaceArtifact?: WorkspaceArtifact;
   notification?: ShellNotificationContext;
   object?: ShellPrimitiveObject;
+  contributionSurface?: 'applet-element' | (string & {});
   focusReturnElement?: HTMLElement;
   items: ContextMenuItem[];
 }
@@ -2228,31 +2236,37 @@ export class AppComponent implements OnInit, OnDestroy {
     );
   }
 
-  openSshFileObjectContextMenu(request: SshFileObjectContextMenuRequest): void {
-    const actionIds = request.actions.map((action) => action.id);
-    const capabilities = Array.from(new Set(request.actions.flatMap((action) => action.requiredCapabilities)));
+  openAppletElementContextMenu(windowItem: ShellWindow, request: AppletElementContextMenuRequest): void {
+    const actionIds = request.object.actionIds ?? request.actions.map((action) => action.id);
+    const actionCapabilities = request.actions.flatMap((action) => action.requiredCapabilities ?? []);
+    const capabilities = request.object.requiredCapabilities ?? Array.from(new Set(actionCapabilities));
+    const sourceAppId = request.object.sourceAppId ?? windowItem.appId;
+    const sourceWindowId = request.object.sourceWindowId ?? windowItem.windowId;
     const object: ShellPrimitiveObject = {
-      id: `${request.hostId}:${request.targetPath}`,
-      kind: request.objectKind,
-      owner: request.objectOwner,
-      source: request.objectSource,
-      targetScope: request.targetScope,
-      label: request.label,
+      id: request.object.id,
+      kind: request.object.kind,
+      owner: request.object.owner,
+      source: request.object.source,
+      targetScope: request.object.targetScope,
+      label: request.object.label,
       actionIds,
-      sourceAppId: request.sourceAppId,
-      hostId: request.hostId,
-      remotePath: request.targetPath,
+      sourceAppId,
+      windowId: sourceWindowId,
+      hostId: request.object.hostId,
+      remotePath: request.object.remotePath,
       requiredCapabilities: capabilities,
     };
     this.showContextMenuAt({
       x: request.x,
       y: request.y,
-      target: 'ssh-file-object',
+      target: request.target,
       label: request.label,
-      items: this.sshFileObjectContextItems(request),
-      appId: request.sourceAppId,
-      hostId: request.hostId,
+      items: this.appletElementContextItems(request, sourceAppId, sourceWindowId),
+      appId: sourceAppId,
+      windowId: sourceWindowId,
+      hostId: request.object.hostId,
       object,
+      contributionSurface: 'applet-element',
       focusReturnElement: request.focusReturnElement,
     });
   }
@@ -3850,7 +3864,7 @@ export class AppComponent implements OnInit, OnDestroy {
       hostContextId: windowItem.hostId,
       hostContextTitle: host?.name ?? windowItem.title,
       hostContextLocked: Boolean(windowItem.hostId),
-      openShellFileContextMenu: (request: SshFileObjectContextMenuRequest) => this.openSshFileObjectContextMenu(request),
+      openAppletElementContextMenu: (request: AppletElementContextMenuRequest) => this.openAppletElementContextMenu(windowItem, request),
     };
   }
 
@@ -4113,6 +4127,7 @@ export class AppComponent implements OnInit, OnDestroy {
     hostId?: string;
     notification?: ShellNotificationContext;
     object?: ShellPrimitiveObject;
+    contributionSurface?: ContextMenuState['contributionSurface'];
     focusReturnElement?: HTMLElement;
   }): void {
     this.contextMenu = {
@@ -4127,6 +4142,7 @@ export class AppComponent implements OnInit, OnDestroy {
       workspaceArtifact: input.workspaceArtifact,
       notification: input.notification,
       object: input.object,
+      contributionSurface: input.contributionSurface,
       focusReturnElement: input.focusReturnElement,
       items: input.items,
     };
@@ -4576,22 +4592,28 @@ export class AppComponent implements OnInit, OnDestroy {
     ];
   }
 
-  private sshFileObjectContextItems(request: SshFileObjectContextMenuRequest): ContextMenuItem[] {
+  private appletElementContextItems(
+    request: AppletElementContextMenuRequest,
+    sourceAppId: ShellAppId,
+    sourceWindowId: string,
+  ): ContextMenuItem[] {
     return request.actions.map((action) => ({
-      id: `ssh-file:${action.id}`,
+      id: `applet-element:${request.object.kind}:${action.id}`,
       label: action.label,
       icon: action.icon,
       shortcut: action.shortcut,
-      detail: action.disabledReason || undefined,
+      detail: action.detail ?? action.disabledReason ?? undefined,
       disabledReason: action.disabledReason || undefined,
-      disabled: Boolean(action.disabledReason),
+      disabled: Boolean(action.disabled || action.disabledReason),
       danger: Boolean(action.destructive),
-      source: request.objectSource,
-      sourceAppId: request.sourceAppId,
-      targetScope: request.targetScope,
-      requiredCapabilities: [...action.requiredCapabilities],
+      separatorBefore: Boolean(action.separatorBefore),
+      source: action.source ?? request.object.source,
+      sourceAppId: action.sourceAppId ?? sourceAppId,
+      sourceWindowId: action.sourceWindowId ?? sourceWindowId,
+      targetScope: action.targetScope ?? request.object.targetScope,
+      requiredCapabilities: [...(action.requiredCapabilities ?? [])],
       actionId: action.id,
-      handler: () => request.runAction(action.id),
+      handler: action.handler,
     }));
   }
 
