@@ -31,7 +31,10 @@ import { CommandHistoryComponent } from './command-history/command-history.compo
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { ExampleHostMapComponent } from './example-host-map/example-host-map.component';
 import { GeneratedAppRuntimeComponent } from './generated-app-runtime/generated-app-runtime.component';
-import { HostOperationsComponent } from './host-operations/host-operations.component';
+import {
+  HostOperationsComponent,
+  type SshFileObjectContextMenuRequest,
+} from './host-operations/host-operations.component';
 import { HostsComponent } from './hosts/hosts.component';
 import { SettingsComponent } from './settings/settings.component';
 import { TerminalComponent } from './terminal/terminal.component';
@@ -154,17 +157,19 @@ type LauncherTarget =
   | 'terminal'
   | 'window'
   | 'launcher-row'
-  | 'workspace-file';
+  | 'workspace-file'
+  | 'ssh-file-object'
+  | 'ssh-file-row';
 
-type ShellActionSource = 'shell' | 'app-manifest' | 'window-object' | 'host-object';
+type ShellActionSource = 'shell' | 'app-manifest' | 'window-object' | 'host-object' | 'ssh-file-provider';
 type PaletteTargetScope = 'command-palette' | 'focused-window' | 'global-keyboard';
 type KeyboardShortcutKind = 'shell' | 'app' | 'window-action';
-type ShellPrimitiveKind = 'panel' | 'tray-status' | 'taskbar-window' | 'notification';
+type ShellPrimitiveKind = 'panel' | 'tray-status' | 'taskbar-window' | 'notification' | 'ssh-file-object';
 
 interface ShellPrimitiveObject {
   id: string;
   kind: ShellPrimitiveKind;
-  owner: 'shell';
+  owner: 'shell' | 'file-browser';
   source: ShellActionSource;
   targetScope: ContextMenuState['target'];
   label: string;
@@ -173,6 +178,8 @@ interface ShellPrimitiveObject {
   windowId?: string;
   notificationKind?: ShellNotificationKind;
   requiredCapabilities?: string[];
+  remotePath?: string;
+  hostId?: string;
 }
 
 interface ShellKeyboardShortcut {
@@ -637,21 +644,23 @@ interface ContextMenuItem {
   icon?: string;
   shortcut?: string;
   detail?: string;
+  disabledReason?: string;
   disabled?: boolean;
   danger?: boolean;
   separatorBefore?: boolean;
   submenu?: ContextMenuItem[];
-  source?: 'shell' | 'app-manifest' | 'window-object';
+  source?: ShellActionSource;
   sourceAppId?: ShellAppId;
   targetScope?: ContextMenuState['target'];
   requiredCapabilities?: string[];
   actionId?: string;
+  handler?: () => void | Promise<void>;
 }
 
 interface ContextMenuState {
   x: number;
   y: number;
-  target: 'desktop' | 'desktop-icon' | 'host' | 'notification' | 'taskbar' | 'taskbar-window' | 'tray-status' | 'terminal' | 'window' | 'launcher-row' | 'workspace-file';
+  target: LauncherTarget | 'notification';
   label: string;
   appId?: ShellAppId;
   shortcutId?: string;
@@ -660,6 +669,7 @@ interface ContextMenuState {
   workspaceArtifact?: WorkspaceArtifact;
   notification?: ShellNotificationContext;
   object?: ShellPrimitiveObject;
+  focusReturnElement?: HTMLElement;
   items: ContextMenuItem[];
 }
 
@@ -1422,6 +1432,9 @@ export class AppComponent implements OnInit, OnDestroy {
     if (keyboardShortcut.kind === 'shell' && keyboardShortcut.actionId === 'close-shell-overlays') {
       this.commandPaletteOpen = false;
       this.launcherOpen = false;
+      const focusReturnElement = this.contextMenu?.focusReturnElement;
+      this.contextMenu = null;
+      setTimeout(() => focusReturnElement?.focus(), 0);
       event.preventDefault();
       return;
     }
@@ -2215,6 +2228,35 @@ export class AppComponent implements OnInit, OnDestroy {
     );
   }
 
+  openSshFileObjectContextMenu(request: SshFileObjectContextMenuRequest): void {
+    const actionIds = request.actions.map((action) => action.id);
+    const capabilities = Array.from(new Set(request.actions.flatMap((action) => action.requiredCapabilities)));
+    const object: ShellPrimitiveObject = {
+      id: `${request.hostId}:${request.targetPath}`,
+      kind: request.objectKind,
+      owner: request.objectOwner,
+      source: request.objectSource,
+      targetScope: request.targetScope,
+      label: request.label,
+      actionIds,
+      sourceAppId: request.sourceAppId,
+      hostId: request.hostId,
+      remotePath: request.targetPath,
+      requiredCapabilities: capabilities,
+    };
+    this.showContextMenuAt({
+      x: request.x,
+      y: request.y,
+      target: 'ssh-file-object',
+      label: request.label,
+      items: this.sshFileObjectContextItems(request),
+      appId: request.sourceAppId,
+      hostId: request.hostId,
+      object,
+      focusReturnElement: request.focusReturnElement,
+    });
+  }
+
   openWorkspaceArtifactContextMenu(event: MouseEvent, artifact: WorkspaceArtifact): void {
     this.showWorkspaceArtifactProperties(artifact);
     this.showContextMenu(
@@ -2252,6 +2294,10 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     const menu = this.contextMenu;
     this.contextMenu = null;
+    if (item.handler) {
+      void item.handler();
+      return;
+    }
     const workspaceArtifact = menu?.workspaceArtifact;
     const host = this.contextHost(menu);
     if (item.id.startsWith('window-action:')) {
@@ -3804,6 +3850,7 @@ export class AppComponent implements OnInit, OnDestroy {
       hostContextId: windowItem.hostId,
       hostContextTitle: host?.name ?? windowItem.title,
       hostContextLocked: Boolean(windowItem.hostId),
+      openShellFileContextMenu: (request: SshFileObjectContextMenuRequest) => this.openSshFileObjectContextMenu(request),
     };
   }
 
@@ -4037,20 +4084,70 @@ export class AppComponent implements OnInit, OnDestroy {
   ): void {
     event.preventDefault();
     event.stopPropagation();
-    this.contextMenu = {
+    this.showContextMenuAt({
       x: event.clientX,
       y: event.clientY,
       target,
       label,
+      items,
       appId,
       shortcutId,
-      hostId,
       windowId,
       workspaceArtifact,
+      hostId,
       notification,
       object,
-      items,
+    });
+  }
+
+  private showContextMenuAt(input: {
+    x: number;
+    y: number;
+    target: ContextMenuState['target'];
+    label: string;
+    items: ContextMenuItem[];
+    appId?: ShellAppId;
+    shortcutId?: string;
+    windowId?: string;
+    workspaceArtifact?: WorkspaceArtifact;
+    hostId?: string;
+    notification?: ShellNotificationContext;
+    object?: ShellPrimitiveObject;
+    focusReturnElement?: HTMLElement;
+  }): void {
+    this.contextMenu = {
+      x: input.x,
+      y: input.y,
+      target: input.target,
+      label: input.label,
+      appId: input.appId,
+      shortcutId: input.shortcutId,
+      hostId: input.hostId,
+      windowId: input.windowId,
+      workspaceArtifact: input.workspaceArtifact,
+      notification: input.notification,
+      object: input.object,
+      focusReturnElement: input.focusReturnElement,
+      items: input.items,
     };
+    this.focusContextMenuFirstAction();
+  }
+
+  private focusContextMenuFirstAction(): void {
+    setTimeout(() => {
+      document.querySelector<HTMLElement>('[data-testid="context-menu"] button:not(:disabled)')?.focus();
+    }, 0);
+  }
+
+  handleContextMenuKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape') {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const focusReturnElement = this.contextMenu?.focusReturnElement;
+    this.contextMenu = null;
+    setTimeout(() => focusReturnElement?.focus(), 0);
   }
 
   private createShellPrimitiveObject(input: {
@@ -4477,6 +4574,25 @@ export class AppComponent implements OnInit, OnDestroy {
       { id: 'test-host-connection', label: 'Test Connection' },
       { id: 'host-properties', label: 'Properties', detail: host.id },
     ];
+  }
+
+  private sshFileObjectContextItems(request: SshFileObjectContextMenuRequest): ContextMenuItem[] {
+    return request.actions.map((action) => ({
+      id: `ssh-file:${action.id}`,
+      label: action.label,
+      icon: action.icon,
+      shortcut: action.shortcut,
+      detail: action.disabledReason || undefined,
+      disabledReason: action.disabledReason || undefined,
+      disabled: Boolean(action.disabledReason),
+      danger: Boolean(action.destructive),
+      source: request.objectSource,
+      sourceAppId: request.sourceAppId,
+      targetScope: request.targetScope,
+      requiredCapabilities: [...action.requiredCapabilities],
+      actionId: action.id,
+      handler: () => request.runAction(action.id),
+    }));
   }
 
   private runWindowMenuAction(windowId: string | undefined, callback: (windowItem: ShellWindow) => void): void {

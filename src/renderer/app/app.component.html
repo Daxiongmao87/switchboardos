@@ -628,11 +628,15 @@
       [attr.data-shell-object-source-app-id]="menu.object?.sourceAppId || null"
       [attr.data-shell-object-window-id]="menu.object?.windowId || null"
       [attr.data-shell-object-notification-kind]="menu.object?.notificationKind || null"
+      [attr.data-shell-object-host-id]="menu.object?.hostId || null"
+      [attr.data-shell-object-path]="menu.object?.remotePath || null"
+      [attr.data-target-path]="menu.object?.remotePath || null"
       [attr.data-shell-object-action-ids]="menu.object ? shellPrimitiveActionIds(menu.object) : null"
       [attr.data-shell-object-capabilities]="menu.object ? shellPrimitiveCapabilities(menu.object) || null : null"
       [attr.aria-label]="menu.label + ' context menu'"
       (click)="$event.stopPropagation()"
       (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
+      (keydown)="handleContextMenuKeydown($event)"
     >
       <div class="context-menu-title">{{ menu.label }}</div>
       <ng-container *ngFor="let item of menu.items">
@@ -647,6 +651,13 @@
           [attr.data-menu-target-scope]="item.targetScope || null"
           [attr.data-menu-required-capabilities]="(item.requiredCapabilities || []).join(',') || null"
           [attr.data-menu-action-id]="item.actionId || null"
+          [attr.data-action-id]="item.actionId || item.id"
+          [attr.data-action-source]="item.source || null"
+          [attr.data-target-scope]="item.targetScope || null"
+          [attr.data-source-app-id]="item.sourceAppId || null"
+          [attr.data-required-capabilities]="(item.requiredCapabilities || []).join(',') || null"
+          [attr.data-shortcut]="item.shortcut || null"
+          [attr.data-disabled-reason]="item.disabledReason || null"
         >
           <span class="context-menu-main">
             <span *ngIf="item.icon" class="context-menu-icon" aria-hidden="true">{{ item.icon }}</span>
@@ -673,6 +684,13 @@
               [attr.data-menu-target-scope]="subItem.targetScope || null"
               [attr.data-menu-required-capabilities]="(subItem.requiredCapabilities || []).join(',') || null"
               [attr.data-menu-action-id]="subItem.actionId || null"
+              [attr.data-action-id]="subItem.actionId || subItem.id"
+              [attr.data-action-source]="subItem.source || null"
+              [attr.data-target-scope]="subItem.targetScope || null"
+              [attr.data-source-app-id]="subItem.sourceAppId || null"
+              [attr.data-required-capabilities]="(subItem.requiredCapabilities || []).join(',') || null"
+              [attr.data-shortcut]="subItem.shortcut || null"
+              [attr.data-disabled-reason]="subItem.disabledReason || null"
               [disabled]="subItem.disabled"
               (click)="runContextMenuAction(subItem)"
             >
@@ -700,6 +718,13 @@
             [attr.data-menu-target-scope]="item.targetScope || null"
             [attr.data-menu-required-capabilities]="(item.requiredCapabilities || []).join(',') || null"
             [attr.data-menu-action-id]="item.actionId || null"
+            [attr.data-action-id]="item.actionId || item.id"
+            [attr.data-action-source]="item.source || null"
+            [attr.data-target-scope]="item.targetScope || null"
+            [attr.data-source-app-id]="item.sourceAppId || null"
+            [attr.data-required-capabilities]="(item.requiredCapabilities || []).join(',') || null"
+            [attr.data-shortcut]="item.shortcut || null"
+            [attr.data-disabled-reason]="item.disabledReason || null"
             [disabled]="item.disabled"
             (click)="runContextMenuAction(item)"
           >

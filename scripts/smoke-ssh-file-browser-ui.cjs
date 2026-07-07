@@ -253,7 +253,7 @@ async function browserSmoke(params) {
     .find((button) => textIncludes(button, text));
   const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
     .find((button) => textIncludes(button, text)));
-  const clickFileMenuItem = (text) => click([...document.querySelectorAll('[data-testid="ssh-file-row-context-menu"] button')]
+  const clickFileMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"][data-context-target="ssh-file-object"] button')]
     .find((button) => textIncludes(button, text)));
   const setInputValue = (input, value) => {
     if (!input) {
@@ -383,18 +383,42 @@ async function browserSmoke(params) {
     const selectedDisabledReasonText = actionPanel.querySelector('[data-testid="ssh-file-disabled-reasons"]')?.textContent || '';
     keydown(packageRow, 'F10', { shiftKey: true });
     const statContextMenu = await waitFor(
-      () => document.querySelector('[data-testid="ssh-file-row-context-menu"][data-context-target="ssh-file-object"]'),
-      'keyboard-opened SSH file row context menu',
+      () => document.querySelector('[data-testid="context-menu"][data-context-target="ssh-file-object"]'),
+      'keyboard-opened shared SSH file row context menu',
     );
+    await waitFor(() => document.activeElement?.getAttribute('data-action-id') === 'stat', 'shared SSH file row context menu focuses stat action');
+    const localMenuPresentAfterKeyboard = Boolean(document.querySelector('[data-testid="ssh-file-row-context-menu"]'));
     const statContextMenuReport = {
+      sharedContextMenu: statContextMenu.getAttribute('data-testid') || '',
+      contextTarget: statContextMenu.getAttribute('data-context-target') || '',
       targetPath: statContextMenu.getAttribute('data-target-path') || '',
+      shellObjectKind: statContextMenu.getAttribute('data-shell-object-kind') || '',
+      shellObjectOwner: statContextMenu.getAttribute('data-shell-object-owner') || '',
+      shellObjectSource: statContextMenu.getAttribute('data-shell-object-source') || '',
+      shellObjectTargetScope: statContextMenu.getAttribute('data-shell-object-target-scope') || '',
+      shellObjectSourceAppId: statContextMenu.getAttribute('data-shell-object-source-app-id') || '',
+      shellObjectActionIds: statContextMenu.getAttribute('data-shell-object-action-ids') || '',
+      shellObjectCapabilities: statContextMenu.getAttribute('data-shell-object-capabilities') || '',
       actionIds: [...statContextMenu.querySelectorAll('button')].map((button) => button.getAttribute('data-action-id') || ''),
       statActionSource: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-action-source') || '',
       targetScope: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-target-scope') || '',
+      statRequiredCapabilities: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-required-capabilities') || '',
+      statShortcut: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-shortcut') || '',
+      focusedActionId: document.activeElement?.getAttribute('data-action-id') || '',
+      localMenuPresent: localMenuPresentAfterKeyboard,
       disabledReasons: [...statContextMenu.querySelectorAll('button[disabled]')]
         .map((button) => button.getAttribute('data-disabled-reason') || '')
         .filter(Boolean),
     };
+    keydown(document.activeElement, 'Escape');
+    await waitFor(() => !document.querySelector('[data-testid="context-menu"]')
+      && document.activeElement?.getAttribute('data-remote-path') === params.remotePackagePath, 'shared context menu Escape returns focus to row');
+    const escapeFocusPath = document.activeElement?.getAttribute('data-remote-path') || '';
+    keydown(document.activeElement, 'F10', { shiftKey: true });
+    await waitFor(
+      () => document.querySelector('[data-testid="context-menu"][data-context-target="ssh-file-object"]'),
+      'keyboard-reopened shared SSH file row context menu',
+    );
     clickFileMenuItem('Get info');
     await waitFor(() => actionPanel.getAttribute('data-stat-provider-route') === 'ssh-file:stat'
       && actionPanel.getAttribute('data-stat-status') === 'success', 'ssh-file:stat success', 45000);
@@ -453,13 +477,19 @@ async function browserSmoke(params) {
     setInputValue(movePanel.querySelector('[data-testid="ssh-file-move-target-path"]'), params.remoteMovedPath);
     rightClick(uploadedRow);
     const moveContextMenu = await waitFor(
-      () => document.querySelector('[data-testid="ssh-file-row-context-menu"][data-context-target="ssh-file-object"]'),
-      'right-click SSH file row context menu for move',
+      () => document.querySelector('[data-testid="context-menu"][data-context-target="ssh-file-object"]'),
+      'right-click shared SSH file row context menu for move',
     );
+    const localMenuPresentAfterRightClick = Boolean(document.querySelector('[data-testid="ssh-file-row-context-menu"]'));
     const moveContextMenuReport = {
+      sharedContextMenu: moveContextMenu.getAttribute('data-testid') || '',
+      contextTarget: moveContextMenu.getAttribute('data-context-target') || '',
       targetPath: moveContextMenu.getAttribute('data-target-path') || '',
       moveActionSource: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-action-source') || '',
       moveRequiredCapabilities: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-required-capabilities') || '',
+      moveTargetScope: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-target-scope') || '',
+      deleteDestructive: moveContextMenu.querySelector('[data-action-id="delete"]')?.classList.contains('is-danger') || false,
+      localMenuPresent: localMenuPresentAfterRightClick,
     };
     clickFileMenuItem('Rename / Move');
     await waitFor(() => movePanel.getAttribute('data-move-provider-route') === 'ssh-file:move'
@@ -570,6 +600,7 @@ async function browserSmoke(params) {
       keyboardNavigatedPath,
       keyboardReturnedPath,
       statContextMenuReport,
+      escapeFocusPath,
       keyboardDeleteConfirmation,
       moveContextMenuReport,
       rowCount: rowCountBeforeDelete,
@@ -607,19 +638,39 @@ async function main() {
     assert.equal(report.keyboardFocusPath, join(repoRoot, 'package.json'), 'File Browser row accepts keyboard focus');
     assert.equal(report.keyboardReturnedPath, join(repoRoot, 'package.json'), 'File Browser keyboard path returns selection to package row');
     assert.equal(Boolean(report.keyboardNavigatedPath) || report.keyboardReturnedPath === join(repoRoot, 'package.json'), true, 'File Browser keyboard navigation path selected a row');
+    assert.equal(report.statContextMenuReport.sharedContextMenu, 'context-menu', 'File Browser keyboard context menu uses shared shell context menu');
+    assert.equal(report.statContextMenuReport.contextTarget, 'ssh-file-object', 'File Browser keyboard context menu declares SSH file object target');
     assert.equal(report.statContextMenuReport.targetPath, join(repoRoot, 'package.json'), 'File Browser keyboard context menu targets selected file object');
+    assert.equal(report.statContextMenuReport.shellObjectKind, 'ssh-file-object', 'File Browser shared context menu declares file object kind');
+    assert.equal(report.statContextMenuReport.shellObjectOwner, 'file-browser', 'File Browser shared context menu declares object owner');
+    assert.equal(report.statContextMenuReport.shellObjectSource, 'ssh-file-provider', 'File Browser shared context menu declares provider source');
+    assert.equal(report.statContextMenuReport.shellObjectTargetScope, 'ssh-file-row', 'File Browser shared context menu declares row target scope');
+    assert.equal(report.statContextMenuReport.shellObjectSourceAppId, 'file-browser', 'File Browser shared context menu declares source app id');
+    assert.equal(report.statContextMenuReport.shellObjectActionIds.includes('stat'), true, 'File Browser shared context menu object action ids include stat');
+    assert.equal(report.statContextMenuReport.shellObjectCapabilities.includes('host:file:read'), true, 'File Browser shared context menu object capabilities include read');
     assert.equal(report.statContextMenuReport.actionIds.includes('stat'), true, 'File Browser context menu exposes stat object action');
     assert.equal(report.statContextMenuReport.statActionSource, 'ssh-file-provider', 'File Browser stat context action declares provider source');
     assert.equal(report.statContextMenuReport.targetScope, 'ssh-file-row', 'File Browser stat context action declares row target scope');
+    assert.equal(report.statContextMenuReport.statRequiredCapabilities, 'host:file:read', 'File Browser stat context action declares read capability');
+    assert.equal(report.statContextMenuReport.statShortcut, 'Ctrl+I', 'File Browser stat context action declares shortcut');
+    assert.equal(report.statContextMenuReport.focusedActionId, 'stat', 'File Browser shared context menu focuses first enabled row action');
+    assert.equal(report.statContextMenuReport.localMenuPresent, false, 'File Browser keyboard context menu did not render the component-local menu');
+    assert.equal(report.statContextMenuReport.disabledReasons.includes('Enter folder is available after selecting a folder.'), true, 'File Browser shared context menu exposes disabled reason');
+    assert.equal(report.escapeFocusPath, join(repoRoot, 'package.json'), 'File Browser shared context menu Escape returns focus to row');
     assert.equal(report.keyboardDeleteConfirmation.pending, 'pending', 'File Browser keyboard Delete opens explicit delete confirmation');
     assert.equal(report.keyboardDeleteConfirmation.message.includes('Permanent delete pending for file'), true, 'File Browser keyboard Delete confirmation is visible');
     assert.equal(report.statRoute, 'ssh-file:stat', 'File Browser stat action used ssh-file:stat route');
     assert.equal(report.statStatus, 'success', 'File Browser stat action succeeded');
     assert.equal(report.downloadRoute, 'ssh-file:download', 'File Browser download action used ssh-file:download route');
     assert.equal(report.uploadRoute, 'ssh-file:upload', 'File Browser upload action used ssh-file:upload route');
+    assert.equal(report.moveContextMenuReport.sharedContextMenu, 'context-menu', 'File Browser right-click context menu uses shared shell context menu');
+    assert.equal(report.moveContextMenuReport.contextTarget, 'ssh-file-object', 'File Browser right-click context menu declares SSH file object target');
     assert.equal(report.moveContextMenuReport.targetPath, remoteUploadPath, 'File Browser move context menu targets uploaded file object');
     assert.equal(report.moveContextMenuReport.moveActionSource, 'ssh-file-provider', 'File Browser move context action declares provider source');
     assert.equal(report.moveContextMenuReport.moveRequiredCapabilities, 'host:file:write', 'File Browser move context action declares write capability');
+    assert.equal(report.moveContextMenuReport.moveTargetScope, 'ssh-file-row', 'File Browser move context action declares row target scope');
+    assert.equal(report.moveContextMenuReport.deleteDestructive, true, 'File Browser shared context menu preserves destructive styling');
+    assert.equal(report.moveContextMenuReport.localMenuPresent, false, 'File Browser right-click context menu did not render the component-local menu');
     assert.equal(report.moveRoute, 'ssh-file:move', 'File Browser move action used ssh-file:move route');
     assert.equal(report.moveStatus, 'success', 'File Browser move action succeeded');
     assert.equal(report.moveResultMoved, 'true', 'File Browser move result reports moved');

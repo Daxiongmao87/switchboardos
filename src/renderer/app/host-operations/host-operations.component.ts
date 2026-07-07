@@ -1,4 +1,4 @@
-import { Component, HostListener, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
+import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
 import type {
   HostOperationInput,
   HostOperationKind,
@@ -21,15 +21,32 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
   metrics: { title: 'Host Metrics', noun: 'OS, uptime, memory, and disk snapshot', defaultPath: '', icon: 'MT' },
 };
 
-type FileObjectActionId = 'enter-folder' | 'stat' | 'move' | 'delete' | 'download' | 'upload';
+export type FileObjectActionId = 'enter-folder' | 'stat' | 'move' | 'delete' | 'download' | 'upload';
 
-interface FileObjectAction {
+export interface FileObjectAction {
   id: FileObjectActionId;
   label: string;
   icon: string;
   shortcut: string;
   destructive?: boolean;
   disabledReason: string;
+  requiredCapabilities: string[];
+}
+
+export interface SshFileObjectContextMenuRequest {
+  x: number;
+  y: number;
+  label: string;
+  targetPath: string;
+  hostId: string;
+  objectKind: 'ssh-file-object';
+  objectOwner: 'file-browser';
+  objectSource: 'ssh-file-provider';
+  sourceAppId: 'file-browser';
+  targetScope: 'ssh-file-row';
+  actions: FileObjectAction[];
+  focusReturnElement?: HTMLElement;
+  runAction: (actionId: FileObjectActionId) => void | Promise<void>;
 }
 
 @Component({
@@ -300,49 +317,6 @@ interface FileObjectAction {
           </p>
         </section>
 
-        <nav
-          *ngIf="fileContextMenuOpen"
-          class="file-object-context-menu"
-          data-testid="ssh-file-row-context-menu"
-          data-context-target="ssh-file-object"
-          data-object-kind="ssh-file-object"
-          data-object-owner="file-browser"
-          data-object-source="ssh-file-provider"
-          [attr.data-target-path]="selectedFilePath"
-          [style.left.px]="fileContextMenuX"
-          [style.top.px]="fileContextMenuY"
-          role="menu"
-          (keydown)="handleFileContextMenuKeydown($event)"
-        >
-          <header>
-            <strong>{{ selectedFileEntry?.name || 'Remote object' }}</strong>
-            <span>{{ selectedFileEntry?.type || 'unknown' }}</span>
-          </header>
-          <button
-            *ngFor="let action of fileObjectActions; trackBy: trackFileAction"
-            type="button"
-            role="menuitem"
-            [class.danger-action]="action.destructive"
-            [disabled]="!!action.disabledReason"
-            [attr.data-action-id]="action.id"
-            [attr.data-action-source]="'ssh-file-provider'"
-            [attr.data-target-scope]="'ssh-file-row'"
-            [attr.data-source-app-id]="'file-browser'"
-            [attr.data-required-capabilities]="action.id === 'download' || action.id === 'stat' || action.id === 'enter-folder' ? 'host:file:read' : 'host:file:write'"
-            [attr.data-shortcut]="action.shortcut"
-            [attr.data-disabled-reason]="action.disabledReason || null"
-            [attr.data-testid]="'ssh-file-context-menu-action-' + action.id"
-            (click)="runFileObjectAction(action)"
-          >
-            <span class="file-menu-icon">{{ action.icon }}</span>
-            <span>
-              <strong>{{ action.label }}</strong>
-              <small *ngIf="action.disabledReason">{{ action.disabledReason }}</small>
-            </span>
-            <kbd>{{ action.shortcut }}</kbd>
-          </button>
-        </nav>
-
         <details>
           <summary>Raw stdout/stderr</summary>
           <pre>{{ result.stdout || '(no stdout)' }}</pre>
@@ -573,71 +547,6 @@ interface FileObjectAction {
       color: #cbd6e7;
     }
 
-    .file-object-context-menu {
-      position: fixed;
-      z-index: 10000;
-      display: grid;
-      min-width: 260px;
-      max-width: min(360px, calc(100vw - 24px));
-      border: 1px solid #3d4960;
-      border-radius: 8px;
-      padding: 6px;
-      background: #101723;
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-      color: #eef3fb;
-    }
-
-    .file-object-context-menu header {
-      display: grid;
-      gap: 2px;
-      padding: 7px 8px 8px;
-      border-bottom: 1px solid #2a3445;
-      color: #dce6f5;
-    }
-
-    .file-object-context-menu header span {
-      color: #9eaabd;
-      font-size: 11px;
-      text-transform: uppercase;
-    }
-
-    .file-object-context-menu button {
-      display: grid;
-      grid-template-columns: 22px 1fr auto;
-      align-items: center;
-      gap: 8px;
-      border: 0;
-      padding: 8px;
-      background: transparent;
-      text-align: left;
-    }
-
-    .file-object-context-menu button:hover:not(:disabled),
-    .file-object-context-menu button:focus-visible {
-      background: #1b2638;
-      outline: none;
-    }
-
-    .file-object-context-menu button.danger-action {
-      color: #ffd9de;
-    }
-
-    .file-object-context-menu small,
-    .file-object-context-menu kbd {
-      color: #9eaabd;
-      font-size: 11px;
-    }
-
-    .file-object-context-menu button span:nth-child(2) {
-      display: grid;
-      gap: 2px;
-    }
-
-    .file-menu-icon {
-      color: #9db7ff;
-      font-weight: 700;
-    }
-
     details {
       border-top: 1px solid #2c3546;
       padding: 10px 12px;
@@ -669,6 +578,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   @Input() hostContextId: string | null = null;
   @Input() hostContextTitle = '';
   @Input() hostContextLocked = false;
+  @Input() openShellFileContextMenu: ((request: SshFileObjectContextMenuRequest) => void) | null = null;
 
   hosts: HostRecord[] = [];
   selectedHostId = '';
@@ -694,9 +604,6 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   uploadLocalPath = '';
   uploadRemotePath = '/tmp/switchboardos-file-browser-upload';
   lastTransferDirection = '';
-  fileContextMenuOpen = false;
-  fileContextMenuX = 0;
-  fileContextMenuY = 0;
 
   get copy() {
     return MODE_COPY[this.mode];
@@ -830,6 +737,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
         icon: 'Go',
         shortcut: 'Enter',
         disabledReason: this.enterFolderDisabledReason,
+        requiredCapabilities: ['host:file:read'],
       },
       {
         id: 'stat',
@@ -837,6 +745,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
         icon: 'i',
         shortcut: 'Ctrl+I',
         disabledReason: this.statDisabledReason,
+        requiredCapabilities: ['host:file:read'],
       },
       {
         id: 'move',
@@ -844,6 +753,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
         icon: 'F2',
         shortcut: 'F2',
         disabledReason: this.moveDisabledReason,
+        requiredCapabilities: ['host:file:write'],
       },
       {
         id: 'download',
@@ -851,6 +761,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
         icon: 'Down',
         shortcut: 'Ctrl+D',
         disabledReason: this.downloadDisabledReason,
+        requiredCapabilities: ['host:file:read'],
       },
       {
         id: 'upload',
@@ -858,6 +769,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
         icon: 'Up',
         shortcut: 'Ctrl+U',
         disabledReason: this.uploadDisabledReason,
+        requiredCapabilities: ['host:file:write'],
       },
       {
         id: 'delete',
@@ -866,6 +778,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
         shortcut: 'Delete',
         destructive: true,
         disabledReason: this.deleteDisabledReason,
+        requiredCapabilities: ['host:file:write'],
       },
     ];
   }
@@ -1000,7 +913,6 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.downloadLocalPath = `/tmp/switchboardos-file-browser-${this.safeFileName(name)}`;
     this.moveTargetPath = remotePath;
     this.uploadRemotePath = this.defaultUploadRemotePathForSelection(remotePath, type);
-    this.closeFileContextMenu();
   }
 
   async statSelectedFile(): Promise<void> {
@@ -1185,7 +1097,6 @@ export class HostOperationsComponent implements OnInit, OnChanges {
       this.fileActionError = action.disabledReason;
       return;
     }
-    this.closeFileContextMenu();
     switch (action.id) {
       case 'enter-folder':
         await this.enterSelectedFolder();
@@ -1278,34 +1189,25 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     const mouseEvent = event instanceof MouseEvent ? event : null;
     const x = mouseEvent && mouseEvent.clientX > 0 ? mouseEvent.clientX : (rect?.left ?? 24) + 24;
     const y = mouseEvent && mouseEvent.clientY > 0 ? mouseEvent.clientY : (rect?.top ?? 24) + 24;
-    this.fileContextMenuX = Math.max(8, Math.min(x, window.innerWidth - 280));
-    this.fileContextMenuY = Math.max(8, Math.min(y, window.innerHeight - 320));
-    this.fileContextMenuOpen = true;
-    setTimeout(() => {
-      const firstEnabled = document.querySelector<HTMLElement>(
-        '[data-testid="ssh-file-row-context-menu"] button:not(:disabled)',
-      );
-      firstEnabled?.focus();
-    }, 0);
-  }
-
-  handleFileContextMenuKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      this.closeFileContextMenu();
-    }
-  }
-
-  @HostListener('document:click', ['$event'])
-  handleDocumentClick(event: MouseEvent): void {
-    if (!this.fileContextMenuOpen) {
+    if (!this.openShellFileContextMenu) {
+      this.fileActionError = 'SwitchboardOS shell context menu dispatcher is unavailable.';
       return;
     }
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest('[data-testid="ssh-file-row-context-menu"]')) {
-      return;
-    }
-    this.closeFileContextMenu();
+    this.openShellFileContextMenu({
+      x: Math.max(8, Math.min(x, window.innerWidth - 320)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 360)),
+      label: `${this.selectedFileEntry?.name || 'Remote object'} actions`,
+      targetPath: this.selectedFilePath,
+      hostId: this.selectedHostId,
+      objectKind: 'ssh-file-object',
+      objectOwner: 'file-browser',
+      objectSource: 'ssh-file-provider',
+      sourceAppId: 'file-browser',
+      targetScope: 'ssh-file-row',
+      actions: this.fileObjectActions.map((action) => ({ ...action })),
+      focusReturnElement: target ?? undefined,
+      runAction: (actionId) => this.runFileObjectActionById(actionId),
+    });
   }
 
   private applyHostContext(): void {
@@ -1372,7 +1274,6 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.uploadRemotePath = this.joinRemotePath(this.path || '.', 'switchboardos-upload.txt');
     this.moveTargetPath = '';
     this.pendingDeletePath = '';
-    this.closeFileContextMenu();
   }
 
   private async refreshFileListAfterMutation(deletedPath: string): Promise<void> {
@@ -1514,7 +1415,12 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     }, 0);
   }
 
-  private closeFileContextMenu(): void {
-    this.fileContextMenuOpen = false;
+  private runFileObjectActionById(actionId: FileObjectActionId): void {
+    const action = this.fileObjectActions.find((candidate) => candidate.id === actionId);
+    if (!action) {
+      this.fileActionError = `Remote file action ${actionId} is unavailable.`;
+      return;
+    }
+    void this.runFileObjectAction(action);
   }
 }
