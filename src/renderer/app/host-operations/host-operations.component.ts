@@ -1,4 +1,4 @@
-import { Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
+import { Component, HostListener, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
 import type {
   HostOperationInput,
   HostOperationKind,
@@ -20,6 +20,17 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
   logs: { title: 'Log Viewer', noun: 'log lines', defaultPath: '', icon: 'LV' },
   metrics: { title: 'Host Metrics', noun: 'OS, uptime, memory, and disk snapshot', defaultPath: '', icon: 'MT' },
 };
+
+type FileObjectActionId = 'enter-folder' | 'stat' | 'move' | 'delete' | 'download' | 'upload';
+
+interface FileObjectAction {
+  id: FileObjectActionId;
+  label: string;
+  icon: string;
+  shortcut: string;
+  destructive?: boolean;
+  disabledReason: string;
+}
 
 @Component({
   selector: 'app-host-operations',
@@ -103,11 +114,21 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
             <tbody>
               <tr
                 *ngFor="let row of result.rows; trackBy: trackRow"
+                role="row"
+                [attr.tabindex]="mode === 'files' ? 0 : null"
                 [class.selectable-row]="mode === 'files'"
                 [class.is-selected]="mode === 'files' && row['path'] === selectedFilePath"
                 [attr.data-remote-path]="mode === 'files' ? row['path'] : null"
+                [attr.data-object-kind]="mode === 'files' ? 'ssh-file-object' : null"
+                [attr.data-object-owner]="mode === 'files' ? 'file-browser' : null"
+                [attr.data-object-source]="mode === 'files' ? 'ssh-file-provider' : null"
+                [attr.data-action-ids]="mode === 'files' ? rowFileActionIds(row) : null"
                 [attr.data-selected]="mode === 'files' && row['path'] === selectedFilePath ? 'true' : null"
+                [attr.aria-selected]="mode === 'files' && row['path'] === selectedFilePath ? 'true' : null"
+                [attr.aria-label]="mode === 'files' ? fileRowLabel(row) : null"
                 (click)="mode === 'files' ? selectFileRow(row) : null"
+                (keydown)="mode === 'files' ? handleFileRowKeydown($event, row) : null"
+                (contextmenu)="mode === 'files' ? openFileRowContextMenu($event, row) : null"
               >
                 <td *ngFor="let key of rowKeys">{{ row[key] }}</td>
               </tr>
@@ -137,6 +158,10 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
           [attr.data-move-target-path]="moveTargetPath"
           [attr.data-transfer-direction]="lastTransferDirection"
           [attr.data-transfer-status]="lastTransferStatus"
+          [attr.data-object-kind]="selectedFileEntry ? 'ssh-file-object' : 'ssh-file-provider-root'"
+          [attr.data-object-owner]="'file-browser'"
+          [attr.data-object-source]="'ssh-file-provider'"
+          [attr.data-object-action-ids]="fileObjectActionIds"
         >
           <header>
             <div>
@@ -149,9 +174,24 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
             <button
               type="button"
               class="secondary-action"
+              data-testid="ssh-file-enter-folder-action"
+              data-action-id="enter-folder"
+              data-action-source="ssh-file-provider"
+              [attr.title]="enterFolderDisabledReason || 'Enter selected folder'"
+              (click)="enterSelectedFolder()"
+              [disabled]="!!enterFolderDisabledReason"
+            >
+              Enter folder
+            </button>
+            <button
+              type="button"
+              class="secondary-action"
               data-testid="ssh-file-stat-action"
+              data-action-id="stat"
+              data-action-source="ssh-file-provider"
+              [attr.title]="statDisabledReason || 'Get info for selected remote object'"
               (click)="statSelectedFile()"
-              [disabled]="isFileActionRunning || !selectedFilePath || !selectedHostId"
+              [disabled]="!!statDisabledReason"
             >
               Get info
             </button>
@@ -159,8 +199,11 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
               type="button"
               class="danger-action"
               data-testid="ssh-file-delete-action"
+              data-action-id="delete"
+              data-action-source="ssh-file-provider"
+              [attr.title]="deleteDisabledReason || 'Delete selected remote object'"
               (click)="deleteSelectedFile()"
-              [disabled]="isFileActionRunning || !selectedFilePath || !selectedHostId"
+              [disabled]="!!deleteDisabledReason"
             >
               {{ deleteConfirmationPending ? 'Confirm permanent delete' : 'Delete' }}
             </button>
@@ -179,8 +222,11 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
             <button
               type="button"
               data-testid="ssh-file-move-action"
+              data-action-id="move"
+              data-action-source="ssh-file-provider"
+              [attr.title]="moveDisabledReason || 'Rename or move selected remote object'"
               (click)="moveSelectedFile()"
-              [disabled]="isFileActionRunning || !selectedFilePath || !moveTargetPath || !selectedHostId"
+              [disabled]="!!moveDisabledReason"
             >
               Rename / Move
             </button>
@@ -199,8 +245,11 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
             <button
               type="button"
               data-testid="ssh-file-download-action"
+              data-action-id="download"
+              data-action-source="ssh-file-provider"
+              [attr.title]="downloadDisabledReason || 'Download selected remote file'"
               (click)="downloadSelectedFile()"
-              [disabled]="isFileActionRunning || !selectedFilePath || !downloadLocalPath || !selectedHostId"
+              [disabled]="!!downloadDisabledReason"
             >
               Download
             </button>
@@ -225,11 +274,22 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
             <button
               type="button"
               data-testid="ssh-file-upload-action"
+              data-action-id="upload"
+              data-action-source="ssh-file-provider"
+              [attr.title]="uploadDisabledReason || 'Upload into the selected folder or current folder'"
               (click)="uploadFile()"
-              [disabled]="isFileActionRunning || !uploadLocalPath || !uploadRemotePath || !selectedHostId"
+              [disabled]="!!uploadDisabledReason"
             >
-              Upload
+              Upload into folder
             </button>
+          </div>
+
+          <div
+            *ngIf="disabledActionReasons.length > 0"
+            class="file-action-disabled-reasons"
+            data-testid="ssh-file-disabled-reasons"
+          >
+            <p *ngFor="let reason of disabledActionReasons">{{ reason }}</p>
           </div>
 
           <p *ngIf="fileActionMessage" class="status-message" data-testid="ssh-file-action-message">
@@ -239,6 +299,49 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
             {{ fileActionError }}
           </p>
         </section>
+
+        <nav
+          *ngIf="fileContextMenuOpen"
+          class="file-object-context-menu"
+          data-testid="ssh-file-row-context-menu"
+          data-context-target="ssh-file-object"
+          data-object-kind="ssh-file-object"
+          data-object-owner="file-browser"
+          data-object-source="ssh-file-provider"
+          [attr.data-target-path]="selectedFilePath"
+          [style.left.px]="fileContextMenuX"
+          [style.top.px]="fileContextMenuY"
+          role="menu"
+          (keydown)="handleFileContextMenuKeydown($event)"
+        >
+          <header>
+            <strong>{{ selectedFileEntry?.name || 'Remote object' }}</strong>
+            <span>{{ selectedFileEntry?.type || 'unknown' }}</span>
+          </header>
+          <button
+            *ngFor="let action of fileObjectActions; trackBy: trackFileAction"
+            type="button"
+            role="menuitem"
+            [class.danger-action]="action.destructive"
+            [disabled]="!!action.disabledReason"
+            [attr.data-action-id]="action.id"
+            [attr.data-action-source]="'ssh-file-provider'"
+            [attr.data-target-scope]="'ssh-file-row'"
+            [attr.data-source-app-id]="'file-browser'"
+            [attr.data-required-capabilities]="action.id === 'download' || action.id === 'stat' || action.id === 'enter-folder' ? 'host:file:read' : 'host:file:write'"
+            [attr.data-shortcut]="action.shortcut"
+            [attr.data-disabled-reason]="action.disabledReason || null"
+            [attr.data-testid]="'ssh-file-context-menu-action-' + action.id"
+            (click)="runFileObjectAction(action)"
+          >
+            <span class="file-menu-icon">{{ action.icon }}</span>
+            <span>
+              <strong>{{ action.label }}</strong>
+              <small *ngIf="action.disabledReason">{{ action.disabledReason }}</small>
+            </span>
+            <kbd>{{ action.shortcut }}</kbd>
+          </button>
+        </nav>
 
         <details>
           <summary>Raw stdout/stderr</summary>
@@ -412,6 +515,12 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
       cursor: pointer;
     }
 
+    .selectable-row:focus-visible {
+      outline: 2px solid #7aa2ff;
+      outline-offset: -2px;
+      background: #203050;
+    }
+
     .selectable-row:hover,
     .selectable-row.is-selected {
       background: #18243a;
@@ -448,6 +557,85 @@ const MODE_COPY: Record<HostOperationKind, { title: string; noun: string; defaul
 
     .file-actions .file-object-kind {
       color: #cbd6e7;
+    }
+
+    .file-action-disabled-reasons {
+      display: grid;
+      gap: 4px;
+      border: 1px solid #344052;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #0d1420;
+    }
+
+    .file-action-disabled-reasons p {
+      margin: 0;
+      color: #cbd6e7;
+    }
+
+    .file-object-context-menu {
+      position: fixed;
+      z-index: 10000;
+      display: grid;
+      min-width: 260px;
+      max-width: min(360px, calc(100vw - 24px));
+      border: 1px solid #3d4960;
+      border-radius: 8px;
+      padding: 6px;
+      background: #101723;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+      color: #eef3fb;
+    }
+
+    .file-object-context-menu header {
+      display: grid;
+      gap: 2px;
+      padding: 7px 8px 8px;
+      border-bottom: 1px solid #2a3445;
+      color: #dce6f5;
+    }
+
+    .file-object-context-menu header span {
+      color: #9eaabd;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .file-object-context-menu button {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      padding: 8px;
+      background: transparent;
+      text-align: left;
+    }
+
+    .file-object-context-menu button:hover:not(:disabled),
+    .file-object-context-menu button:focus-visible {
+      background: #1b2638;
+      outline: none;
+    }
+
+    .file-object-context-menu button.danger-action {
+      color: #ffd9de;
+    }
+
+    .file-object-context-menu small,
+    .file-object-context-menu kbd {
+      color: #9eaabd;
+      font-size: 11px;
+    }
+
+    .file-object-context-menu button span:nth-child(2) {
+      display: grid;
+      gap: 2px;
+    }
+
+    .file-menu-icon {
+      color: #9db7ff;
+      font-weight: 700;
     }
 
     details {
@@ -506,6 +694,9 @@ export class HostOperationsComponent implements OnInit, OnChanges {
   uploadLocalPath = '';
   uploadRemotePath = '/tmp/switchboardos-file-browser-upload';
   lastTransferDirection = '';
+  fileContextMenuOpen = false;
+  fileContextMenuX = 0;
+  fileContextMenuY = 0;
 
   get copy() {
     return MODE_COPY[this.mode];
@@ -547,6 +738,154 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   get deleteConfirmationPending(): boolean {
     return Boolean(this.selectedFilePath && this.pendingDeletePath === this.selectedFilePath);
+  }
+
+  get selectedFileIsDirectory(): boolean {
+    return this.selectedFileEntry?.type === 'directory';
+  }
+
+  get selectedFileIsFile(): boolean {
+    return this.selectedFileEntry?.type === 'file';
+  }
+
+  get selectedObjectRequiredReason(): string {
+    if (!this.selectedHostId) {
+      return 'Select a host before using remote file actions.';
+    }
+    if (!this.selectedFilePath) {
+      return 'Select a remote file or folder first.';
+    }
+    if (this.isFileActionRunning) {
+      return 'Wait for the current file action to finish.';
+    }
+    return '';
+  }
+
+  get enterFolderDisabledReason(): string {
+    const required = this.selectedObjectRequiredReason;
+    if (required) {
+      return required;
+    }
+    return this.selectedFileIsDirectory ? '' : 'Enter folder is available after selecting a folder.';
+  }
+
+  get statDisabledReason(): string {
+    return this.selectedObjectRequiredReason;
+  }
+
+  get deleteDisabledReason(): string {
+    return this.selectedObjectRequiredReason;
+  }
+
+  get moveDisabledReason(): string {
+    const required = this.selectedObjectRequiredReason;
+    if (required) {
+      return required;
+    }
+    const targetPath = this.moveTargetPath.trim();
+    if (!targetPath) {
+      return 'Provide a rename or move target path.';
+    }
+    if (targetPath === this.selectedFilePath) {
+      return 'Move target must be different from the selected path.';
+    }
+    return '';
+  }
+
+  get downloadDisabledReason(): string {
+    const required = this.selectedObjectRequiredReason;
+    if (required) {
+      return required;
+    }
+    if (!this.selectedFileIsFile) {
+      return 'Download is available for files; folder download is not supported by this SSH file provider.';
+    }
+    if (!this.downloadLocalPath.trim()) {
+      return 'Provide a local download target path.';
+    }
+    return '';
+  }
+
+  get uploadDisabledReason(): string {
+    if (!this.selectedHostId) {
+      return 'Select a host before uploading into a remote folder.';
+    }
+    if (this.isFileActionRunning) {
+      return 'Wait for the current file action to finish.';
+    }
+    if (!this.uploadLocalPath.trim()) {
+      return 'Provide a local upload source path.';
+    }
+    if (!this.uploadRemotePath.trim()) {
+      return 'Provide a remote upload destination inside the selected or current folder.';
+    }
+    return '';
+  }
+
+  get fileObjectActions(): FileObjectAction[] {
+    return [
+      {
+        id: 'enter-folder',
+        label: 'Enter folder',
+        icon: 'Go',
+        shortcut: 'Enter',
+        disabledReason: this.enterFolderDisabledReason,
+      },
+      {
+        id: 'stat',
+        label: 'Get info',
+        icon: 'i',
+        shortcut: 'Ctrl+I',
+        disabledReason: this.statDisabledReason,
+      },
+      {
+        id: 'move',
+        label: 'Rename / Move',
+        icon: 'F2',
+        shortcut: 'F2',
+        disabledReason: this.moveDisabledReason,
+      },
+      {
+        id: 'download',
+        label: 'Download file',
+        icon: 'Down',
+        shortcut: 'Ctrl+D',
+        disabledReason: this.downloadDisabledReason,
+      },
+      {
+        id: 'upload',
+        label: 'Upload into folder',
+        icon: 'Up',
+        shortcut: 'Ctrl+U',
+        disabledReason: this.uploadDisabledReason,
+      },
+      {
+        id: 'delete',
+        label: this.deleteConfirmationPending ? 'Confirm permanent delete' : 'Delete',
+        icon: 'Del',
+        shortcut: 'Delete',
+        destructive: true,
+        disabledReason: this.deleteDisabledReason,
+      },
+    ];
+  }
+
+  get fileObjectActionIds(): string {
+    return this.fileObjectActions.map((action) => action.id).join(',');
+  }
+
+  get disabledActionReasons(): string[] {
+    const seen = new Set<string>();
+    return this.fileObjectActions
+      .filter((action) => action.disabledReason)
+      .map((action) => `${action.label}: ${action.disabledReason}`)
+      .filter((reason) => {
+        if (seen.has(reason)) {
+          return false;
+        }
+        seen.add(reason);
+        return true;
+      });
   }
 
   ngOnInit(): void {
@@ -624,6 +963,10 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     return index;
   }
 
+  trackFileAction(_index: number, action: FileObjectAction): string {
+    return action.id;
+  }
+
   selectFileRow(row: Record<string, string | number | boolean | null>): void {
     if (this.mode !== 'files') {
       return;
@@ -656,15 +999,15 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.lastTransferDirection = '';
     this.downloadLocalPath = `/tmp/switchboardos-file-browser-${this.safeFileName(name)}`;
     this.moveTargetPath = remotePath;
-    this.uploadRemotePath = type === 'directory'
-      ? this.joinRemotePath(remotePath, 'switchboardos-upload.txt')
-      : remotePath;
+    this.uploadRemotePath = this.defaultUploadRemotePathForSelection(remotePath, type);
+    this.closeFileContextMenu();
   }
 
   async statSelectedFile(): Promise<void> {
     const api = getSwitchboardApi();
-    if (!api || !this.selectedHostId || !this.selectedFilePath) {
-      this.fileActionError = 'Select a remote file before requesting file info.';
+    const disabledReason = this.statDisabledReason;
+    if (!api || disabledReason) {
+      this.fileActionError = disabledReason || 'Switchboard API is unavailable.';
       return;
     }
 
@@ -688,8 +1031,9 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   async downloadSelectedFile(): Promise<void> {
     const api = getSwitchboardApi();
-    if (!api || !this.selectedHostId || !this.selectedFilePath || !this.downloadLocalPath.trim()) {
-      this.fileActionError = 'Select a remote file and provide a local download target.';
+    const disabledReason = this.downloadDisabledReason;
+    if (!api || disabledReason) {
+      this.fileActionError = disabledReason || 'Switchboard API is unavailable.';
       return;
     }
 
@@ -715,10 +1059,11 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   async uploadFile(): Promise<void> {
     const api = getSwitchboardApi();
+    const disabledReason = this.uploadDisabledReason;
     const localPath = this.uploadLocalPath.trim();
     const remotePath = this.uploadRemotePath.trim();
-    if (!api || !this.selectedHostId || !localPath || !remotePath) {
-      this.fileActionError = 'Provide a local upload source and remote destination.';
+    if (!api || disabledReason) {
+      this.fileActionError = disabledReason || 'Switchboard API is unavailable.';
       return;
     }
 
@@ -744,8 +1089,9 @@ export class HostOperationsComponent implements OnInit, OnChanges {
 
   async deleteSelectedFile(): Promise<void> {
     const api = getSwitchboardApi();
-    if (!api || !this.selectedHostId || !this.selectedFilePath) {
-      this.fileActionError = 'Select a remote file or folder before deleting.';
+    const disabledReason = this.deleteDisabledReason;
+    if (!api || disabledReason) {
+      this.fileActionError = disabledReason || 'Switchboard API is unavailable.';
       return;
     }
 
@@ -788,12 +1134,9 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     const api = getSwitchboardApi();
     const sourcePath = this.selectedFilePath;
     const targetPath = this.moveTargetPath.trim();
-    if (!api || !this.selectedHostId || !sourcePath || !targetPath) {
-      this.fileActionError = 'Select a remote object and provide a rename or move target.';
-      return;
-    }
-    if (sourcePath === targetPath) {
-      this.fileActionError = 'Move target must be different from the selected path.';
+    const disabledReason = this.moveDisabledReason;
+    if (!api || disabledReason) {
+      this.fileActionError = disabledReason || 'Switchboard API is unavailable.';
       return;
     }
 
@@ -821,6 +1164,148 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     } finally {
       this.isFileActionRunning = false;
     }
+  }
+
+  async enterSelectedFolder(): Promise<void> {
+    const disabledReason = this.enterFolderDisabledReason;
+    if (disabledReason) {
+      this.fileActionError = disabledReason;
+      return;
+    }
+
+    const folderPath = this.selectedFilePath;
+    this.path = folderPath;
+    this.fileActionMessage = `Opening folder ${folderPath}.`;
+    this.fileActionError = '';
+    await this.runOperation();
+  }
+
+  async runFileObjectAction(action: FileObjectAction): Promise<void> {
+    if (action.disabledReason) {
+      this.fileActionError = action.disabledReason;
+      return;
+    }
+    this.closeFileContextMenu();
+    switch (action.id) {
+      case 'enter-folder':
+        await this.enterSelectedFolder();
+        break;
+      case 'stat':
+        await this.statSelectedFile();
+        break;
+      case 'move':
+        await this.moveSelectedFile();
+        break;
+      case 'delete':
+        await this.deleteSelectedFile();
+        break;
+      case 'download':
+        await this.downloadSelectedFile();
+        break;
+      case 'upload':
+        await this.uploadFile();
+        break;
+    }
+  }
+
+  handleFileRowKeydown(event: KeyboardEvent, row: Record<string, string | number | boolean | null>): void {
+    if (this.mode !== 'files') {
+      return;
+    }
+    const path = this.rowText(row, 'path');
+    if (path && path !== this.selectedFilePath) {
+      this.selectFileRow(row);
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      this.selectAdjacentFileRow(row, event.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void (this.selectedFileIsDirectory ? this.enterSelectedFolder() : this.statSelectedFile());
+      return;
+    }
+
+    if (event.key === ' ' || event.key === 'Spacebar') {
+      event.preventDefault();
+      this.selectFileRow(row);
+      return;
+    }
+
+    if (event.key === 'F2') {
+      event.preventDefault();
+      this.focusMoveTargetInput();
+      return;
+    }
+
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      void this.deleteSelectedFile();
+      return;
+    }
+
+    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      event.preventDefault();
+      this.openFileRowContextMenu(event, row);
+      return;
+    }
+
+    if ((event.key === 'i' || event.key === 'I') && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      void this.statSelectedFile();
+      return;
+    }
+
+    if ((event.key === 'd' || event.key === 'D') && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      void this.downloadSelectedFile();
+      return;
+    }
+  }
+
+  openFileRowContextMenu(event: MouseEvent | KeyboardEvent, row: Record<string, string | number | boolean | null>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const path = this.rowText(row, 'path');
+    if (path !== this.selectedFilePath) {
+      this.selectFileRow(row);
+    }
+    const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    const rect = target?.getBoundingClientRect();
+    const mouseEvent = event instanceof MouseEvent ? event : null;
+    const x = mouseEvent && mouseEvent.clientX > 0 ? mouseEvent.clientX : (rect?.left ?? 24) + 24;
+    const y = mouseEvent && mouseEvent.clientY > 0 ? mouseEvent.clientY : (rect?.top ?? 24) + 24;
+    this.fileContextMenuX = Math.max(8, Math.min(x, window.innerWidth - 280));
+    this.fileContextMenuY = Math.max(8, Math.min(y, window.innerHeight - 320));
+    this.fileContextMenuOpen = true;
+    setTimeout(() => {
+      const firstEnabled = document.querySelector<HTMLElement>(
+        '[data-testid="ssh-file-row-context-menu"] button:not(:disabled)',
+      );
+      firstEnabled?.focus();
+    }, 0);
+  }
+
+  handleFileContextMenuKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.closeFileContextMenu();
+    }
+  }
+
+  @HostListener('document:click', ['$event'])
+  handleDocumentClick(event: MouseEvent): void {
+    if (!this.fileContextMenuOpen) {
+      return;
+    }
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('[data-testid="ssh-file-row-context-menu"]')) {
+      return;
+    }
+    this.closeFileContextMenu();
   }
 
   private applyHostContext(): void {
@@ -887,6 +1372,7 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     this.uploadRemotePath = this.joinRemotePath(this.path || '.', 'switchboardos-upload.txt');
     this.moveTargetPath = '';
     this.pendingDeletePath = '';
+    this.closeFileContextMenu();
   }
 
   private async refreshFileListAfterMutation(deletedPath: string): Promise<void> {
@@ -937,6 +1423,24 @@ export class HostOperationsComponent implements OnInit, OnChanges {
     return Number.isFinite(value) ? value : null;
   }
 
+  rowFileActionIds(row: Record<string, string | number | boolean | null>): string {
+    const type = this.normalizedFileType(this.rowText(row, 'type'));
+    const ids: FileObjectActionId[] = ['stat', 'move', 'delete', 'upload'];
+    if (type === 'directory') {
+      ids.unshift('enter-folder');
+    }
+    if (type === 'file') {
+      ids.push('download');
+    }
+    return ids.join(',');
+  }
+
+  fileRowLabel(row: Record<string, string | number | boolean | null>): string {
+    const name = this.rowText(row, 'name') || this.fileNameFromPath(this.rowText(row, 'path'));
+    const type = this.normalizedFileType(this.rowText(row, 'type'));
+    return `${type === 'directory' ? 'Folder' : 'File'} ${name}. Press Enter to ${type === 'directory' ? 'enter folder' : 'get info'}, Shift F10 for actions.`;
+  }
+
   private normalizedFileType(value: string): SshFileEntry['type'] {
     if (value === 'file' || value === 'directory' || value === 'symlink' || value === 'other' || value === 'unknown') {
       return value;
@@ -971,5 +1475,46 @@ export class HostOperationsComponent implements OnInit, OnChanges {
       return `/${childPath}`;
     }
     return `${base.replace(/\/+$/, '')}/${childPath}`;
+  }
+
+  private defaultUploadRemotePathForSelection(remotePath: string, type: SshFileEntry['type']): string {
+    const uploadName = 'switchboardos-upload.txt';
+    if (type === 'directory') {
+      return this.joinRemotePath(remotePath, uploadName);
+    }
+    return this.joinRemotePath(this.parentRemotePath(remotePath), uploadName);
+  }
+
+  private selectAdjacentFileRow(
+    currentRow: Record<string, string | number | boolean | null>,
+    delta: 1 | -1,
+  ): void {
+    const rows = this.result?.rows ?? [];
+    if (rows.length === 0) {
+      return;
+    }
+    const currentPath = this.rowText(currentRow, 'path');
+    const currentIndex = rows.findIndex((row) => this.rowText(row, 'path') === currentPath);
+    const nextIndex = Math.max(0, Math.min(rows.length - 1, (currentIndex === -1 ? 0 : currentIndex) + delta));
+    const nextRow = rows[nextIndex];
+    this.selectFileRow(nextRow);
+    this.focusFileRow(this.selectedFilePath);
+  }
+
+  private focusFileRow(path: string): void {
+    setTimeout(() => {
+      const rows = Array.from(document.querySelectorAll<HTMLElement>('tr[data-remote-path]'));
+      rows.find((row) => row.getAttribute('data-remote-path') === path)?.focus();
+    }, 0);
+  }
+
+  private focusMoveTargetInput(): void {
+    setTimeout(() => {
+      document.querySelector<HTMLInputElement>('[data-testid="ssh-file-move-target-path"]')?.focus();
+    }, 0);
+  }
+
+  private closeFileContextMenu(): void {
+    this.fileContextMenuOpen = false;
   }
 }

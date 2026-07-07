@@ -238,9 +238,22 @@ async function browserSmoke(params) {
     const clientY = rect.top + Math.min(24, Math.max(4, rect.height / 2));
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX, clientY }));
   };
+  const keydown = (element, key, options = {}) => {
+    if (!element) {
+      throw new Error(`Missing key target for ${key}`);
+    }
+    element.dispatchEvent(new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key,
+      ...options,
+    }));
+  };
   const buttonByText = (root, text) => [...(root?.querySelectorAll('button') || [])]
     .find((button) => textIncludes(button, text));
   const clickMenuItem = (text) => click([...document.querySelectorAll('[data-testid="context-menu"] button')]
+    .find((button) => textIncludes(button, text)));
+  const clickFileMenuItem = (text) => click([...document.querySelectorAll('[data-testid="ssh-file-row-context-menu"] button')]
     .find((button) => textIncludes(button, text)));
   const setInputValue = (input, value) => {
     if (!input) {
@@ -326,6 +339,8 @@ async function browserSmoke(params) {
     );
 
     await runFileList(runtime, params.remoteListPath);
+    const initialActionPanel = await waitFor(() => runtime.querySelector('[data-testid="ssh-file-actions"]'), 'initial SSH file actions panel');
+    const initialDisabledReasonText = initialActionPanel.querySelector('[data-testid="ssh-file-disabled-reasons"]')?.textContent || '';
     const rowCountBeforeDelete = Number(runtime.getAttribute('data-row-count') || '0');
     const packageRow = await waitFor(
       () => [...runtime.querySelectorAll('tr[data-remote-path]')]
@@ -333,14 +348,67 @@ async function browserSmoke(params) {
       'package.json row',
       30000,
     );
-    click(packageRow);
 
     const actionPanel = await waitFor(() => runtime.querySelector('[data-testid="ssh-file-actions"]'), 'SSH file actions panel');
+    const rowsBeforeKeyboard = [...runtime.querySelectorAll('tr[data-remote-path]')];
+    const packageIndex = rowsBeforeKeyboard.indexOf(packageRow);
+    if (packageIndex === -1) {
+      throw new Error('package.json row was not part of the keyboard row set.');
+    }
+    packageRow.focus();
+    const keyboardFocusPath = document.activeElement?.getAttribute('data-remote-path') || '';
+    let keyboardNavigatedPath = '';
+    let keyboardReturnedPath = '';
+    if (rowsBeforeKeyboard.length > 1) {
+      const direction = packageIndex < rowsBeforeKeyboard.length - 1 ? 1 : -1;
+      const forwardKey = direction === 1 ? 'ArrowDown' : 'ArrowUp';
+      const backKey = direction === 1 ? 'ArrowUp' : 'ArrowDown';
+      const expectedRow = rowsBeforeKeyboard[packageIndex + direction];
+      const expectedPath = expectedRow.getAttribute('data-remote-path') || '';
+      keydown(packageRow, forwardKey);
+      await waitFor(() => actionPanel.getAttribute('data-selected-path') === expectedPath
+        && document.activeElement?.getAttribute('data-remote-path') === expectedPath, 'keyboard row navigation selected adjacent row');
+      keyboardNavigatedPath = actionPanel.getAttribute('data-selected-path') || '';
+      keydown(document.activeElement, backKey);
+      await waitFor(() => actionPanel.getAttribute('data-selected-path') === params.remotePackagePath
+        && document.activeElement?.getAttribute('data-remote-path') === params.remotePackagePath, 'keyboard row navigation returned to package row');
+      keyboardReturnedPath = actionPanel.getAttribute('data-selected-path') || '';
+    } else {
+      keydown(packageRow, ' ');
+      await waitFor(() => actionPanel.getAttribute('data-selected-path') === params.remotePackagePath, 'keyboard space selected package row');
+      keyboardReturnedPath = actionPanel.getAttribute('data-selected-path') || '';
+    }
     await waitFor(() => actionPanel.getAttribute('data-selected-path') === params.remotePackagePath, 'selected package.json path');
 
-    click(actionPanel.querySelector('[data-testid="ssh-file-stat-action"]'));
+    const selectedDisabledReasonText = actionPanel.querySelector('[data-testid="ssh-file-disabled-reasons"]')?.textContent || '';
+    keydown(packageRow, 'F10', { shiftKey: true });
+    const statContextMenu = await waitFor(
+      () => document.querySelector('[data-testid="ssh-file-row-context-menu"][data-context-target="ssh-file-object"]'),
+      'keyboard-opened SSH file row context menu',
+    );
+    const statContextMenuReport = {
+      targetPath: statContextMenu.getAttribute('data-target-path') || '',
+      actionIds: [...statContextMenu.querySelectorAll('button')].map((button) => button.getAttribute('data-action-id') || ''),
+      statActionSource: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-action-source') || '',
+      targetScope: statContextMenu.querySelector('[data-action-id="stat"]')?.getAttribute('data-target-scope') || '',
+      disabledReasons: [...statContextMenu.querySelectorAll('button[disabled]')]
+        .map((button) => button.getAttribute('data-disabled-reason') || '')
+        .filter(Boolean),
+    };
+    clickFileMenuItem('Get info');
     await waitFor(() => actionPanel.getAttribute('data-stat-provider-route') === 'ssh-file:stat'
       && actionPanel.getAttribute('data-stat-status') === 'success', 'ssh-file:stat success', 45000);
+
+    const packageRowForDeleteKey = [...runtime.querySelectorAll('tr[data-remote-path]')]
+      .find((row) => row.getAttribute('data-remote-path') === params.remotePackagePath);
+    packageRowForDeleteKey.focus();
+    keydown(packageRowForDeleteKey, 'Delete');
+    await waitFor(() => actionPanel.getAttribute('data-delete-confirmation') === 'pending'
+      && (actionPanel.textContent || '').includes('Permanent delete pending for file'), 'keyboard Delete opens explicit delete confirmation');
+    const keyboardDeleteConfirmation = {
+      pending: actionPanel.getAttribute('data-delete-confirmation') || '',
+      message: actionPanel.querySelector('[data-testid="ssh-file-action-message"]')?.textContent || '',
+    };
 
     setInputValue(actionPanel.querySelector('[data-testid="ssh-file-download-local-path"]'), params.downloadTargetPath);
     click(actionPanel.querySelector('[data-testid="ssh-file-download-action"]'));
@@ -383,7 +451,17 @@ async function browserSmoke(params) {
     const movePanel = await waitFor(() => runtime.querySelector('[data-testid="ssh-file-actions"]'), 'SSH file move action panel');
     await waitFor(() => movePanel.getAttribute('data-selected-path') === params.remoteUploadPath, 'uploaded file selected for move');
     setInputValue(movePanel.querySelector('[data-testid="ssh-file-move-target-path"]'), params.remoteMovedPath);
-    click(movePanel.querySelector('[data-testid="ssh-file-move-action"]'));
+    rightClick(uploadedRow);
+    const moveContextMenu = await waitFor(
+      () => document.querySelector('[data-testid="ssh-file-row-context-menu"][data-context-target="ssh-file-object"]'),
+      'right-click SSH file row context menu for move',
+    );
+    const moveContextMenuReport = {
+      targetPath: moveContextMenu.getAttribute('data-target-path') || '',
+      moveActionSource: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-action-source') || '',
+      moveRequiredCapabilities: moveContextMenu.querySelector('[data-action-id="move"]')?.getAttribute('data-required-capabilities') || '',
+    };
+    clickFileMenuItem('Rename / Move');
     await waitFor(() => movePanel.getAttribute('data-move-provider-route') === 'ssh-file:move'
       && movePanel.getAttribute('data-move-status') === 'success'
       && movePanel.getAttribute('data-move-result-moved') === 'true'
@@ -486,6 +564,14 @@ async function browserSmoke(params) {
       deleteAuditIncludesRemotePath: deleteAuditJson.includes(params.remoteMovedPath),
       transferStatusBeforeRelist,
       actionText: deletePanel.textContent || '',
+      initialDisabledReasonText,
+      selectedDisabledReasonText,
+      keyboardFocusPath,
+      keyboardNavigatedPath,
+      keyboardReturnedPath,
+      statContextMenuReport,
+      keyboardDeleteConfirmation,
+      moveContextMenuReport,
       rowCount: rowCountBeforeDelete,
       fileWindowTitle: fileWindow.querySelector('.window-title')?.textContent?.trim() || '',
     };
@@ -516,10 +602,24 @@ async function main() {
 
     assert.equal(report.providerRoute, 'ssh-file:list', 'File Browser uses ssh-file:list route marker');
     assert.equal(report.selectedPath, join(repoRoot, 'package.json'), 'selected remote package row remains selected after transfer actions');
+    assert.equal(report.initialDisabledReasonText.includes('Select a remote file or folder first'), true, 'File Browser shows visible disabled reasons before row selection');
+    assert.equal(report.selectedDisabledReasonText.includes('Enter folder is available after selecting a folder'), true, 'File Browser shows file-specific disabled reason for folder-only action');
+    assert.equal(report.keyboardFocusPath, join(repoRoot, 'package.json'), 'File Browser row accepts keyboard focus');
+    assert.equal(report.keyboardReturnedPath, join(repoRoot, 'package.json'), 'File Browser keyboard path returns selection to package row');
+    assert.equal(Boolean(report.keyboardNavigatedPath) || report.keyboardReturnedPath === join(repoRoot, 'package.json'), true, 'File Browser keyboard navigation path selected a row');
+    assert.equal(report.statContextMenuReport.targetPath, join(repoRoot, 'package.json'), 'File Browser keyboard context menu targets selected file object');
+    assert.equal(report.statContextMenuReport.actionIds.includes('stat'), true, 'File Browser context menu exposes stat object action');
+    assert.equal(report.statContextMenuReport.statActionSource, 'ssh-file-provider', 'File Browser stat context action declares provider source');
+    assert.equal(report.statContextMenuReport.targetScope, 'ssh-file-row', 'File Browser stat context action declares row target scope');
+    assert.equal(report.keyboardDeleteConfirmation.pending, 'pending', 'File Browser keyboard Delete opens explicit delete confirmation');
+    assert.equal(report.keyboardDeleteConfirmation.message.includes('Permanent delete pending for file'), true, 'File Browser keyboard Delete confirmation is visible');
     assert.equal(report.statRoute, 'ssh-file:stat', 'File Browser stat action used ssh-file:stat route');
     assert.equal(report.statStatus, 'success', 'File Browser stat action succeeded');
     assert.equal(report.downloadRoute, 'ssh-file:download', 'File Browser download action used ssh-file:download route');
     assert.equal(report.uploadRoute, 'ssh-file:upload', 'File Browser upload action used ssh-file:upload route');
+    assert.equal(report.moveContextMenuReport.targetPath, remoteUploadPath, 'File Browser move context menu targets uploaded file object');
+    assert.equal(report.moveContextMenuReport.moveActionSource, 'ssh-file-provider', 'File Browser move context action declares provider source');
+    assert.equal(report.moveContextMenuReport.moveRequiredCapabilities, 'host:file:write', 'File Browser move context action declares write capability');
     assert.equal(report.moveRoute, 'ssh-file:move', 'File Browser move action used ssh-file:move route');
     assert.equal(report.moveStatus, 'success', 'File Browser move action succeeded');
     assert.equal(report.moveResultMoved, 'true', 'File Browser move result reports moved');
