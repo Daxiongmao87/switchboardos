@@ -569,6 +569,42 @@ interface WorkspaceArtifact {
   size?: number;
 }
 
+interface WorkspaceArtifactInfo {
+  path: string;
+  kind: WorkspaceArtifactKind;
+  sourceRoute: 'workspaceArtifactContent';
+  manifestName: string;
+  manifestKind: string;
+  schemaVersion: string;
+  capabilities: string[];
+  provenance: string;
+  validationMessages: string[];
+  updatedAt: string;
+  size: number;
+  applet?: WorkspaceAppletArtifactInfo;
+  scriptlet?: WorkspaceScriptletArtifactInfo;
+}
+
+interface WorkspaceAppletArtifactInfo {
+  appId: string;
+  installStatus: string;
+  installedAppId: string;
+  installedManifestId: string;
+  enabled: boolean | null;
+  sourcePersistence: string;
+  artifactBacked: boolean;
+}
+
+interface WorkspaceScriptletArtifactInfo {
+  hostId: string;
+  hostIdPresent: boolean;
+  commandDeclared: boolean;
+  commandSource: string;
+  runApiAvailable: boolean;
+  runReady: boolean;
+  readiness: string;
+}
+
 interface WorkspaceTrashEntry {
   id: string;
   name: string;
@@ -670,6 +706,42 @@ function manifestStringArrayField(record: Record<string, unknown>, key: string):
     .filter((item): item is string => typeof item === 'string')
     .map((item) => item.trim())
     .filter(Boolean)));
+}
+
+function manifestSchemaVersionField(record: Record<string, unknown>): string {
+  const value = record['schemaVersion'];
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return '';
+}
+
+function manifestObjectField(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = record[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function manifestNestedStringField(record: Record<string, unknown>, key: string, nestedKey: string): string {
+  const nested = manifestObjectField(record, key);
+  return nested ? manifestStringField(nested, nestedKey) : '';
+}
+
+function workspaceArtifactDeclaredCapabilities(record: Record<string, unknown>): string[] {
+  return Array.from(new Set([
+    ...manifestStringArrayField(record, 'capabilities'),
+    ...manifestStringArrayField(record, 'requiredCapabilities'),
+    ...manifestStringArrayField(record, 'requestedCapabilities'),
+  ]));
+}
+
+function workspaceArtifactProvenanceValue(record: Record<string, unknown>, key: string): string {
+  const provenance = manifestObjectField(record, 'provenance');
+  return provenance ? manifestStringField(provenance, key) : '';
 }
 
 interface DesktopIconPosition {
@@ -873,6 +945,10 @@ export class AppComponent implements OnInit, OnDestroy {
   workspaceCurrentPath = '';
   workspaceClipboard: WorkspaceClipboardItem | null = null;
   selectedWorkspaceArtifact: WorkspaceArtifact | null = null;
+  selectedWorkspaceArtifactInfo: WorkspaceArtifactInfo | null = null;
+  selectedWorkspaceArtifactInfoLoading = false;
+  selectedWorkspaceArtifactInfoError = '';
+  private workspaceArtifactInfoRequestId = 0;
   workspaceArtifactSearchText = '';
   workspaceArtifactKindFilter: WorkspaceArtifactKindFilter = 'all';
   workspaceArtifactSortBy: WorkspaceArtifactSortField = 'name';
@@ -2901,6 +2977,13 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
 
+    if (event.key === 'Enter' && event.altKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.showWorkspaceArtifactProperties(artifact);
+      return;
+    }
+
     if (event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
@@ -3226,6 +3309,205 @@ export class AppComponent implements OnInit, OnDestroy {
 
   showWorkspaceArtifactProperties(artifact: WorkspaceArtifact): void {
     this.selectedWorkspaceArtifact = artifact;
+    this.selectedWorkspaceArtifactInfo = null;
+    this.selectedWorkspaceArtifactInfoError = '';
+    const requestId = ++this.workspaceArtifactInfoRequestId;
+    if (!this.isWorkspaceAppletArtifact(artifact) && !this.isWorkspaceScriptletArtifact(artifact)) {
+      this.selectedWorkspaceArtifactInfoLoading = false;
+      return;
+    }
+
+    this.selectedWorkspaceArtifactInfoLoading = true;
+    void this.loadWorkspaceArtifactInfo(artifact, requestId);
+  }
+
+  clearWorkspaceArtifactProperties(): void {
+    this.selectedWorkspaceArtifact = null;
+    this.selectedWorkspaceArtifactInfo = null;
+    this.selectedWorkspaceArtifactInfoError = '';
+    this.selectedWorkspaceArtifactInfoLoading = false;
+    this.workspaceArtifactInfoRequestId += 1;
+  }
+
+  private async loadWorkspaceArtifactInfo(artifact: WorkspaceArtifact, requestId: number): Promise<void> {
+    try {
+      const info = await this.buildWorkspaceArtifactInfo(artifact);
+      if (requestId !== this.workspaceArtifactInfoRequestId || this.selectedWorkspaceArtifact?.id !== artifact.id) {
+        return;
+      }
+      this.selectedWorkspaceArtifactInfo = info;
+      this.selectedWorkspaceArtifactInfoError = '';
+    } catch (error) {
+      if (requestId !== this.workspaceArtifactInfoRequestId || this.selectedWorkspaceArtifact?.id !== artifact.id) {
+        return;
+      }
+      this.selectedWorkspaceArtifactInfo = null;
+      this.selectedWorkspaceArtifactInfoError = this.errorText(error, 'Unable to load workspace artifact properties.');
+    } finally {
+      if (requestId === this.workspaceArtifactInfoRequestId && this.selectedWorkspaceArtifact?.id === artifact.id) {
+        this.selectedWorkspaceArtifactInfoLoading = false;
+      }
+    }
+  }
+
+  private async buildWorkspaceArtifactInfo(artifact: WorkspaceArtifact): Promise<WorkspaceArtifactInfo> {
+    const api = getSwitchboardApi();
+    if (!api?.workspaceArtifactContent) {
+      throw new Error('Workspace artifact content API is unavailable.');
+    }
+
+    const artifactPath = this.workspaceArtifactPath(artifact);
+    const record = await api.workspaceArtifactContent.get(artifactPath);
+    const manifestRecord = record.manifest as Record<string, unknown>;
+    const capabilities = workspaceArtifactDeclaredCapabilities(manifestRecord);
+    const validationMessages = this.workspaceArtifactInfoValidationMessages(artifact, record, manifestRecord);
+    const schemaVersion = manifestSchemaVersionField(manifestRecord);
+    const info: WorkspaceArtifactInfo = {
+      path: record.path,
+      kind: record.kind,
+      sourceRoute: 'workspaceArtifactContent',
+      manifestName: manifestStringField(manifestRecord, 'name', record.name.replace(/\.(sbapplet|sbscriptlet)\.json$/, '')),
+      manifestKind: manifestStringField(manifestRecord, 'kind'),
+      schemaVersion: schemaVersion || 'Missing',
+      capabilities,
+      provenance: workspaceArtifactProvenanceValue(manifestRecord, 'generatedBy') || 'Not declared',
+      validationMessages,
+      updatedAt: record.updatedAt,
+      size: record.size,
+    };
+
+    if (record.kind === 'applet') {
+      info.applet = await this.workspaceAppletArtifactInfo(record, manifestRecord);
+    }
+    if (record.kind === 'scriptlet') {
+      info.scriptlet = this.workspaceScriptletArtifactInfo(manifestRecord, capabilities, validationMessages);
+    }
+    return info;
+  }
+
+  private workspaceArtifactInfoValidationMessages(
+    artifact: WorkspaceArtifact,
+    record: WorkspaceArtifactContentRecord,
+    manifestRecord: Record<string, unknown>,
+  ): string[] {
+    const messages: string[] = [];
+    const expectedPath = this.workspaceArtifactPath(artifact);
+    if (record.path !== expectedPath) {
+      messages.push('Workspace artifact content path does not match the selected row.');
+    }
+    if (record.kind !== artifact.kind) {
+      messages.push('Workspace artifact content kind does not match the selected row.');
+    }
+    const manifestKind = manifestStringField(manifestRecord, 'kind');
+    if (manifestKind !== record.kind) {
+      messages.push(`Manifest kind must match ${record.kind}.`);
+    }
+    if (!manifestSchemaVersionField(manifestRecord)) {
+      messages.push('Manifest schemaVersion is missing.');
+    }
+    if (record.kind === 'applet' && !manifestStringField(manifestRecord, 'appId')) {
+      messages.push('Applet manifest is missing appId.');
+    }
+    if (record.kind === 'scriptlet') {
+      if (!workspaceArtifactDeclaredCapabilities(manifestRecord).includes('ssh:exec')) {
+        messages.push('Scriptlet manifest is missing the ssh:exec capability.');
+      }
+      if (!this.workspaceScriptletHostId(manifestRecord)) {
+        messages.push('Scriptlet manifest is missing hostId.');
+      }
+      if (!this.workspaceScriptletCommandSource(manifestRecord)) {
+        messages.push('Scriptlet manifest is missing command or source.code.');
+      }
+    }
+    return messages;
+  }
+
+  private async workspaceAppletArtifactInfo(
+    record: WorkspaceArtifactContentRecord,
+    manifestRecord: Record<string, unknown>,
+  ): Promise<WorkspaceAppletArtifactInfo> {
+    const api = getSwitchboardApi();
+    const appId = manifestStringField(manifestRecord, 'appId');
+    let registryManifest: AppManifest | null = null;
+    if (api?.appManifest) {
+      const manifests = await api.appManifest.list();
+      registryManifest = manifests.find((manifest) => generatedAppArtifactPath(manifest) === record.path)
+        ?? (appId ? manifests.find((manifest) => manifest.appId === appId) ?? null : null);
+    }
+
+    const registryArtifactPath = registryManifest ? generatedAppArtifactPath(registryManifest) : null;
+    const artifactBacked = Boolean(registryManifest && registryManifest.packageMetadata['artifactBacked'] === true && registryArtifactPath === record.path);
+    const enabled = registryManifest ? registryManifest.enabled : null;
+    let installStatus = 'Not installed';
+    if (registryManifest && artifactBacked && registryManifest.enabled) {
+      installStatus = 'Installed and enabled from workspaceArtifactContent';
+    } else if (registryManifest && artifactBacked) {
+      installStatus = 'Installed from workspaceArtifactContent, disabled';
+    } else if (registryManifest) {
+      installStatus = 'App registry entry exists without artifact-backed package metadata for this path';
+    }
+
+    return {
+      appId: appId || 'Missing',
+      installStatus,
+      installedAppId: registryManifest?.appId ?? '',
+      installedManifestId: registryManifest?.id ?? '',
+      enabled,
+      sourcePersistence: registryManifest ? stringPackageMetadata(registryManifest, 'sourcePersistence') ?? 'appManifest.sourceCode' : 'Not installed',
+      artifactBacked,
+    };
+  }
+
+  private workspaceScriptletArtifactInfo(
+    manifestRecord: Record<string, unknown>,
+    capabilities: string[],
+    validationMessages: string[],
+  ): WorkspaceScriptletArtifactInfo {
+    const hostId = this.workspaceScriptletHostId(manifestRecord);
+    const commandSource = this.workspaceScriptletCommandSource(manifestRecord);
+    const runApiAvailable = Boolean(getSwitchboardApi()?.workspaceScriptlet);
+    const hasExecCapability = capabilities.includes('ssh:exec');
+    const hostIdPresent = Boolean(hostId);
+    const commandDeclared = Boolean(commandSource);
+    const runReady = validationMessages.length === 0 && hasExecCapability && hostIdPresent && commandDeclared && runApiAvailable;
+    const readinessMessages = [
+      !hasExecCapability ? 'requires ssh:exec capability' : '',
+      !hostIdPresent ? 'requires hostId' : '',
+      !commandDeclared ? 'requires command or source.code' : '',
+      !runApiAvailable ? 'workspaceScriptlet API unavailable' : '',
+    ].filter(Boolean);
+
+    return {
+      hostId: hostId || 'Missing',
+      hostIdPresent,
+      commandDeclared,
+      commandSource: commandSource || 'Missing',
+      runApiAvailable,
+      runReady,
+      readiness: runReady ? 'Ready to run through workspaceScriptlet.run' : readinessMessages.join('; '),
+    };
+  }
+
+  private workspaceScriptletHostId(manifestRecord: Record<string, unknown>): string {
+    return manifestStringField(manifestRecord, 'hostId')
+      || manifestStringField(manifestRecord, 'targetHostId')
+      || manifestNestedStringField(manifestRecord, 'host', 'id');
+  }
+
+  private workspaceScriptletCommandSource(manifestRecord: Record<string, unknown>): string {
+    if (manifestStringField(manifestRecord, 'command')) {
+      return 'command declared';
+    }
+    if (manifestStringField(manifestRecord, 'script')) {
+      return 'script declared';
+    }
+    if (manifestNestedStringField(manifestRecord, 'source', 'command')) {
+      return 'source.command declared';
+    }
+    if (manifestNestedStringField(manifestRecord, 'source', 'code')) {
+      return 'source.code declared';
+    }
+    return '';
   }
 
   copyWorkspaceArtifact(artifact: WorkspaceArtifact): void {

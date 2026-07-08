@@ -292,12 +292,12 @@
                   </article>
                 </ng-container>
               </div>
-              <aside *ngIf="selectedWorkspaceArtifact as selectedArtifact" class="workspace-file-properties" aria-label="Workspace file properties">
+              <aside *ngIf="selectedWorkspaceArtifact as selectedArtifact" class="workspace-file-properties" aria-label="Workspace file properties" data-testid="workspace-artifact-properties">
                 <header class="workspace-file-properties-header">
                   <div>
                     <span class="workspace-file-icon">{{ selectedArtifact.kind === 'folder' ? 'DIR' : selectedArtifact.kind === 'applet' ? 'APP' : selectedArtifact.kind === 'scriptlet' ? 'SH' : 'TXT' }}</span>
                   </div>
-                  <button type="button" class="window-btn" (click)="selectedWorkspaceArtifact = null" title="Close properties" aria-label="Close properties">
+                  <button type="button" class="window-btn" (click)="clearWorkspaceArtifactProperties()" title="Close properties" aria-label="Close properties">
                     x
                   </button>
                 </header>
@@ -332,6 +332,110 @@
                     <dd>{{ selectedArtifact.updatedAt }}</dd>
                   </div>
                 </dl>
+                <section
+                  *ngIf="isWorkspaceAppletArtifact(selectedArtifact) || isWorkspaceScriptletArtifact(selectedArtifact)"
+                  class="workspace-artifact-info"
+                  aria-label="Workspace artifact get info"
+                  data-testid="workspace-artifact-info"
+                >
+                  <p *ngIf="selectedWorkspaceArtifactInfoLoading" class="workspace-artifact-info-status" data-testid="workspace-artifact-info-loading">
+                    Loading artifact status from workspaceArtifactContent.
+                  </p>
+                  <p *ngIf="selectedWorkspaceArtifactInfoError" class="workspace-artifact-info-status is-error" data-testid="workspace-artifact-info-error">
+                    {{ selectedWorkspaceArtifactInfoError }}
+                  </p>
+                  <ng-container *ngIf="selectedWorkspaceArtifactInfo as artifactInfo">
+                    <dl class="workspace-file-properties-list workspace-artifact-info-list">
+                      <div>
+                        <dt>Manifest name</dt>
+                        <dd data-testid="artifact-info-manifest-name">{{ artifactInfo.manifestName }}</dd>
+                      </div>
+                      <div>
+                        <dt>Manifest kind</dt>
+                        <dd data-testid="artifact-info-manifest-kind">{{ artifactInfo.manifestKind || 'Missing' }}</dd>
+                      </div>
+                      <div>
+                        <dt>Schema version</dt>
+                        <dd data-testid="artifact-info-schema-version">{{ artifactInfo.schemaVersion }}</dd>
+                      </div>
+                      <div>
+                        <dt>Capabilities</dt>
+                        <dd data-testid="artifact-info-capabilities">
+                          {{ artifactInfo.capabilities.length }} declared{{ artifactInfo.capabilities.length ? ': ' + artifactInfo.capabilities.join(', ') : '' }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Source route</dt>
+                        <dd data-testid="artifact-info-source-route">{{ artifactInfo.sourceRoute }}</dd>
+                      </div>
+                      <div>
+                        <dt>Provenance</dt>
+                        <dd data-testid="artifact-info-provenance">{{ artifactInfo.provenance }}</dd>
+                      </div>
+                      <div>
+                        <dt>Artifact identity</dt>
+                        <dd data-testid="artifact-info-path">{{ artifactInfo.path }}</dd>
+                      </div>
+                      <div>
+                        <dt>Artifact updated</dt>
+                        <dd data-testid="artifact-info-updated">{{ artifactInfo.updatedAt }}</dd>
+                      </div>
+                      <div>
+                        <dt>Artifact size</dt>
+                        <dd data-testid="artifact-info-size">{{ formatWorkspaceArtifactSize(artifactInfo.size) }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.applet as appletInfo">
+                        <dt>Applet install status</dt>
+                        <dd data-testid="artifact-info-applet-install-status">{{ appletInfo.installStatus }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.applet as appletInfo">
+                        <dt>Installed app id</dt>
+                        <dd data-testid="artifact-info-applet-installed-app-id">{{ appletInfo.installedAppId || 'Not installed' }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.applet as appletInfo">
+                        <dt>Applet app id</dt>
+                        <dd data-testid="artifact-info-applet-app-id">{{ appletInfo.appId }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.applet as appletInfo">
+                        <dt>Source persistence</dt>
+                        <dd data-testid="artifact-info-applet-source-persistence">{{ appletInfo.sourcePersistence }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.scriptlet as scriptletInfo">
+                        <dt>Scriptlet host</dt>
+                        <dd data-testid="artifact-info-scriptlet-host">{{ scriptletInfo.hostId }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.scriptlet as scriptletInfo">
+                        <dt>Command declaration</dt>
+                        <dd data-testid="artifact-info-scriptlet-command">{{ scriptletInfo.commandDeclared ? scriptletInfo.commandSource : 'Missing' }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.scriptlet as scriptletInfo">
+                        <dt>Run readiness</dt>
+                        <dd data-testid="artifact-info-scriptlet-readiness">{{ scriptletInfo.readiness }}</dd>
+                      </div>
+                      <div *ngIf="artifactInfo.scriptlet as scriptletInfo">
+                        <dt>Run API</dt>
+                        <dd data-testid="artifact-info-scriptlet-api">{{ scriptletInfo.runApiAvailable ? 'workspaceScriptlet available' : 'workspaceScriptlet unavailable' }}</dd>
+                      </div>
+                    </dl>
+                    <div
+                      *ngIf="artifactInfo.validationMessages.length"
+                      class="workspace-artifact-validation"
+                      data-testid="artifact-info-validation"
+                    >
+                      <strong>Validation</strong>
+                      <ul>
+                        <li *ngFor="let message of artifactInfo.validationMessages">{{ message }}</li>
+                      </ul>
+                    </div>
+                    <p
+                      *ngIf="!artifactInfo.validationMessages.length"
+                      class="workspace-artifact-validation is-ok"
+                      data-testid="artifact-info-validation-ok"
+                    >
+                      Manifest metadata is valid for this artifact type.
+                    </p>
+                  </ng-container>
+                </section>
               </aside>
             </div>
           </section>

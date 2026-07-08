@@ -1299,6 +1299,47 @@ dd {
   font-size: 12px;
 }
 
+.workspace-artifact-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.workspace-artifact-info-list {
+  margin-top: 10px;
+}
+
+.workspace-artifact-info-status {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspace-artifact-info-status.is-error,
+.workspace-artifact-validation {
+  color: #ffbdbd;
+}
+
+.workspace-artifact-validation {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspace-artifact-validation.is-ok {
+  color: var(--color-text-secondary);
+}
+
+.workspace-artifact-validation ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.workspace-artifact-validation li {
+  margin: 3px 0;
+}
+
 .trash-empty {
   border: 1px dashed var(--color-border);
   border-radius: 7px;
