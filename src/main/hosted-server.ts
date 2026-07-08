@@ -28,6 +28,12 @@ import {
   validateGeneratedAppHostStatusInput,
   validateGeneratedAppHostTestConnectionInput,
   validateBootstrapGenerateInput,
+  validateBootstrapPresetCreateInput,
+  validateBootstrapPresetIdInput,
+  validateBootstrapPresetUpdateInput,
+  validateBootstrapRunCreateInput,
+  validateBootstrapRunIdInput,
+  validateBootstrapRunUpdateInput,
   validateCommandHistoryCreateInput,
   validateCommandHistoryEntryIdInput,
   validateHostCreateInput,
@@ -84,8 +90,10 @@ import type {
   GeneratedAppHostTargetInput,
   GeneratedAppHostTestConnectionResult,
   HostRecord,
+  BootstrapPresetRecord,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
+  BootstrapRun,
   CommandHistoryEntry,
   ConnectionTestResult,
   MvpSettingsUpdate,
@@ -814,7 +822,7 @@ export class HostedServer {
     }
 
     if (resource === 'bootstrap') {
-      return this.routeBootstrapApi(method, actionOrId, body, session);
+      return this.routeBootstrapApi(method, segments, body, session);
     }
 
     if (resource === 'terminal') {
@@ -1126,6 +1134,7 @@ export class HostedServer {
       route: string;
       action: string;
       hostId?: string | null;
+      entityId?: string | null;
       entityType: string;
       input: unknown;
       execute: () => TResult;
@@ -1141,6 +1150,7 @@ export class HostedServer {
         route: params.route,
         action: params.action,
         hostId: params.hostId ?? null,
+        entityId: params.entityId ?? null,
         entityType: params.entityType,
         sessionId: params.session?.id ?? null,
       },
@@ -1693,11 +1703,13 @@ export class HostedServer {
 
   private routeBootstrapApi(
     method: string,
-    action: string | undefined,
+    segments: string[],
     body: unknown,
     session: HostedSession | null,
   ): unknown {
-    if (action === 'presets' && method === 'GET') {
+    const [, action, id] = segments;
+
+    if (action === 'presets' && !id && method === 'GET') {
       validateHostedNoRequestBody(body);
       return this.runHostedBootstrapRoute({
         contractId: 'hosted:GET:/api/bootstrap/presets',
@@ -1710,7 +1722,7 @@ export class HostedServer {
       });
     }
 
-    if (action === 'generate' && method === 'POST') {
+    if (action === 'generate' && !id && method === 'POST') {
       const input = validateBootstrapGenerateInput(body);
       const hostId = input.hostId ?? null;
       return this.runHostedBootstrapRoute({
@@ -1724,6 +1736,159 @@ export class HostedServer {
         execute: () => this.generateBootstrap(input),
         successAuditMetadata: (result) => bootstrapGenerateRouteSuccessMetadata(result, input),
       });
+    }
+
+    if (action === 'persisted-presets') {
+      if (!id && method === 'GET') {
+        validateHostedNoRequestBody(body);
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:GET:/api/bootstrap/persisted-presets',
+          session,
+          route: '/api/bootstrap/persisted-presets',
+          action: 'GET /api/bootstrap/persisted-presets',
+          entityType: 'bootstrap_preset',
+          input: null,
+          execute: () => this.options.store.listBootstrapPresets(),
+        });
+      }
+
+      if (!id && method === 'POST') {
+        const input = validateBootstrapPresetCreateInput(body);
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:POST:/api/bootstrap/persisted-presets',
+          session,
+          route: '/api/bootstrap/persisted-presets',
+          action: 'POST /api/bootstrap/persisted-presets',
+          entityType: 'bootstrap_preset',
+          input,
+          execute: () => this.options.store.createBootstrapPreset(input),
+          successAuditMetadata: bootstrapPresetRouteSuccessMetadata,
+        });
+      }
+
+      if (id && method === 'GET') {
+        validateHostedNoRequestBody(body);
+        const presetId = validateBootstrapPresetIdInput(decodeURIComponent(id));
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:GET:/api/bootstrap/persisted-presets/:id',
+          session,
+          route: `/api/bootstrap/persisted-presets/${presetId}`,
+          action: 'GET /api/bootstrap/persisted-presets/:id',
+          entityId: presetId,
+          entityType: 'bootstrap_preset',
+          input: presetId,
+          execute: () => this.options.store.getBootstrapPreset(presetId),
+        });
+      }
+
+      if (id && method === 'PATCH') {
+        const presetId = validateBootstrapPresetIdInput(decodeURIComponent(id));
+        const input = validateBootstrapPresetUpdateInput(body);
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:PATCH:/api/bootstrap/persisted-presets/:id',
+          session,
+          route: `/api/bootstrap/persisted-presets/${presetId}`,
+          action: 'PATCH /api/bootstrap/persisted-presets/:id',
+          entityId: presetId,
+          entityType: 'bootstrap_preset',
+          input,
+          execute: () => this.options.store.updateBootstrapPreset(presetId, input),
+          successAuditMetadata: bootstrapPresetRouteSuccessMetadata,
+        });
+      }
+
+      if (id && method === 'DELETE') {
+        validateHostedNoRequestBody(body);
+        const presetId = validateBootstrapPresetIdInput(decodeURIComponent(id));
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:DELETE:/api/bootstrap/persisted-presets/:id',
+          session,
+          route: `/api/bootstrap/persisted-presets/${presetId}`,
+          action: 'DELETE /api/bootstrap/persisted-presets/:id',
+          entityId: presetId,
+          entityType: 'bootstrap_preset',
+          input: presetId,
+          execute: () => this.options.store.deleteBootstrapPreset(presetId),
+          successAuditMetadata: bootstrapPresetRouteSuccessMetadata,
+        });
+      }
+    }
+
+    if (action === 'runs') {
+      if (!id && method === 'GET') {
+        validateHostedNoRequestBody(body);
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:GET:/api/bootstrap/runs',
+          session,
+          route: '/api/bootstrap/runs',
+          action: 'GET /api/bootstrap/runs',
+          entityType: 'bootstrap_run',
+          input: null,
+          execute: () => this.options.store.listBootstrapRuns(),
+        });
+      }
+
+      if (!id && method === 'POST') {
+        const input = validateBootstrapRunCreateInput(body);
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:POST:/api/bootstrap/runs',
+          session,
+          route: '/api/bootstrap/runs',
+          action: 'POST /api/bootstrap/runs',
+          hostId: input.hostId,
+          entityType: 'bootstrap_run',
+          input,
+          execute: () => this.options.store.createBootstrapRun(input),
+          successAuditMetadata: bootstrapRunRouteSuccessMetadata,
+        });
+      }
+
+      if (id && method === 'GET') {
+        validateHostedNoRequestBody(body);
+        const runId = validateBootstrapRunIdInput(decodeURIComponent(id));
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:GET:/api/bootstrap/runs/:id',
+          session,
+          route: `/api/bootstrap/runs/${runId}`,
+          action: 'GET /api/bootstrap/runs/:id',
+          entityId: runId,
+          entityType: 'bootstrap_run',
+          input: runId,
+          execute: () => this.options.store.getBootstrapRun(runId),
+        });
+      }
+
+      if (id && method === 'PATCH') {
+        const runId = validateBootstrapRunIdInput(decodeURIComponent(id));
+        const input = validateBootstrapRunUpdateInput(body);
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:PATCH:/api/bootstrap/runs/:id',
+          session,
+          route: `/api/bootstrap/runs/${runId}`,
+          action: 'PATCH /api/bootstrap/runs/:id',
+          entityId: runId,
+          entityType: 'bootstrap_run',
+          input,
+          execute: () => this.options.store.updateBootstrapRun(runId, input),
+          successAuditMetadata: bootstrapRunRouteSuccessMetadata,
+        });
+      }
+
+      if (id && method === 'DELETE') {
+        validateHostedNoRequestBody(body);
+        const runId = validateBootstrapRunIdInput(decodeURIComponent(id));
+        return this.runHostedBootstrapRoute({
+          contractId: 'hosted:DELETE:/api/bootstrap/runs/:id',
+          session,
+          route: `/api/bootstrap/runs/${runId}`,
+          action: 'DELETE /api/bootstrap/runs/:id',
+          entityId: runId,
+          entityType: 'bootstrap_run',
+          input: runId,
+          execute: () => this.options.store.deleteBootstrapRun(runId),
+          successAuditMetadata: bootstrapRunRouteSuccessMetadata,
+        });
+      }
     }
 
     throw new HttpError(404, `No hosted bootstrap route for ${method}.`);
@@ -3103,6 +3268,40 @@ function bootstrapGenerateRouteSuccessMetadata(
     generatedScriptLength: result.script.length,
     generatedScriptLineCount: result.script.split(/\r?\n/).length,
     executesRemotely: false,
+  };
+}
+
+function bootstrapPresetRouteSuccessMetadata(result: BootstrapPresetRecord | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      presetFound: Boolean(result),
+      scriptTemplateLogged: false,
+    };
+  }
+
+  return {
+    bootstrapPresetId: result.id,
+    presetId: result.presetId,
+    presetEnabled: result.enabled,
+    variableCount: result.variables.length,
+    scriptTemplateLogged: false,
+  };
+}
+
+function bootstrapRunRouteSuccessMetadata(result: BootstrapRun | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      runFound: Boolean(result),
+      scriptOutputLogged: false,
+    };
+  }
+
+  return {
+    runId: result.id,
+    presetId: result.presetId,
+    hostId: result.hostId,
+    status: result.status,
+    scriptOutputLogged: false,
   };
 }
 

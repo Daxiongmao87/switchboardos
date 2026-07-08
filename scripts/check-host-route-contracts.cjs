@@ -722,6 +722,46 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/bootstrap/persisted-presets',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/bootstrap/persisted-presets/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/bootstrap/persisted-presets',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/bootstrap/persisted-presets/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/bootstrap/persisted-presets/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/bootstrap/runs',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/bootstrap/runs/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/bootstrap/runs',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/bootstrap/runs/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/bootstrap/runs/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/command-history',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -1747,7 +1787,17 @@ function validateHostedDispatches() {
 
   if (hostedText.includes("if (actionOrId === 'presets' && method === 'GET') {\n        return listBootstrapPresets();")
     || hostedText.includes("requireHostedCapability(request, session, 'bootstrap:generate'")
-    || hostedText.includes('return this.generateBootstrap(validateBootstrapGenerateInput(body));')) {
+    || hostedText.includes('return this.generateBootstrap(validateBootstrapGenerateInput(body));')
+    || hostedText.includes('return this.options.store.listBootstrapPresets();')
+    || hostedText.includes('return this.options.store.getBootstrapPreset(')
+    || hostedText.includes('return this.options.store.createBootstrapPreset(')
+    || hostedText.includes('return this.options.store.updateBootstrapPreset(')
+    || hostedText.includes('return this.options.store.deleteBootstrapPreset(')
+    || hostedText.includes('return this.options.store.listBootstrapRuns();')
+    || hostedText.includes('return this.options.store.getBootstrapRun(')
+    || hostedText.includes('return this.options.store.createBootstrapRun(')
+    || hostedText.includes('return this.options.store.updateBootstrapRun(')
+    || hostedText.includes('return this.options.store.deleteBootstrapRun(')) {
     fail('Direct hosted bootstrap fallback detected in hosted-server.ts.');
   }
 
