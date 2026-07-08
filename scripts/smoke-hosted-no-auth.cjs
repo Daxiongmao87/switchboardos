@@ -2,66 +2,14 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const { HostedServer } = require('../dist/src/main/hosted-server.js');
+const { MvpSqliteStore } = require('../dist/src/main/mvp-sqlite-store.js');
 const { PolicyService } = require('../dist/src/main/policy-service.js');
 
 const STATIC_ROOT = path.resolve(__dirname, '..', 'dist', 'renderer');
-const HOST_ID = 'hosted-no-auth-smoke-host';
-
-class FakeStore {
-  constructor() {
-    this.auditEvents = [];
-    this.hosts = [];
-  }
-
-  listHosts() {
-    return this.hosts;
-  }
-
-  createHost(input = {}) {
-    const now = new Date(0).toISOString();
-    const host = {
-      id: HOST_ID,
-      hostId: HOST_ID,
-      name: input.name || 'No-auth smoke host',
-      address: input.address || '127.0.0.1',
-      hostname: input.hostname || input.address || '127.0.0.1',
-      port: input.port || 22,
-      username: input.username || 'agent',
-      authMode: input.authMode || 'agent',
-      keyPath: input.keyPath,
-      credentialRefId: input.credentialRefId ?? null,
-      tags: input.tags || [],
-      group: input.group,
-      favorite: Boolean(input.favorite),
-      osHint: input.osHint || 'linux',
-      bootstrapStatus: input.bootstrapStatus || 'not_started',
-      defaultShell: input.defaultShell || '/bin/bash',
-      defaultWorkingDirectory: input.defaultWorkingDirectory || '~',
-      capabilities: input.capabilities || ['ssh'],
-      notes: input.notes || '',
-      lastConnectionStatus: 'untested',
-      lastCheckedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.hosts.push(host);
-    return host;
-  }
-
-  logAuditEvent(input) {
-    const event = {
-      id: `audit-${this.auditEvents.length + 1}`,
-      timestamp: new Date(0).toISOString(),
-      ...input,
-      metadata: input.metadata ?? {},
-    };
-    this.auditEvents.push(event);
-    return event;
-  }
-}
 
 function unusedApi() {
   throw new Error('This smoke uses hosted app info and host create routes only.');
@@ -71,7 +19,8 @@ async function main() {
   assert.ok(fs.existsSync(path.join(STATIC_ROOT, 'index.html')), 'renderer build must exist before hosted no-auth smoke');
   assert.ok(fs.existsSync(path.join(STATIC_ROOT, 'main.js')), 'renderer main.js must exist before hosted no-auth smoke');
 
-  const store = new FakeStore();
+  const storeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboardos-hosted-no-auth-'));
+  const store = new MvpSqliteStore(() => storeDir);
   const policyService = new PolicyService(
     () => ({ operator: { policy: 'permissive' } }),
     (event) => store.logAuditEvent(event),
@@ -157,16 +106,22 @@ async function main() {
         port: 22,
         username: 'agent',
         authMode: 'agent',
-        tags: ['smoke'],
+        tags: ['smoke', 'hosted'],
         osHint: 'linux',
         bootstrapStatus: 'not_started',
       },
     });
-    assert.equal(createHost.status, 200, 'state-changing hosted API succeeds without token, session cookie, or CSRF header');
-    assert.equal(createHost.json.id, HOST_ID);
-    assert.equal(store.hosts.length, 1, 'state-changing hosted route dispatched to backend store');
+    assert.equal(
+      createHost.status,
+      200,
+      `state-changing hosted API succeeds without token, session cookie, or CSRF header: ${createHost.text}`,
+    );
+    assert.ok(createHost.json.id, 'state-changing hosted route returned persisted host id');
+    assert.equal(store.listHosts().length, 1, 'state-changing hosted route persisted to real SQLite store');
+    const storedHost = store.getHost(createHost.json.id);
+    assert.deepEqual(storedHost.tags, ['smoke', 'hosted'], 'state-changing hosted route preserved host tags in SQLite');
 
-    const createAudit = store.auditEvents.find((event) => event.type === 'host.created');
+    const createAudit = store.listAuditEvents().find((event) => event.type === 'host.created');
     assert.ok(createAudit, 'state-changing hosted route wrote success audit');
     assert.equal(createAudit.metadata.contractId, 'hosted:POST:/api/hosts');
     assert.equal(createAudit.metadata.policyCapability, 'host:create');
@@ -175,6 +130,8 @@ async function main() {
     console.log('hosted no-auth smoke: app shell, session, login no-op, app info, state-changing API, policy, and audit passed');
   } finally {
     server.close();
+    store.close();
+    fs.rmSync(storeDir, { recursive: true, force: true });
   }
 }
 
@@ -212,7 +169,9 @@ async function jsonRequest(baseUrl, pathname, options = {}) {
   return { status: response.status, json, response, text };
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

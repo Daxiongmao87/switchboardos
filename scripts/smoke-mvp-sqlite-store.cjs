@@ -55,6 +55,7 @@ function assertSchemaTables(dir) {
     }
     const hostColumns = db.pragma('table_info(hosts)').map((row) => row.name);
     assert('hosts schema has key_path', hostColumns.includes('key_path'), JSON.stringify(hostColumns));
+    assert('hosts schema has tags', hostColumns.includes('tags'), JSON.stringify(hostColumns));
     for (const column of ['credential_ref_id', 'os_hint', 'bootstrap_status', 'default_shell', 'default_working_directory', 'capabilities_json']) {
       assert(`hosts schema has ${column}`, hostColumns.includes(column), JSON.stringify(hostColumns));
     }
@@ -102,6 +103,7 @@ async function caseCrudPersistenceAndFailureProbe() {
     assertEqual('created host auth mode', store.getHost(host.id).authMode, 'key');
     assertEqual('created host key path reference', store.getHost(host.id).keyPath, '/tmp/switchboardos-smoke-key');
     assertEqual('created host credential reference', store.getHost(host.id).credentialRefId, 'cred-smoke-1');
+    assertEqual('created host tags persisted', store.getHost(host.id).tags.join(','), 'local,smoke');
     assertEqual('created host group', store.getHost(host.id).group, 'smoke-group');
     assertEqual('created host os hint', store.getHost(host.id).osHint, 'ubuntu');
     assertEqual('created host bootstrap status', store.getHost(host.id).bootstrapStatus, 'ready');
@@ -154,6 +156,7 @@ async function caseCrudPersistenceAndFailureProbe() {
     try {
       assertEqual('reopened host count persisted', reopened.listHosts().length, 1);
       assertEqual('reopened host name persisted', reopened.getHost(host.id).name, 'Local updated');
+      assertEqual('reopened host tags persisted', reopened.getHost(host.id).tags.join(','), 'updated');
       assertEqual('reopened host credential reference persisted', reopened.getHost(host.id).credentialRefId, 'cred-smoke-1');
       assertEqual('reopened host os hint persisted', reopened.getHost(host.id).osHint, 'ubuntu');
       assertEqual('reopened host bootstrap status persisted', reopened.getHost(host.id).bootstrapStatus, 'pending');
@@ -255,6 +258,94 @@ async function caseStaleDbMigration() {
       assertEqual('stale db new host notes', newHost.notes, 'should work');
     } finally {
       store.close();
+    }
+  });
+}
+
+async function caseLegacyTagsJsonCompatibility() {
+  console.log('case: legacy tags_json host schema compatibility');
+  await withTempDir(async (dir) => {
+    const dbPath = join(dir, 'switchboardos-mvp.sqlite');
+    const db = new Database(dbPath);
+    try {
+      db.exec(`
+        CREATE TABLE hosts (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT 'Untitled host',
+          address TEXT NOT NULL DEFAULT '',
+          hostname TEXT NOT NULL DEFAULT '',
+          port INTEGER NOT NULL DEFAULT 22,
+          username TEXT NOT NULL DEFAULT '',
+          auth_mode TEXT NOT NULL DEFAULT 'placeholder',
+          tags_json TEXT NOT NULL,
+          last_connection_status TEXT NOT NULL DEFAULT 'untested',
+          last_checked_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          theme TEXT NOT NULL DEFAULT 'dark',
+          default_window_behavior TEXT NOT NULL DEFAULT 'floating',
+          ssh_defaults TEXT NOT NULL DEFAULT '{}',
+          operator TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE audit_events (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT,
+          message TEXT NOT NULL,
+          metadata TEXT,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO hosts (id, name, address, hostname, port, username, auth_mode, tags_json, created_at, updated_at)
+          VALUES ('legacy-tags-host', 'Legacy Tags Host', '192.0.2.44', 'legacy-tags.example', 22, 'legacy', 'agent', '["legacy","json"]', '2023-02-01T00:00:00Z', '2023-02-01T00:00:00Z');
+      `);
+    } finally {
+      db.close();
+    }
+
+    let createdHostId = '';
+    const store = new MvpSqliteStore(() => dir);
+    try {
+      const legacyHost = store.getHost('legacy-tags-host');
+      assertEqual('legacy tags_json host tags preserved', legacyHost.tags.join(','), 'legacy,json');
+
+      const created = store.createHost({
+        name: 'Created Against Tags Json',
+        address: '198.51.100.20',
+        tags: ['created', 'json'],
+      });
+      createdHostId = created.id;
+      assertEqual('created host tags against tags_json schema', store.getHost(created.id).tags.join(','), 'created,json');
+
+      const updated = store.updateHost(created.id, { tags: ['updated', 'json'] });
+      assertEqual('updated host tags against tags_json schema', updated.tags.join(','), 'updated,json');
+    } finally {
+      store.close();
+    }
+
+    const reopened = new MvpSqliteStore(() => dir);
+    try {
+      assertEqual('reopened legacy tags_json host tags', reopened.getHost('legacy-tags-host').tags.join(','), 'legacy,json');
+      assertEqual('reopened created host tags from tags_json schema', reopened.getHost(createdHostId).tags.join(','), 'updated,json');
+    } finally {
+      reopened.close();
+    }
+
+    const inspectDb = new Database(dbPath, { readonly: true });
+    try {
+      const hostColumns = inspectDb.pragma('table_info(hosts)').map((row) => row.name);
+      assert('legacy host schema keeps tags_json column', hostColumns.includes('tags_json'), JSON.stringify(hostColumns));
+      assert('legacy host schema gains tags column', hostColumns.includes('tags'), JSON.stringify(hostColumns));
+      const row = inspectDb
+        .prepare('SELECT tags, tags_json FROM hosts WHERE id = ?')
+        .get(createdHostId);
+      assertEqual('created host tags column synchronized', row.tags, '["updated","json"]');
+      assertEqual('created host tags_json column synchronized', row.tags_json, '["updated","json"]');
+    } finally {
+      inspectDb.close();
     }
   });
 }
@@ -597,6 +688,7 @@ async function caseNewEntityTables() {
 async function main() {
   await caseCrudPersistenceAndFailureProbe();
   await caseStaleDbMigration();
+  await caseLegacyTagsJsonCompatibility();
   await caseJsonMigration();
   await caseWorkspaceProfiles();
   await caseNewEntityTables();

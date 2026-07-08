@@ -129,6 +129,23 @@ function stringArrayValue(value: unknown): string[] {
     : [];
 }
 
+function jsonStringArrayValue(value: unknown, fallback: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    return stringArrayValue(value);
+  }
+
+  const raw = typeof value === 'string' ? value : '';
+  if (!raw.trim()) {
+    return fallback;
+  }
+
+  try {
+    return stringArrayValue(JSON.parse(raw) as unknown);
+  } catch {
+    return fallback;
+  }
+}
+
 function metadataValue(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
 }
@@ -318,6 +335,7 @@ function buildConnectionTestMessage(probe: ProbeResult): string {
 }
 
 function rowToHost(row: Record<string, unknown>): HostRecord {
+  const tags = jsonStringArrayValue(row.tags, jsonStringArrayValue(row.tags_json));
   return {
     id: stringValue(row.id, ''),
     name: stringValue(row.name, 'Untitled host'),
@@ -328,14 +346,14 @@ function rowToHost(row: Record<string, unknown>): HostRecord {
     authMode: authModeValue(row.auth_mode, 'placeholder'),
     keyPath: stringValue(row.key_path, '') || undefined,
     credentialRefId: nullableStringValue(row.credential_ref_id, null),
-    tags: stringArrayValue(JSON.parse(stringValue(row.tags, '[]'))),
+    tags,
     group: stringValue(row.group_name, '') || undefined,
     favorite: row.favorite ? true : false,
     osHint: stringValue(row.os_hint, 'unknown') || 'unknown',
     bootstrapStatus: bootstrapStatusValue(row.bootstrap_status, 'unknown'),
     defaultShell: stringValue(row.default_shell, ''),
     defaultWorkingDirectory: stringValue(row.default_working_directory, ''),
-    capabilities: stringArrayValue(JSON.parse(stringValue(row.capabilities_json, '[]'))),
+    capabilities: jsonStringArrayValue(row.capabilities_json),
     notes: stringValue(row.notes, ''),
     lastConnectionStatus: connectionStatusValue(row.last_connection_status, 'untested'),
     lastCheckedAt: nullableStringValue(row.last_checked_at, null),
@@ -443,8 +461,8 @@ export class MvpSqliteStore {
 
     this.db!
       .prepare(
-        `INSERT INTO hosts (id, name, address, hostname, port, username, auth_mode, key_path, credential_ref_id, tags, group_name, favorite, os_hint, bootstrap_status, default_shell, default_working_directory, capabilities_json, notes, last_connection_status, last_checked_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO hosts (id, name, address, hostname, port, username, auth_mode, key_path, credential_ref_id, ${this.hostTagsInsertColumnsSql()}, group_name, favorite, os_hint, bootstrap_status, default_shell, default_working_directory, capabilities_json, notes, last_connection_status, last_checked_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${this.hostTagsInsertPlaceholdersSql()}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         host.id,
@@ -456,7 +474,7 @@ export class MvpSqliteStore {
         host.authMode,
         host.keyPath ?? '',
         host.credentialRefId,
-        JSON.stringify(host.tags),
+        ...this.hostTagWriteValues(host.tags),
         host.group || '',
         host.favorite ? 1 : 0,
         host.osHint,
@@ -517,7 +535,7 @@ export class MvpSqliteStore {
           auth_mode = ?,
           key_path = ?,
           credential_ref_id = ?,
-          tags = ?,
+          ${this.hostTagsUpdateSql()},
           group_name = ?,
           favorite = ?,
           os_hint = ?,
@@ -538,7 +556,7 @@ export class MvpSqliteStore {
         updated.authMode,
         updated.keyPath ?? '',
         updated.credentialRefId,
-        JSON.stringify(updated.tags),
+        ...this.hostTagWriteValues(updated.tags),
         updated.group || '',
         updated.favorite ? 1 : 0,
         updated.osHint,
@@ -2076,6 +2094,44 @@ export class MvpSqliteStore {
         this.db!.exec(`ALTER TABLE hosts ADD COLUMN ${col.name} ${col.def}`);
       }
     }
+
+    this.syncLegacyHostTagsJsonColumn();
+  }
+
+  private hostTagsJsonColumnExists(): boolean {
+    return this.columnExists('hosts', 'tags_json');
+  }
+
+  private hostTagsInsertColumnsSql(): string {
+    return this.hostTagsJsonColumnExists() ? 'tags, tags_json' : 'tags';
+  }
+
+  private hostTagsInsertPlaceholdersSql(): string {
+    return this.hostTagsJsonColumnExists() ? '?, ?' : '?';
+  }
+
+  private hostTagsUpdateSql(): string {
+    return this.hostTagsJsonColumnExists() ? 'tags = ?, tags_json = ?' : 'tags = ?';
+  }
+
+  private hostTagWriteValues(tags: string[]): string[] {
+    const serialized = JSON.stringify(tags);
+    return this.hostTagsJsonColumnExists() ? [serialized, serialized] : [serialized];
+  }
+
+  private syncLegacyHostTagsJsonColumn(): void {
+    if (!this.columnExists('hosts', 'tags') || !this.columnExists('hosts', 'tags_json')) {
+      return;
+    }
+
+    this.db!.exec(`
+      UPDATE hosts
+         SET tags = tags_json
+       WHERE (tags IS NULL OR tags = '' OR tags = '[]')
+         AND tags_json IS NOT NULL
+         AND tags_json != ''
+         AND tags_json != '[]'
+    `);
   }
 
   private ensureAppManifestColumns(): void {
