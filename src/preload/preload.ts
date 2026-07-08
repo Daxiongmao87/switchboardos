@@ -85,6 +85,8 @@ import type {
   UpdateHostTagInput,
   UpdateWorkspaceProfileInput,
   WorkspaceArtifactContentRecord,
+  WorkspaceScriptletRunInput,
+  WorkspaceScriptletRunResult,
   WorkspaceProfile,
 } from '../shared/mvp-models';
 
@@ -303,6 +305,12 @@ contextBridge.exposeInMainWorld('sb', {
       invoke('workspace-artifact-content:get', { path }),
     update: (path: string, content: string): Promise<WorkspaceArtifactContentRecord> =>
       invoke('workspace-artifact-content:update', { path, content }),
+  },
+
+  // --- Workspace Scriptlet Artifact Execution ---
+  workspaceScriptlet: {
+    run: (input: WorkspaceScriptletRunInput): Promise<WorkspaceScriptletRunResult> =>
+      invoke('workspace-scriptlet:run', input),
   },
 
   // --- Host Groups ---
@@ -527,6 +535,9 @@ declare global {
       workspaceArtifactContent: {
         get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
         update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
+      };
+      workspaceScriptlet: {
+        run: (input: WorkspaceScriptletRunInput) => Promise<WorkspaceScriptletRunResult>;
       };
       hostGroup: {
         list: () => Promise<HostGroup[]>;

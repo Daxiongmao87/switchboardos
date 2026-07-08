@@ -51,6 +51,7 @@ import {
   validateWorkspaceFileCopyMoveInput,
   validateWorkspaceArtifactContentGetInput,
   validateWorkspaceArtifactContentUpdateInput,
+  validateWorkspaceScriptletRunInput,
   validateWorkspaceFileCreateFileInput,
   validateWorkspaceFileListInput,
   validateWorkspaceFilePathInput,
@@ -104,7 +105,14 @@ import type {
   TerminalOutputEvent,
   TerminalStatusEvent,
   WorkspaceArtifactContentRecord,
+  WorkspaceScriptletRunInput,
+  WorkspaceScriptletRunResult,
 } from '../shared/mvp-models';
+import {
+  prepareWorkspaceScriptletRun,
+  workspaceScriptletRunResult,
+  workspaceScriptletRunRouteSuccessMetadata,
+} from './workspace-scriptlet-runner';
 
 type TerminalChannel = 'terminal:output' | 'terminal:status' | 'terminal:exit';
 
@@ -739,6 +747,10 @@ export class HostedServer {
       return this.routeWorkspaceArtifactApi(method, segments, body, url, session);
     }
 
+    if (resource === 'workspace-scriptlets') {
+      return this.routeWorkspaceScriptletApi(method, segments, body, session);
+    }
+
     if (resource === 'command-history') {
       return this.routeCommandHistoryApi(method, actionOrId, body, session);
     }
@@ -955,7 +967,7 @@ export class HostedServer {
       entityId?: string | null;
       entityType: string;
       input: unknown;
-      execute: () => TResult;
+      execute: () => Promise<TResult> | TResult;
     },
   ): Promise<TResult> {
     return runHostRouteContract({
@@ -1018,7 +1030,7 @@ export class HostedServer {
       entityId?: string | null;
       entityType: string;
       input: unknown;
-      execute: () => TResult;
+      execute: () => Promise<TResult> | TResult;
       successAuditMetadata?: (result: TResult) => Record<string, unknown>;
     },
   ): Promise<TResult> {
@@ -1298,7 +1310,7 @@ export class HostedServer {
       entityId?: string | null;
       entityType: string;
       input: unknown;
-      execute: () => TResult;
+      execute: () => Promise<TResult> | TResult;
       successAuditMetadata?: (result: TResult) => Record<string, unknown>;
     },
   ): Promise<TResult> {
@@ -1364,6 +1376,61 @@ export class HostedServer {
     }
 
     throw new HttpError(404, `No hosted workspace artifact route for ${method} /api/${segments.join('/')}.`);
+  }
+
+  private routeWorkspaceScriptletApi(
+    method: string,
+    segments: string[],
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
+    const [, action] = segments;
+    if (method !== 'POST' || action !== 'run' || segments.length !== 2) {
+      throw new HttpError(404, `No hosted workspace scriptlet route for ${method} /api/${segments.join('/')}.`);
+    }
+
+    const input = validateWorkspaceScriptletRunInput(asRecord(body));
+    return this.runHostedWorkspaceFileRoute({
+      contractId: 'hosted:POST:/api/workspace-scriptlets/run',
+      session,
+      route: '/api/workspace-scriptlets/run',
+      action: 'POST /api/workspace-scriptlets/run',
+      entityId: workspaceArtifactContentEntityId(input.path),
+      entityType: 'workspace_artifact',
+      input,
+      execute: () => this.runHostedWorkspaceScriptlet(input, session),
+      successAuditMetadata: workspaceScriptletRunRouteSuccessMetadata,
+    });
+  }
+
+  private async runHostedWorkspaceScriptlet(
+    input: WorkspaceScriptletRunInput,
+    session: HostedSession | null,
+  ): Promise<WorkspaceScriptletRunResult> {
+    const artifact = this.options.readWorkspaceArtifactContent(input.path);
+    const prepared = prepareWorkspaceScriptletRun(artifact, input);
+    const execInput = {
+      hostId: prepared.hostId,
+      command: prepared.commandLabel,
+      ...(prepared.timeoutMs ? { timeoutMs: prepared.timeoutMs } : {}),
+    };
+    const execResult = await runHostRouteContract({
+      contract: this.requireRouteAccessContract('hosted:POST:/api/ssh/exec'),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: '/api/workspace-scriptlets/run',
+        action: 'POST /api/workspace-scriptlets/run:ssh-exec',
+        hostId: prepared.hostId,
+        entityType: 'host',
+        sessionId: session?.id ?? null,
+      },
+      input: execInput,
+      execute: () => this.options.sshService.exec(execInput, { remoteCommand: prepared.remoteCommand }),
+      successAuditMetadata: sshExecRouteSuccessMetadata,
+    });
+    return workspaceScriptletRunResult(prepared, execResult);
   }
 
   private routeWorkspaceFileApi(

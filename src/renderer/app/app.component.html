@@ -280,11 +280,11 @@
                         type="button"
                         class="mini-button"
                         data-testid="workspace-artifact-open-action"
-                        [disabled]="isWorkspaceAppletArtifact(artifact) && workspaceAppletOpenDisabledReason(artifact) !== ''"
-                        [attr.title]="isWorkspaceAppletArtifact(artifact) ? workspaceAppletOpenDisabledReason(artifact) || null : null"
+                        [disabled]="workspaceArtifactPrimaryDisabledReason(artifact) !== ''"
+                        [attr.title]="workspaceArtifactPrimaryDisabledReason(artifact) || null"
                         (click)="$event.stopPropagation(); openWorkspaceArtifact(artifact)"
                       >
-                        {{ isWorkspaceAppletArtifact(artifact) ? workspaceAppletActionLabel(artifact) : 'Open' }}
+                        {{ workspaceArtifactPrimaryActionLabel(artifact) }}
                       </button>
                       <button type="button" class="mini-button" (click)="$event.stopPropagation(); renameWorkspaceArtifact(artifact)">Rename</button>
                       <button type="button" class="mini-button workspace-file-danger" (click)="$event.stopPropagation(); deleteWorkspaceArtifact(artifact)">Move to Recycle Bin</button>

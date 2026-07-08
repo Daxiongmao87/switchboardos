@@ -20,6 +20,8 @@ import type {
   ShellWindowSemanticState,
   ShellWindowSnapshot,
   WorkspaceArtifactContentRecord,
+  WorkspaceScriptletRunInput,
+  WorkspaceScriptletRunResult,
   WorkspaceProfile,
   WorkspaceLayoutSnapshot,
   UpdateAppManifestInput,
@@ -86,6 +88,9 @@ interface ShellApi {
   workspaceArtifactContent?: {
     get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
     update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
+  };
+  workspaceScriptlet?: {
+    run: (input: WorkspaceScriptletRunInput) => Promise<WorkspaceScriptletRunResult>;
   };
   appManifest: {
     list: () => Promise<AppManifest[]>;
@@ -2516,6 +2521,11 @@ export class AppComponent implements OnInit, OnDestroy {
           void this.installAndOpenWorkspaceAppletArtifact(workspaceArtifact);
         }
         return;
+      case 'run-workspace-scriptlet-artifact':
+        if (workspaceArtifact) {
+          void this.runWorkspaceScriptletArtifact(workspaceArtifact);
+        }
+        return;
       case 'open-with-workspace-artifact':
         if (workspaceArtifact) {
           void this.openWorkspaceArtifactWith(workspaceArtifact);
@@ -2938,12 +2948,41 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
 
+    if (this.isWorkspaceScriptletArtifact(artifact)) {
+      await this.runWorkspaceScriptletArtifact(artifact);
+      return;
+    }
+
     this.showWorkspaceArtifactProperties(artifact);
     this.notify(`No registered workspace viewer exists yet for "${artifact.name}".`);
   }
 
   isWorkspaceAppletArtifact(artifact: WorkspaceArtifact): boolean {
     return artifact.kind === 'applet' && this.workspaceArtifactPath(artifact).endsWith('.sbapplet.json');
+  }
+
+  isWorkspaceScriptletArtifact(artifact: WorkspaceArtifact): boolean {
+    return artifact.kind === 'scriptlet' && this.workspaceArtifactPath(artifact).endsWith('.sbscriptlet.json');
+  }
+
+  workspaceArtifactPrimaryActionLabel(artifact: WorkspaceArtifact): string {
+    if (this.isWorkspaceAppletArtifact(artifact)) {
+      return this.workspaceAppletActionLabel(artifact);
+    }
+    if (this.isWorkspaceScriptletArtifact(artifact)) {
+      return 'Run Scriptlet';
+    }
+    return 'Open';
+  }
+
+  workspaceArtifactPrimaryDisabledReason(artifact: WorkspaceArtifact): string {
+    if (this.isWorkspaceAppletArtifact(artifact)) {
+      return this.workspaceAppletOpenDisabledReason(artifact);
+    }
+    if (this.isWorkspaceScriptletArtifact(artifact)) {
+      return this.workspaceScriptletRunDisabledReason(artifact);
+    }
+    return '';
   }
 
   workspaceAppletActionLabel(artifact: WorkspaceArtifact): string {
@@ -2973,11 +3012,30 @@ export class AppComponent implements OnInit, OnDestroy {
     return '';
   }
 
+  workspaceScriptletRunDisabledReason(artifact: WorkspaceArtifact): string {
+    if (!this.isWorkspaceScriptletArtifact(artifact)) {
+      return 'This action is available for .sbscriptlet.json workspace artifacts.';
+    }
+
+    const api = getSwitchboardApi();
+    if (!api?.workspaceArtifactContent) {
+      return 'Workspace artifact content API is unavailable.';
+    }
+    if (!api.workspaceScriptlet) {
+      return 'Workspace scriptlet execution API is unavailable.';
+    }
+    return '';
+  }
+
   private workspaceAppletActionCapabilities(artifact: WorkspaceArtifact): string[] {
     const capabilities = ['workspace-file:read', 'app-manifest:read'];
     capabilities.push(this.installedGeneratedAppForWorkspaceArtifact(artifact) ? 'app-manifest:update' : 'app-manifest:create');
     capabilities.push('app-permission:read', 'app-permission:grant');
     return capabilities;
+  }
+
+  private workspaceScriptletActionCapabilities(): string[] {
+    return ['workspace-file:read', 'ssh:exec'];
   }
 
   private installedGeneratedAppForWorkspaceArtifact(artifact: WorkspaceArtifact): ShellAppDefinition | null {
@@ -3113,6 +3171,51 @@ export class AppComponent implements OnInit, OnDestroy {
       this.notify(`${manifest.name} launched from workspace artifact ${artifactRecord.path}.`);
     } catch (error) {
       this.errorMessage = this.errorText(error, 'Unable to install workspace applet artifact.');
+    }
+  }
+
+  async runWorkspaceScriptletArtifact(artifact: WorkspaceArtifact): Promise<void> {
+    const disabledReason = this.workspaceScriptletRunDisabledReason(artifact);
+    if (disabledReason) {
+      this.showWorkspaceArtifactProperties(artifact);
+      this.notify(disabledReason);
+      return;
+    }
+
+    const api = getSwitchboardApi();
+    if (!api?.workspaceArtifactContent || !api.workspaceScriptlet) {
+      this.errorMessage = 'Workspace scriptlet APIs are unavailable.';
+      return;
+    }
+
+    const artifactPath = this.workspaceArtifactPath(artifact);
+    this.errorMessage = '';
+    try {
+      const artifactRecord = await api.workspaceArtifactContent.get(artifactPath);
+      if (artifactRecord.kind !== 'scriptlet') {
+        throw new Error('Workspace artifact content is not a scriptlet manifest.');
+      }
+      if (artifactRecord.path !== artifactPath) {
+        throw new Error('Workspace scriptlet artifact path did not match the selected row.');
+      }
+      const manifestRecord = artifactRecord.manifest as Record<string, unknown>;
+      const capabilities = Array.from(new Set([
+        ...manifestStringArrayField(manifestRecord, 'capabilities'),
+        ...manifestStringArrayField(manifestRecord, 'requiredCapabilities'),
+        ...manifestStringArrayField(manifestRecord, 'requestedCapabilities'),
+      ]));
+      if (!capabilities.includes('ssh:exec')) {
+        throw new Error('Workspace scriptlet artifact must declare the ssh:exec capability before it can run.');
+      }
+      const result = await api.workspaceScriptlet.run({ path: artifactRecord.path });
+      this.showWorkspaceArtifactProperties(artifact);
+      const status = result.status === 'success' ? 'completed' : 'failed';
+      this.notify(`Scriptlet ${result.name} ${status} on host ${result.hostId}.`);
+      if (result.status !== 'success') {
+        this.errorMessage = result.error || 'Workspace scriptlet execution failed.';
+      }
+    } catch (error) {
+      this.errorMessage = this.errorText(error, 'Unable to run workspace scriptlet artifact.');
     }
   }
 
@@ -4608,7 +4711,11 @@ export class AppComponent implements OnInit, OnDestroy {
     ])));
     return {
       id: `workspace:${path}`,
-      kind: this.isWorkspaceAppletArtifact(artifact) ? 'workspace-applet-artifact' : 'workspace-file',
+      kind: this.isWorkspaceAppletArtifact(artifact)
+        ? 'workspace-applet-artifact'
+        : this.isWorkspaceScriptletArtifact(artifact)
+          ? 'workspace-scriptlet-artifact'
+          : 'workspace-file',
       owner: 'workspace-files',
       source: 'workspace-file-object',
       targetScope: 'workspace-file',
@@ -4629,8 +4736,12 @@ export class AppComponent implements OnInit, OnDestroy {
     const appletDisabledReason = this.isWorkspaceAppletArtifact(artifact)
       ? this.workspaceAppletOpenDisabledReason(artifact)
       : '';
-    const openItem: ContextMenuItem = this.isWorkspaceAppletArtifact(artifact)
-      ? {
+    const scriptletDisabledReason = this.isWorkspaceScriptletArtifact(artifact)
+      ? this.workspaceScriptletRunDisabledReason(artifact)
+      : '';
+    let openItem: ContextMenuItem;
+    if (this.isWorkspaceAppletArtifact(artifact)) {
+      openItem = {
         id: 'install-open-workspace-applet-artifact',
         label: this.workspaceAppletActionLabel(artifact),
         icon: 'APP',
@@ -4639,8 +4750,20 @@ export class AppComponent implements OnInit, OnDestroy {
         disabledReason: appletDisabledReason || undefined,
         detail: appletDisabledReason || 'Install or launch this applet through workspace artifact content.',
         requiredCapabilities: this.workspaceAppletActionCapabilities(artifact),
-      }
-      : {
+      };
+    } else if (this.isWorkspaceScriptletArtifact(artifact)) {
+      openItem = {
+        id: 'run-workspace-scriptlet-artifact',
+        label: 'Run Scriptlet',
+        icon: 'SH',
+        shortcut: 'Enter',
+        disabled: Boolean(scriptletDisabledReason),
+        disabledReason: scriptletDisabledReason || undefined,
+        detail: scriptletDisabledReason || 'Run this scriptlet through workspace artifact content and backend SSH execution.',
+        requiredCapabilities: this.workspaceScriptletActionCapabilities(),
+      };
+    } else {
+      openItem = {
         id: 'open-workspace-artifact',
         label: 'Open',
         icon: 'O',
@@ -4648,6 +4771,7 @@ export class AppComponent implements OnInit, OnDestroy {
         detail: artifact.kind === 'folder' ? `Open ${path}` : 'Shows properties; no workspace viewer is registered yet.',
         requiredCapabilities: ['workspace-file:read'],
       };
+    }
     return this.workspaceArtifactObjectContextItems([
       openItem,
       {

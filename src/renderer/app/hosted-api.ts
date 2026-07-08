@@ -56,6 +56,8 @@ import type {
   UpdateHostInput,
   UpdateWorkspaceProfileInput,
   WorkspaceArtifactContentRecord,
+  WorkspaceScriptletRunInput,
+  WorkspaceScriptletRunResult,
   WorkspaceProfile,
 } from '../../shared/mvp-models';
 import type { AppInfo } from './switchboard-api';
@@ -167,6 +169,9 @@ interface HostedSwitchboardApi {
   workspaceArtifactContent: {
     get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
     update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
+  };
+  workspaceScriptlet: {
+    run: (input: WorkspaceScriptletRunInput) => Promise<WorkspaceScriptletRunResult>;
   };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;
@@ -351,6 +356,10 @@ function createHostedApi(): HostedSwitchboardApi {
         request(`/api/workspace-artifacts/content?path=${encodeURIComponent(path)}`),
       update: (path: string, content: string) =>
         request('/api/workspace-artifacts/content', { method: 'PUT', body: { path, content } }),
+    },
+    workspaceScriptlet: {
+      run: (input: WorkspaceScriptletRunInput) =>
+        request('/api/workspace-scriptlets/run', { method: 'POST', body: input }),
     },
     bootstrap: {
       presets: () => request('/api/bootstrap/presets'),

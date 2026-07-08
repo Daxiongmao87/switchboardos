@@ -401,6 +401,11 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:workspace-scriptlet:run',
+    routeMarker: "'workspace-scriptlet:run'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:workspace-file:rename',
     routeMarker: "'workspace-file:rename'",
     contextFile: 'src/main/main.ts',
@@ -562,6 +567,10 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:POST:/api/host-operations/run',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/workspace-scriptlets/run',
     contextFile: 'src/main/hosted-server.ts',
   },
   {
@@ -1323,6 +1332,36 @@ function validateHostedDispatches() {
     || !mainText.includes('artifactContentLogged: false')
     || !hostedText.includes('artifactContentLogged: false')) {
     fail('Workspace artifact content routes must keep sanitized audit metadata and never log raw content or manifests.');
+  }
+
+  if (!mainText.includes("'workspace-scriptlet:run'")
+    || !mainText.includes('validateWorkspaceScriptletRunInput')
+    || !mainText.includes('workspaceScriptletRunRouteSuccessMetadata')) {
+    fail('IPC workspace scriptlet run route must expose validated, sanitized backend execution.');
+  }
+
+  if (!hostedText.includes("contractId: 'hosted:POST:/api/workspace-scriptlets/run'")
+    || !hostedText.includes('/api/workspace-scriptlets/run')
+    || !hostedText.includes('workspaceScriptletRunRouteSuccessMetadata')) {
+    fail('Hosted workspace scriptlet run route must expose route-contract execution and sanitized audit metadata.');
+  }
+
+  if (!preloadText.includes('workspaceScriptlet: {')
+    || !preloadText.includes("invoke('workspace-scriptlet:run'")) {
+    fail('Preload API must expose workspaceScriptlet.run IPC route.');
+  }
+
+  if (!switchboardApiText.includes('workspaceScriptlet: {')
+    || !hostedApiText.includes('workspaceScriptlet: {')
+    || !hostedApiText.includes('/api/workspace-scriptlets/run')) {
+    fail('SwitchboardApi and hosted-api must expose structured workspaceScriptlet.run methods.');
+  }
+
+  if (!contractText.includes('workspace-scriptlet-route')
+    || !contractText.includes('scriptLogged: false')
+    || !contractText.includes('commandTextLogged: false')
+    || !contractText.includes('commandOutputLogged: false')) {
+    fail('Workspace scriptlet run routes must keep sanitized audit metadata and never log raw script or command output.');
   }
 
   if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/app-manifests')

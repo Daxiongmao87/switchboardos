@@ -97,6 +97,7 @@ import {
   validateWorkspaceFileCopyMoveInput,
   validateWorkspaceArtifactContentGetInput,
   validateWorkspaceArtifactContentUpdateInput,
+  validateWorkspaceScriptletRunInput,
   validateWorkspaceFileCreateFileInput,
   validateWorkspaceFileListInput,
   validateWorkspaceFilePathInput,
@@ -174,8 +175,15 @@ import type {
   UpdateHostTagInput,
   WorkspaceArtifactContentRecord,
   WorkspaceArtifactContentUpdateInput,
+  WorkspaceScriptletRunInput,
+  WorkspaceScriptletRunResult,
   UpdateWorkspaceProfileInput,
 } from '../shared/mvp-models';
+import {
+  prepareWorkspaceScriptletRun,
+  workspaceScriptletRunResult,
+  workspaceScriptletRunRouteSuccessMetadata,
+} from './workspace-scriptlet-runner';
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
@@ -1044,7 +1052,7 @@ function runWorkspaceFileIpcRoute<TResult>(
     entityType: string;
   },
   input: unknown,
-  execute: () => TResult,
+  execute: () => Promise<TResult> | TResult,
   successAuditMetadata?: (result: TResult) => Record<string, unknown>,
 ): Promise<TResult> {
   return runHostRouteContract({
@@ -1625,6 +1633,29 @@ function workspaceArtifactContentRouteSuccessMetadata(result: WorkspaceArtifactC
     providerPayloadLogged: false,
     secretsLogged: false,
   };
+}
+
+async function runWorkspaceScriptletArtifact(input: WorkspaceScriptletRunInput): Promise<WorkspaceScriptletRunResult> {
+  const artifact = readWorkspaceArtifactContent(input.path);
+  const prepared = prepareWorkspaceScriptletRun(artifact, input);
+  const execInput: SshExecInput = {
+    hostId: prepared.hostId,
+    command: prepared.commandLabel,
+    ...(prepared.timeoutMs ? { timeoutMs: prepared.timeoutMs } : {}),
+  };
+  const execResult = await runSshIpcRoute(
+    'ipc:ssh:exec',
+    {
+      route: 'workspace-scriptlet:run',
+      action: 'workspace-scriptlet:run:ssh-exec',
+      hostId: prepared.hostId,
+      entityType: 'host',
+    },
+    execInput,
+    () => sshService.exec(execInput, { remoteCommand: prepared.remoteCommand }),
+    sshExecRouteSuccessMetadata,
+  );
+  return workspaceScriptletRunResult(prepared, execResult);
 }
 
 function assertAppScopedStorageGranted(input: AppScopedStorageGetInput, action: string): void {
@@ -2811,6 +2842,25 @@ ipcMain.handle(
       validatedInput,
       () => updateWorkspaceArtifactContent(validatedInput),
       workspaceArtifactContentRouteSuccessMetadata,
+    );
+  }
+);
+
+ipcMain.handle(
+  'workspace-scriptlet:run',
+  async (_event, input: unknown): Promise<WorkspaceScriptletRunResult> => {
+    const validatedInput = validateWorkspaceScriptletRunInput(input);
+    return runWorkspaceFileIpcRoute(
+      'ipc:workspace-scriptlet:run',
+      {
+        route: 'workspace-scriptlet:run',
+        action: 'workspace-scriptlet:run',
+        entityId: workspaceArtifactContentEntityId(validatedInput.path),
+        entityType: 'workspace_artifact',
+      },
+      validatedInput,
+      () => runWorkspaceScriptletArtifact(validatedInput),
+      workspaceScriptletRunRouteSuccessMetadata,
     );
   }
 );

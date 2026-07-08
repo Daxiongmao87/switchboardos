@@ -56,6 +56,8 @@ import type {
   UpdateHostInput,
   UpdateWorkspaceProfileInput,
   WorkspaceArtifactContentRecord,
+  WorkspaceScriptletRunInput,
+  WorkspaceScriptletRunResult,
   WorkspaceProfile,
 } from '../../shared/mvp-models';
 
@@ -179,6 +181,9 @@ export interface SwitchboardApi {
   workspaceArtifactContent: {
     get: (path: string) => Promise<WorkspaceArtifactContentRecord>;
     update: (path: string, content: string) => Promise<WorkspaceArtifactContentRecord>;
+  };
+  workspaceScriptlet: {
+    run: (input: WorkspaceScriptletRunInput) => Promise<WorkspaceScriptletRunResult>;
   };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;

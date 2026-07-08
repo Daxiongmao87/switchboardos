@@ -54,6 +54,7 @@ import type {
   CreateWorkspaceProfileInput,
   UpdateWorkspaceProfileInput,
   WorkspaceArtifactContentUpdateInput,
+  WorkspaceScriptletRunInput,
   WorkspaceLayoutSnapshot,
 } from '../shared/mvp-models';
 
@@ -689,6 +690,20 @@ export function validateWorkspaceArtifactContentUpdateInput(value: unknown): Wor
     path: requireNonEmptyString(record.path, 'path'),
     content,
   };
+}
+
+export function validateWorkspaceScriptletRunInput(value: unknown): WorkspaceScriptletRunInput {
+  const record = requireRecord(value, 'workspace scriptlet run input');
+  const input: WorkspaceScriptletRunInput = {
+    path: requireNonEmptyString(record.path, 'path'),
+  };
+  if (record.hostId !== undefined) {
+    input.hostId = requireNonEmptyString(record.hostId, 'hostId');
+  }
+  if (record.timeoutMs !== undefined) {
+    input.timeoutMs = requireInteger(record.timeoutMs, 'timeoutMs', 1000, 120000);
+  }
+  return input;
 }
 
 export function validateWorkspaceTrashIdInput(value: unknown): string {

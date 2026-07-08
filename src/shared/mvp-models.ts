@@ -428,6 +428,32 @@ export interface WorkspaceArtifactContentUpdateInput extends WorkspaceArtifactCo
   content: string;
 }
 
+export interface WorkspaceScriptletRunInput extends WorkspaceArtifactContentGetInput {
+  hostId?: string;
+  timeoutMs?: number;
+}
+
+export interface WorkspaceScriptletRunResult {
+  path: string;
+  name: string;
+  hostId: string;
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  status: SshExecStatus;
+  error: string | null;
+  capabilities: string[];
+  artifactKind: 'scriptlet';
+  sourceLogged: false;
+  scriptLogged: false;
+  commandTextLogged: false;
+  commandOutputLogged: false;
+}
+
 // ============================================================
 // Host Groups
 // ============================================================
