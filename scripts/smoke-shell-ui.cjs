@@ -480,6 +480,7 @@ async function browserSmoke() {
       sourceAppId: element.getAttribute('data-shell-object-source-app-id') || '',
       windowId: element.getAttribute('data-shell-object-window-id') || '',
       notificationKind: element.getAttribute('data-shell-object-notification-kind') || element.getAttribute('data-notification-kind') || '',
+      hostId: element.getAttribute('data-shell-object-host-id') || '',
       actionIds: (element.getAttribute('data-shell-object-action-ids') || '')
         .split(',')
         .map((actionId) => actionId.trim())
@@ -797,6 +798,11 @@ async function browserSmoke() {
   const hostLauncherRefreshButton = await waitForEnabledButtonByText(hostLauncherPanel, 'Refresh', 'enabled Host launcher Refresh button');
   click(hostLauncherRefreshButton);
   const hostContextRow = await waitForSeededHostRow(hostLauncherPanel, 'Smoke Context Host', 20000);
+  const terminalSemanticEvents = [];
+  const handleTerminalSemantic = (event) => {
+    terminalSemanticEvents.push(event.detail);
+  };
+  window.addEventListener('switchboard-terminal-semantic', handleTerminalSemantic);
   rightClick(hostContextRow);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="host"]'), 'host context menu');
   const hostContextMenu = menuLabels();
@@ -809,11 +815,89 @@ async function browserSmoke() {
     () => hostTerminalWindow.querySelector('.host-terminal-window'),
     'host terminal content',
   );
+  const terminalRuntime = await waitFor(
+    () => hostTerminalWindow.querySelector('[data-testid="terminal-runtime"]'),
+    'terminal session object runtime',
+  );
+  await waitFor(
+    () => (terminalRuntime.getAttribute('data-terminal-ssh-target') || '').includes('smoke@127.0.0.1:22')
+      && (terminalRuntime.querySelector('[data-testid="terminal-working-directory"]')?.textContent || '').includes('/tmp'),
+    'terminal target and working directory state',
+  );
+  await window.sb.audit.log({
+    type: 'terminal.session.smoke_lifecycle',
+    entityType: 'terminal_session',
+    entityId: 'smoke-terminal-session',
+    message: 'Smoke terminal lifecycle audit event',
+    metadata: {
+      sessionId: 'smoke-terminal-session',
+      hostId: seededHost.id,
+      resultStatus: 'active',
+      cols: 80,
+      rows: 24,
+      terminalInputLogged: false,
+      terminalOutputLogged: false,
+      rawCommand: 'RAW_TERMINAL_INPUT_SHOULD_NOT_RENDER',
+      rawOutput: 'RAW_TERMINAL_OUTPUT_SHOULD_NOT_RENDER',
+    },
+  });
+  click(terminalRuntime.querySelector('[data-testid="terminal-action-audit"]'));
+  await waitFor(
+    () => terminalRuntime.querySelector('[data-testid="terminal-audit-entry"]'),
+    'terminal sanitized audit entry',
+  );
+  const terminalActionButtons = [...terminalRuntime.querySelectorAll('[data-testid^="terminal-action-"]')]
+    .map((button) => ({
+      id: button.getAttribute('data-testid') || '',
+      text: (button.textContent || '').trim(),
+      disabled: button.disabled,
+      disabledReason: button.getAttribute('data-disabled-reason') || '',
+    }));
+  const terminalSessionObject = {
+    sessionObject: terminalRuntime.getAttribute('data-terminal-session-object') || '',
+    objectId: terminalRuntime.getAttribute('data-terminal-object-id') || '',
+    sshTarget: terminalRuntime.getAttribute('data-terminal-ssh-target') || '',
+    workingDirectory: terminalRuntime.getAttribute('data-terminal-working-directory') || '',
+    workingDirectoryState: terminalRuntime.getAttribute('data-terminal-working-directory-state') || '',
+    connectionState: terminalRuntime.getAttribute('data-terminal-connection-state') || '',
+    lifecycleState: terminalRuntime.getAttribute('data-terminal-lifecycle-state') || '',
+    actionIds: (terminalRuntime.getAttribute('data-terminal-action-ids') || '')
+      .split(',')
+      .map((actionId) => actionId.trim())
+      .filter(Boolean),
+    auditSafe: terminalRuntime.getAttribute('data-terminal-audit-safe') || '',
+    localStorageState: terminalRuntime.getAttribute('data-terminal-local-storage') || '',
+    activeSessionText: (terminalRuntime.querySelector('[data-testid="terminal-active-session-id"]')?.textContent || '').trim(),
+    sizeText: (terminalRuntime.querySelector('[data-testid="terminal-size-state"]')?.textContent || '').trim(),
+    lastEventText: (terminalRuntime.querySelector('[data-testid="terminal-last-event-state"]')?.textContent || '').trim(),
+    recentAuditText: (terminalRuntime.querySelector('[data-testid="terminal-recent-audit-state"]')?.textContent || '').trim(),
+    auditText: (terminalRuntime.querySelector('[data-testid="terminal-audit-state"]')?.textContent || '').trim(),
+  };
   rightClick(hostTerminalContextTarget);
   await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="terminal"]'), 'terminal context menu');
   const terminalContextMenu = menuLabels();
   const terminalContextMenuItems = menuButtonStates();
   const terminalMenuAffordances = menuAffordances();
+  const terminalMenuContributions = menuContributionMetadata();
+  const terminalContextObject = contextShellObjectMetadata();
+  clickMenuItem('Copy');
+  await waitFor(
+    () => (terminalRuntime.querySelector('[data-testid="terminal-action-status"]')?.textContent || '').includes('Copy'),
+    'terminal context menu Copy dispatched',
+  );
+  const terminalCopyContextDispatchStatus = (terminalRuntime.querySelector('[data-testid="terminal-action-status"]')?.textContent || '').trim();
+  rightClick(hostTerminalContextTarget);
+  await waitFor(() => document.querySelector('[data-testid="context-menu"][data-context-target="terminal"]'), 'terminal context menu for clear');
+  clickMenuItem('Clear');
+  await waitFor(
+    () => (terminalRuntime.querySelector('[data-testid="terminal-action-status"]')?.textContent || '').includes('Cleared'),
+    'terminal context menu Clear dispatched',
+  );
+  const terminalClearContextDispatchStatus = (terminalRuntime.querySelector('[data-testid="terminal-action-status"]')?.textContent || '').trim();
+  window.removeEventListener('switchboard-terminal-semantic', handleTerminalSemantic);
+  const terminalSemanticState = terminalSemanticEvents[terminalSemanticEvents.length - 1]?.semanticState || null;
+  const terminalLocalStorageKeys = Object.keys(localStorage)
+    .filter((key) => /terminal|xterm|ssh-session|terminal-session/i.test(key));
   click(document.body);
   await waitFor(() => !document.querySelector('[data-testid="context-menu"]'), 'terminal context menu closed');
   click(document.querySelector('[data-testid="app-launcher-button"]'));
@@ -2071,6 +2155,7 @@ async function browserSmoke() {
       launcherRowMenu: launcherRowContributionMetadata,
       hostsTaskbarPinMenu: hostsTaskbarPinContributionMetadata,
       hostsTaskbarUnpinMenu: hostsTaskbarUnpinContributionMetadata,
+      terminalMenu: terminalMenuContributions,
     },
     shellObjects: {
       taskbarPanelObject,
@@ -2079,6 +2164,7 @@ async function browserSmoke() {
       taskbarWindowContextObject,
       taskbarContextObject,
       trayStatusContextObject,
+      terminalContextObject,
       notificationToastObject,
       notificationContextObject,
     },
@@ -2115,6 +2201,14 @@ async function browserSmoke() {
     hosts: {
       seededHostId: seededHost.id,
       hostContextRowFound: Boolean(hostContextRow),
+    },
+    terminal: {
+      sessionObject: terminalSessionObject,
+      actionButtons: terminalActionButtons,
+      copyContextDispatchStatus: terminalCopyContextDispatchStatus,
+      clearContextDispatchStatus: terminalClearContextDispatchStatus,
+      semanticState: terminalSemanticState,
+      localStorageKeys: terminalLocalStorageKeys,
     },
     trash: trashResult,
     launcher: {
@@ -2176,6 +2270,8 @@ async function main() {
   });
   const terminalActionMenuItem = (label) => report.menus.terminalContextMenuItems
     .find((item) => item.text.includes(label));
+  const terminalVisibleAction = (label) => report.terminal.actionButtons
+    .find((item) => item.text.includes(label));
   const iconMenuActionItem = (label, items) => items
     .find((item) => item.text.includes(label));
   const contributionMatches = (items, label, expected) => {
@@ -2210,10 +2306,10 @@ async function main() {
       && !item.sourceAppId);
   const labelsHaveNoAppActionLeak = (labels) => labels.every((label) => !label.includes('App Actions')
     && !label.includes('Refresh workspace context'));
-  const terminalBridgeActionsReady = ['Copy', 'Paste', 'Clear'].every((label) => {
+  const terminalBridgeActionsReady = ['Copy', 'Clear'].every((label) => {
     const item = terminalActionMenuItem(label);
     return Boolean(item) && !item.disabled && !item.text.includes('Requires the terminal applet action bridge');
-  });
+  }) && Boolean(terminalActionMenuItem('Paste')?.disabled);
   const iconMenuDuplicateActionAvailable = iconMenuActionItem('Duplicate Shortcut', report.menus.iconMenuButtonStates);
   const duplicateShortcutMenuActionRemovable = iconMenuActionItem('Remove Shortcut', report.menus.duplicateShortcutContextButtonStates);
   const initialDesktopIconSetFromReport = [...report.initial.iconLabels].sort();
@@ -2514,9 +2610,104 @@ async function main() {
     report.menus.hostContextMenu.some((label) => label.includes('Test Connection')),
     report.menus.hostContextMenu.some((label) => label.includes('Properties')),
     report.windows.hostTerminalOpen,
+    report.terminal.sessionObject.sessionObject === 'true',
+    report.terminal.sessionObject.objectId.startsWith('terminal-window:') || report.terminal.sessionObject.objectId.startsWith('terminal-session:'),
+    report.terminal.sessionObject.sshTarget.includes('smoke@127.0.0.1:22'),
+    report.terminal.sessionObject.workingDirectory === '/tmp',
+    report.terminal.sessionObject.workingDirectoryState === 'configured',
+    report.terminal.sessionObject.connectionState.includes('no active session'),
+    report.terminal.sessionObject.lifecycleState === 'idle',
+    report.terminal.sessionObject.actionIds.includes('copy'),
+    report.terminal.sessionObject.actionIds.includes('paste'),
+    report.terminal.sessionObject.actionIds.includes('clear'),
+    report.terminal.sessionObject.actionIds.includes('disconnect'),
+    report.terminal.sessionObject.actionIds.includes('reconnect'),
+    report.terminal.sessionObject.actionIds.includes('resize'),
+    report.terminal.sessionObject.actionIds.includes('audit'),
+    report.terminal.sessionObject.auditSafe === 'true',
+    report.terminal.sessionObject.localStorageState === 'none',
+    report.terminal.sessionObject.activeSessionText.includes('No active session'),
+    /\d+\s+x\s+\d+/.test(report.terminal.sessionObject.sizeText),
+    report.terminal.sessionObject.lastEventText.includes('No terminal events consumed'),
+    report.terminal.sessionObject.recentAuditText.includes('terminal.session.smoke_lifecycle'),
+    report.terminal.sessionObject.auditText.includes('Smoke terminal lifecycle audit event'),
+    !report.terminal.sessionObject.auditText.includes('RAW_TERMINAL_INPUT_SHOULD_NOT_RENDER'),
+    !report.terminal.sessionObject.auditText.includes('RAW_TERMINAL_OUTPUT_SHOULD_NOT_RENDER'),
+    terminalVisibleAction('Copy') && !terminalVisibleAction('Copy').disabled,
+    terminalVisibleAction('Paste')?.disabled && terminalVisibleAction('Paste').disabledReason.includes('Start a terminal session'),
+    terminalVisibleAction('Clear') && !terminalVisibleAction('Clear').disabled,
+    terminalVisibleAction('Disconnect')?.disabled && terminalVisibleAction('Disconnect').disabledReason.includes('No active terminal session'),
+    terminalVisibleAction('Reconnect') && !terminalVisibleAction('Reconnect').disabled,
+    terminalVisibleAction('Resize')?.disabled && terminalVisibleAction('Resize').disabledReason.includes('Start a terminal session'),
+    terminalVisibleAction('Audit') && !terminalVisibleAction('Audit').disabled,
+    report.terminal.copyContextDispatchStatus.includes('Copy'),
+    report.terminal.clearContextDispatchStatus.includes('Cleared terminal view'),
+    report.terminal.semanticState?.kind === 'terminal',
+    report.terminal.semanticState?.metadata?.objectKind === 'terminal-session',
+    report.terminal.semanticState?.metadata?.sshTarget === 'smoke@127.0.0.1:22',
+    report.terminal.semanticState?.metadata?.remoteWorkingDirectory === '/tmp',
+    report.terminal.semanticState?.metadata?.remoteWorkingDirectoryState === 'configured',
+    report.terminal.semanticState?.metadata?.sessionLifecycleState === 'idle',
+    Array.isArray(report.terminal.semanticState?.metadata?.actionIds)
+      && report.terminal.semanticState.metadata.actionIds.includes('audit'),
+    Array.isArray(report.terminal.semanticState?.metadata?.availableActions)
+      && report.terminal.semanticState.metadata.availableActions.some((action) => action.id === 'disconnect'),
+    report.terminal.semanticState?.metadata?.auditSafe === true,
+    report.terminal.semanticState?.metadata?.localStorageSessionPersistence === false,
+    report.terminal.semanticState?.metadata?.terminalInputStored === false,
+    report.terminal.semanticState?.metadata?.terminalOutputStored === false,
+    report.terminal.localStorageKeys.length === 0,
+    shellObjectMatches(report.shellObjects.terminalContextObject, {
+      objectKind: 'terminal-session',
+      owner: 'shell',
+      source: 'shell',
+      targetScope: 'terminal',
+      sourceAppId: 'host-terminal',
+    }),
+    report.shellObjects.terminalContextObject?.hostId === report.hosts.seededHostId,
+    report.shellObjects.terminalContextObject?.actionIds.includes('terminal-disconnect'),
+    report.shellObjects.terminalContextObject?.actionIds.includes('terminal-reconnect'),
+    report.shellObjects.terminalContextObject?.actionIds.includes('terminal-resize'),
+    report.shellObjects.terminalContextObject?.actionIds.includes('terminal-audit'),
+    report.shellObjects.terminalContextObject?.capabilities.includes('terminal:stop'),
+    report.shellObjects.terminalContextObject?.capabilities.includes('terminal:start'),
+    report.shellObjects.terminalContextObject?.capabilities.includes('terminal:resize'),
+    report.shellObjects.terminalContextObject?.capabilities.includes('audit:read'),
     report.menus.terminalContextMenu.some((label) => label.includes('Copy')),
     report.menus.terminalContextMenu.some((label) => label.includes('Paste')),
     report.menus.terminalContextMenu.some((label) => label.includes('Clear')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Disconnect')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Reconnect')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Resize')),
+    report.menus.terminalContextMenu.some((label) => label.includes('Audit')),
+    contributionMatches(report.menuContributions.terminalMenu, 'Disconnect', {
+      source: 'shell',
+      targetScope: 'terminal',
+      actionId: 'terminal-disconnect',
+      requiredCapabilities: ['terminal:stop'],
+      disabled: true,
+    }),
+    contributionMatches(report.menuContributions.terminalMenu, 'Reconnect', {
+      source: 'shell',
+      targetScope: 'terminal',
+      actionId: 'terminal-reconnect',
+      requiredCapabilities: ['terminal:start'],
+      disabled: false,
+    }),
+    contributionMatches(report.menuContributions.terminalMenu, 'Resize', {
+      source: 'shell',
+      targetScope: 'terminal',
+      actionId: 'terminal-resize',
+      requiredCapabilities: ['terminal:resize'],
+      disabled: true,
+    }),
+    contributionMatches(report.menuContributions.terminalMenu, 'Audit', {
+      source: 'shell',
+      targetScope: 'terminal',
+      actionId: 'terminal-audit',
+      requiredCapabilities: ['audit:read'],
+      disabled: false,
+    }),
     terminalBridgeActionsReady,
     report.menuAffordances.terminalMenu.iconCount >= 3,
     report.menuAffordances.terminalMenu.separatorCount >= 1,

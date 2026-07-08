@@ -12,10 +12,12 @@ import {
 } from '@angular/core';
 import { Terminal } from '@xterm/xterm';
 import type {
+  AuditEvent,
   HostRecord,
   ShellWindowSemanticState,
   TerminalExitEvent,
   TerminalOutputEvent,
+  TerminalResizeResult,
   TerminalStatusEvent,
 } from '../../../shared/mvp-models';
 import { getSwitchboardApi } from '../switchboard-api';
@@ -30,11 +32,42 @@ type PendingTerminalEvent =
   | { kind: 'exit'; event: TerminalExitEvent };
 
 type TerminalShellCommand = 'copy' | 'paste' | 'clear';
+type TerminalSessionAction = TerminalShellCommand | 'disconnect' | 'reconnect' | 'resize' | 'audit';
 
 interface TerminalShellCommandEventDetail {
   windowId?: string;
-  action?: TerminalShellCommand;
+  action?: TerminalSessionAction;
 }
+
+interface TerminalAuditSummary {
+  id: string;
+  type: string;
+  message: string;
+  createdAt: string;
+  sessionId: string | null;
+  hostId: string | null;
+  resultStatus: string | null;
+  success: string | null;
+  size: string | null;
+  auditSafe: boolean;
+}
+
+interface TerminalActionState {
+  id: TerminalSessionAction;
+  label: string;
+  disabled: boolean;
+  disabledReason: string | null;
+}
+
+const TERMINAL_SESSION_ACTIONS: TerminalSessionAction[] = [
+  'copy',
+  'paste',
+  'clear',
+  'disconnect',
+  'reconnect',
+  'resize',
+  'audit',
+];
 
 @Component({
   selector: 'app-terminal',
@@ -47,9 +80,22 @@ interface TerminalShellCommandEventDetail {
       [attr.data-selected-host-id]="selectedHostId || null"
       [attr.data-host-context-locked]="hostContextLocked ? 'true' : 'false'"
       [attr.data-active-session-id]="activeSessionId || null"
+      [attr.data-terminal-session-object]="'true'"
+      [attr.data-terminal-object-id]="terminalObjectId"
+      [attr.data-terminal-ssh-target]="sshTargetLabel"
+      [attr.data-terminal-working-directory]="remoteWorkingDirectoryLabel"
+      [attr.data-terminal-working-directory-state]="remoteWorkingDirectoryState"
+      [attr.data-terminal-connection-state]="connectionStateLabel"
+      [attr.data-terminal-lifecycle-state]="sessionLifecycleState"
+      [attr.data-terminal-action-ids]="terminalActionIdsLabel"
+      [attr.data-terminal-last-action]="lastSessionActionId || null"
+      [attr.data-terminal-audit-safe]="'true'"
+      [attr.data-terminal-local-storage]="terminalLocalStorageState"
       [attr.data-terminal-event-count]="consumedTerminalEventCount"
       [attr.data-terminal-last-event-session-id]="lastTerminalEventSessionId || null"
       [attr.data-terminal-last-event-kind]="lastTerminalEventKind || null"
+      [attr.data-terminal-last-event-at]="lastTerminalEventAt || null"
+      [attr.data-terminal-last-event-message]="lastTerminalEventMessage || null"
     >
       <header class="page-header">
         <div>
@@ -113,16 +159,46 @@ interface TerminalShellCommandEventDetail {
               <dd>{{ sshTargetLabel }}</dd>
             </div>
             <div>
+              <dt>Working directory</dt>
+              <dd data-testid="terminal-working-directory" [attr.data-state]="remoteWorkingDirectoryState">
+                {{ remoteWorkingDirectoryLabel }}
+              </dd>
+            </div>
+            <div>
+              <dt>Default shell</dt>
+              <dd data-testid="terminal-default-shell">{{ defaultShellLabel }}</dd>
+            </div>
+            <div>
               <dt>Reachability</dt>
-              <dd>{{ selectedHost ? statusLabel(selectedHost.lastConnectionStatus) : 'No connection' }}</dd>
+              <dd data-testid="terminal-reachability">{{ reachabilityLabel }}</dd>
             </div>
             <div>
               <dt>Last checked</dt>
               <dd>{{ selectedLastCheckedLabel }}</dd>
             </div>
             <div>
+              <dt>Connection state</dt>
+              <dd data-testid="terminal-connection-state">{{ connectionStateLabel }}</dd>
+            </div>
+            <div>
+              <dt>Session lifecycle</dt>
+              <dd data-testid="terminal-lifecycle-state">{{ sessionLifecycleLabel }}</dd>
+            </div>
+            <div>
+              <dt>Active session</dt>
+              <dd data-testid="terminal-active-session-id">{{ activeSessionDisplayId }}</dd>
+            </div>
+            <div>
               <dt>Resize</dt>
-              <dd>Recorded only; SSH pipe backend cannot propagate terminal size.</dd>
+              <dd data-testid="terminal-size-state">{{ terminalSizeLabel }}. {{ resizeStatusMessage }}</dd>
+            </div>
+            <div>
+              <dt>Last event</dt>
+              <dd data-testid="terminal-last-event-state">{{ lastTerminalEventLabel }}</dd>
+            </div>
+            <div>
+              <dt>Recent audit</dt>
+              <dd data-testid="terminal-recent-audit-state">{{ recentAuditLabel }}</dd>
             </div>
           </dl>
 
@@ -145,6 +221,119 @@ interface TerminalShellCommandEventDetail {
               Stop session
             </button>
           </div>
+
+          <section class="session-actions" aria-label="Terminal session actions">
+            <div class="panel-heading">
+              <h2>Session actions</h2>
+              <span data-testid="terminal-action-status">{{ actionStatusMessage }}</span>
+            </div>
+            <div class="action-grid">
+              <button
+                type="button"
+                data-testid="terminal-action-copy"
+                [disabled]="copyActionDisabled"
+                [title]="copyDisabledReason || 'Copy selected terminal text.'"
+                [attr.data-disabled-reason]="copyDisabledReason || null"
+                (click)="runVisibleShellCommand('copy')"
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                data-testid="terminal-action-paste"
+                [disabled]="pasteActionDisabled"
+                [title]="pasteDisabledReason || 'Paste clipboard text into the active session.'"
+                [attr.data-disabled-reason]="pasteDisabledReason || null"
+                (click)="runVisibleShellCommand('paste')"
+              >
+                Paste
+              </button>
+              <button
+                type="button"
+                data-testid="terminal-action-clear"
+                [disabled]="clearActionDisabled"
+                [title]="clearDisabledReason || 'Clear the visible terminal buffer.'"
+                [attr.data-disabled-reason]="clearDisabledReason || null"
+                (click)="runVisibleShellCommand('clear')"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                class="danger-action"
+                data-testid="terminal-action-disconnect"
+                [disabled]="disconnectActionDisabled"
+                [title]="disconnectDisabledReason || 'Disconnect the active terminal session.'"
+                [attr.data-disabled-reason]="disconnectDisabledReason || null"
+                (click)="disconnectSession()"
+              >
+                Disconnect
+              </button>
+              <button
+                type="button"
+                data-testid="terminal-action-reconnect"
+                [disabled]="reconnectActionDisabled"
+                [title]="reconnectDisabledReason || 'Start a new session for the selected host.'"
+                [attr.data-disabled-reason]="reconnectDisabledReason || null"
+                (click)="reconnectSession()"
+              >
+                Reconnect
+              </button>
+              <button
+                type="button"
+                data-testid="terminal-action-resize"
+                [disabled]="resizeActionDisabled"
+                [title]="resizeDisabledReason || 'Sync the current xterm size with the terminal session.'"
+                [attr.data-disabled-reason]="resizeDisabledReason || null"
+                (click)="syncResizeFromAction()"
+              >
+                Resize
+              </button>
+              <button
+                type="button"
+                data-testid="terminal-action-audit"
+                [disabled]="auditActionDisabled"
+                [title]="auditDisabledReason || 'Refresh sanitized terminal lifecycle audit state.'"
+                [attr.data-disabled-reason]="auditDisabledReason || null"
+                (click)="refreshTerminalAuditFromAction()"
+              >
+                Audit
+              </button>
+            </div>
+          </section>
+
+          <section
+            class="audit-panel"
+            data-testid="terminal-audit-state"
+            [attr.data-audit-safe]="'true'"
+            [attr.data-audit-last-refreshed-at]="auditLastRefreshedAt || null"
+          >
+            <div class="panel-heading">
+              <h2>Sanitized audit</h2>
+              <span>{{ auditStatusMessage }}</span>
+            </div>
+            <ol class="audit-list" *ngIf="terminalAuditEntries.length > 0; else noTerminalAudit">
+              <li
+                *ngFor="let event of terminalAuditEntries; trackBy: trackAudit"
+                data-testid="terminal-audit-entry"
+                [attr.data-audit-type]="event.type"
+                [attr.data-audit-session-id]="event.sessionId || null"
+                [attr.data-audit-host-id]="event.hostId || null"
+                [attr.data-audit-safe]="event.auditSafe ? 'true' : 'false'"
+              >
+                <strong>{{ event.type }}</strong>
+                <span>{{ formatDate(event.createdAt) }}</span>
+                <p>{{ event.message }}</p>
+                <small>
+                  Session {{ event.sessionId || 'unknown' }} | Host {{ event.hostId || 'unknown' }} |
+                  Result {{ event.resultStatus || event.success || 'recorded' }} | {{ event.size || 'size n/a' }}
+                </small>
+              </li>
+            </ol>
+            <ng-template #noTerminalAudit>
+              <p class="empty-state">No terminal lifecycle audit events have been loaded for this session or host.</p>
+            </ng-template>
+          </section>
         </aside>
 
         <article class="panel terminal-panel">
@@ -267,6 +456,34 @@ interface TerminalShellCommandEventDetail {
       margin: 14px 0;
     }
 
+    .session-actions,
+    .audit-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 16px;
+      border-top: 1px solid #2d3440;
+      padding-top: 14px;
+    }
+
+    .session-actions .panel-heading,
+    .audit-panel .panel-heading {
+      align-items: flex-start;
+    }
+
+    .session-actions .panel-heading span,
+    .audit-panel .panel-heading span {
+      max-width: 170px;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
     dl {
       display: flex;
       flex-direction: column;
@@ -385,6 +602,46 @@ interface TerminalShellCommandEventDetail {
       color: #bbf7d0;
     }
 
+    .audit-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .audit-list li {
+      border: 1px solid #2d3440;
+      border-radius: 6px;
+      background: #101318;
+      padding: 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .audit-list strong,
+    .audit-list p,
+    .audit-list small,
+    .empty-state {
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .audit-list strong {
+      color: #e5e7eb;
+    }
+
+    .audit-list p {
+      color: #cbd5e1;
+    }
+
+    .audit-list small,
+    .empty-state {
+      color: #94a3b8;
+    }
+
     @media (max-width: 1000px) {
       .terminal-layout {
         grid-template-columns: 1fr;
@@ -421,6 +678,16 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
   consumedTerminalEventCount = 0;
   lastTerminalEventSessionId = '';
   lastTerminalEventKind = '';
+  lastTerminalEventAt = '';
+  lastTerminalEventMessage = '';
+  lastLifecycleSessionId = '';
+  lastSessionHostId = '';
+  lastSessionActionId: TerminalSessionAction | '' = '';
+  actionStatusMessage = 'No terminal action has run.';
+  resizeStatusMessage = 'Resize sync is idle.';
+  auditStatusMessage = 'Audit state has not been loaded.';
+  auditLastRefreshedAt = '';
+  terminalAuditEntries: TerminalAuditSummary[] = [];
 
   private readonly unsubscribeCallbacks: Array<() => void> = [];
   private pendingStartEvents: PendingTerminalEvent[] = [];
@@ -472,11 +739,11 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
   @HostListener('window:switchboard-terminal-command', ['$event'])
   handleShellCommand(event: CustomEvent<TerminalShellCommandEventDetail>): void {
     const detail = event.detail;
-    if (!detail || detail.windowId !== this.shellWindowId || !this.isTerminalShellCommand(detail.action)) {
+    if (!detail || detail.windowId !== this.shellWindowId || !this.isTerminalSessionAction(detail.action)) {
       return;
     }
 
-    void this.runShellCommand(detail.action);
+    void this.runSessionAction(detail.action);
   }
 
   get selectedHost(): HostRecord | null {
@@ -509,6 +776,192 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
 
   get sessionLabel(): string {
     return this.activeSessionId ? this.sessionStatus : 'No active session';
+  }
+
+  get terminalObjectId(): string {
+    if (this.activeSessionId) {
+      return `terminal-session:${this.activeSessionId}`;
+    }
+    if (this.lastLifecycleSessionId) {
+      return `terminal-session:${this.lastLifecycleSessionId}`;
+    }
+    return `terminal-window:${this.shellWindowId || 'unbound'}`;
+  }
+
+  get remoteWorkingDirectoryLabel(): string {
+    const workingDirectory = this.selectedHost?.defaultWorkingDirectory?.trim();
+    return workingDirectory || 'Unknown: host has no default working directory configured.';
+  }
+
+  get remoteWorkingDirectoryState(): 'configured' | 'unknown' {
+    return this.selectedHost?.defaultWorkingDirectory?.trim() ? 'configured' : 'unknown';
+  }
+
+  get defaultShellLabel(): string {
+    return this.selectedHost?.defaultShell?.trim() || 'Unknown';
+  }
+
+  get reachabilityLabel(): string {
+    return this.selectedHost ? this.statusLabel(this.selectedHost.lastConnectionStatus) : 'No host selected';
+  }
+
+  get sessionLifecycleState(): string {
+    if (this.isStarting) {
+      return 'starting';
+    }
+    if (this.isStopping) {
+      return 'stopping';
+    }
+    if (this.activeSessionId) {
+      return this.normalizedSessionStatus();
+    }
+    if (this.lastLifecycleSessionId) {
+      return this.normalizedSessionStatus() === 'disconnected' ? 'ended' : this.normalizedSessionStatus();
+    }
+    return 'idle';
+  }
+
+  get sessionLifecycleLabel(): string {
+    const sessionId = this.activeSessionId || this.lastLifecycleSessionId;
+    if (sessionId) {
+      return `${this.sessionLifecycleState} (${sessionId})`;
+    }
+    return 'Idle: no terminal session has been started.';
+  }
+
+  get activeSessionDisplayId(): string {
+    return this.activeSessionId || this.lastLifecycleSessionId || 'No active session';
+  }
+
+  get connectionStateLabel(): string {
+    if (!this.selectedHost) {
+      return 'No host selected';
+    }
+    if (this.activeSessionId) {
+      return `Session ${this.normalizedSessionStatus()} for ${this.selectedHost.name}`;
+    }
+    if (this.isStarting) {
+      return `Starting session for ${this.selectedHost.name}`;
+    }
+    if (this.isStopping) {
+      return `Stopping session for ${this.selectedHost.name}`;
+    }
+    return `${this.reachabilityLabel}; no active session`;
+  }
+
+  get lastTerminalEventLabel(): string {
+    if (!this.lastTerminalEventKind) {
+      return 'No terminal events consumed.';
+    }
+
+    const timestamp = this.lastTerminalEventAt ? this.formatDate(this.lastTerminalEventAt) : 'time unknown';
+    const message = this.lastTerminalEventMessage || 'No event message.';
+    return `${this.lastTerminalEventKind} for ${this.lastTerminalEventSessionId || 'unknown session'} at ${timestamp}: ${message}`;
+  }
+
+  get recentAuditLabel(): string {
+    const event = this.terminalAuditEntries[0];
+    if (!event) {
+      return this.auditStatusMessage;
+    }
+    return `${event.type} at ${this.formatDate(event.createdAt)} for ${event.sessionId || event.hostId || 'terminal'}`;
+  }
+
+  get terminalActionIdsLabel(): string {
+    return TERMINAL_SESSION_ACTIONS.join(',');
+  }
+
+  get terminalLocalStorageState(): string {
+    return 'none';
+  }
+
+  get copyDisabledReason(): string | null {
+    return this.xterm ? null : 'Terminal renderer is not ready.';
+  }
+
+  get pasteDisabledReason(): string | null {
+    if (!this.xterm) {
+      return 'Terminal renderer is not ready.';
+    }
+    if (!this.activeSessionId) {
+      return 'Start a terminal session before pasting.';
+    }
+    if (this.isStopping) {
+      return 'Session is stopping.';
+    }
+    return null;
+  }
+
+  get clearDisabledReason(): string | null {
+    return this.xterm ? null : 'Terminal renderer is not ready.';
+  }
+
+  get disconnectDisabledReason(): string | null {
+    if (!this.activeSessionId) {
+      return 'No active terminal session to disconnect.';
+    }
+    if (this.isStopping) {
+      return 'Session disconnect is already in progress.';
+    }
+    return null;
+  }
+
+  get reconnectDisabledReason(): string | null {
+    if (!this.selectedHost) {
+      return 'Select a host before reconnecting.';
+    }
+    if (this.activeSessionId) {
+      return 'Disconnect the active session before reconnecting.';
+    }
+    if (this.isStarting) {
+      return 'Session start is already in progress.';
+    }
+    return null;
+  }
+
+  get resizeDisabledReason(): string | null {
+    if (!this.xterm) {
+      return 'Terminal renderer is not ready.';
+    }
+    if (!this.activeSessionId) {
+      return 'Start a terminal session before syncing size.';
+    }
+    if (this.isStopping) {
+      return 'Session is stopping.';
+    }
+    return null;
+  }
+
+  get auditDisabledReason(): string | null {
+    return getSwitchboardApi()?.audit?.list ? null : 'Audit API is unavailable.';
+  }
+
+  get copyActionDisabled(): boolean {
+    return this.copyDisabledReason !== null;
+  }
+
+  get pasteActionDisabled(): boolean {
+    return this.pasteDisabledReason !== null;
+  }
+
+  get clearActionDisabled(): boolean {
+    return this.clearDisabledReason !== null;
+  }
+
+  get disconnectActionDisabled(): boolean {
+    return this.disconnectDisabledReason !== null;
+  }
+
+  get reconnectActionDisabled(): boolean {
+    return this.reconnectDisabledReason !== null;
+  }
+
+  get resizeActionDisabled(): boolean {
+    return this.resizeDisabledReason !== null;
+  }
+
+  get auditActionDisabled(): boolean {
+    return this.auditDisabledReason !== null;
   }
 
   async loadHosts(): Promise<void> {
@@ -545,6 +998,65 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     this.emitSemanticState();
   }
 
+  async runVisibleShellCommand(action: TerminalShellCommand): Promise<void> {
+    await this.runSessionAction(action);
+  }
+
+  async disconnectSession(): Promise<void> {
+    const disabledReason = this.disconnectDisabledReason;
+    this.lastSessionActionId = 'disconnect';
+    if (disabledReason) {
+      this.actionStatusMessage = disabledReason;
+      this.emitSemanticState();
+      return;
+    }
+
+    this.actionStatusMessage = 'Disconnect requested for active terminal session.';
+    this.emitSemanticState();
+    await this.stopSession();
+  }
+
+  async reconnectSession(): Promise<void> {
+    const disabledReason = this.reconnectDisabledReason;
+    this.lastSessionActionId = 'reconnect';
+    if (disabledReason) {
+      this.actionStatusMessage = disabledReason;
+      this.emitSemanticState();
+      return;
+    }
+
+    this.actionStatusMessage = `Reconnect requested for ${this.selectedHost?.name ?? 'selected host'}.`;
+    this.emitSemanticState();
+    await this.startSession();
+  }
+
+  async syncResizeFromAction(): Promise<void> {
+    const disabledReason = this.resizeDisabledReason;
+    this.lastSessionActionId = 'resize';
+    if (disabledReason) {
+      this.actionStatusMessage = disabledReason;
+      this.resizeStatusMessage = disabledReason;
+      this.emitSemanticState();
+      return;
+    }
+
+    this.resizeXtermToContainer();
+    const result = await this.syncBackendResize(true);
+    if (result?.success) {
+      this.actionStatusMessage = `Resize synced to ${result.cols} x ${result.rows}.`;
+      this.resizeStatusMessage = result.message;
+    } else if (result) {
+      this.actionStatusMessage = result.message;
+      this.resizeStatusMessage = result.message;
+    }
+    this.emitSemanticState();
+  }
+
+  async refreshTerminalAuditFromAction(): Promise<void> {
+    this.lastSessionActionId = 'audit';
+    await this.refreshTerminalAudit();
+  }
+
   async startSession(): Promise<void> {
     const api = getSwitchboardApi();
     const host = this.selectedHost;
@@ -557,8 +1069,12 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     this.pendingStartHostId = host.id;
     this.pendingStartEvents = [];
     this.errorMessage = '';
+    this.lastSessionActionId = this.lastSessionActionId === 'reconnect' ? 'reconnect' : '';
+    this.actionStatusMessage = `Starting terminal session for ${host.name}.`;
+    this.lastSessionHostId = host.id;
     this.xterm?.clear();
     this.appendSystemOutput(`Starting session for ${host.name}...\n`);
+    this.emitSemanticState();
 
     try {
       const result = await api.terminal.start(host.id);
@@ -566,30 +1082,49 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
         this.activeSessionId = null;
         this.pendingStartEvents = [];
         this.sessionStatus = 'Failed';
+        this.lastTerminalEventKind = 'status';
+        this.lastTerminalEventAt = new Date().toISOString();
+        this.lastTerminalEventMessage = result.message;
+        this.actionStatusMessage = result.message;
         this.appendSystemOutput(`${result.message}\n`);
         this.errorMessage = result.message;
         this.emitSemanticState();
+        void this.refreshTerminalAudit();
         return;
       }
 
       this.activeSessionId = result.sessionId;
+      this.lastLifecycleSessionId = result.sessionId;
+      this.lastSessionHostId = host.id;
       this.sessionStatus = 'Starting';
+      this.lastTerminalEventKind = 'status';
+      this.lastTerminalEventSessionId = result.sessionId;
+      this.lastTerminalEventAt = new Date().toISOString();
+      this.lastTerminalEventMessage = result.message;
+      this.actionStatusMessage = result.message;
       this.emitSemanticState();
       this.replayPendingStartEvents(result.sessionId);
       this.appendSystemOutput(`${result.message}\n`);
       this.xterm?.focus();
       await this.syncBackendResize();
+      void this.refreshTerminalAudit();
     } catch {
       this.activeSessionId = null;
       this.pendingStartEvents = [];
       this.sessionStatus = 'Failed';
       this.errorMessage = 'Unable to start terminal session.';
+      this.lastTerminalEventKind = 'status';
+      this.lastTerminalEventAt = new Date().toISOString();
+      this.lastTerminalEventMessage = this.errorMessage;
+      this.actionStatusMessage = this.errorMessage;
       this.appendSystemOutput('Unable to start terminal session.\n');
       this.emitSemanticState();
+      void this.refreshTerminalAudit();
     } finally {
       this.pendingStartHostId = null;
       this.pendingStartEvents = [];
       this.isStarting = false;
+      this.emitSemanticState();
     }
   }
 
@@ -601,22 +1136,35 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     }
 
     this.isStopping = true;
+    this.lastLifecycleSessionId = sessionId;
+    this.lastSessionActionId = this.lastSessionActionId || 'disconnect';
+    this.actionStatusMessage = `Stop requested for terminal session ${sessionId}.`;
     this.appendSystemOutput('Stopping session...\n');
+    this.emitSemanticState();
     try {
       const result = await api.terminal.stop(sessionId);
       if (!result.success) {
         this.errorMessage = result.message;
       }
+      this.actionStatusMessage = result.message;
       this.appendSystemOutput(`${result.message}\n`);
+      void this.refreshTerminalAudit();
     } catch {
       this.errorMessage = 'Unable to stop terminal session.';
+      this.actionStatusMessage = this.errorMessage;
       this.appendSystemOutput('Unable to stop terminal session.\n');
       this.isStopping = false;
+      this.emitSemanticState();
+      void this.refreshTerminalAudit();
     }
   }
 
   trackHost(_index: number, host: HostRecord): string {
     return host.id;
+  }
+
+  trackAudit(_index: number, event: TerminalAuditSummary): string {
+    return event.id;
   }
 
   statusLabel(status: HostRecord['lastConnectionStatus']): string {
@@ -705,48 +1253,78 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
   }
 
   private async runShellCommand(action: TerminalShellCommand): Promise<void> {
+    this.lastSessionActionId = action;
     switch (action) {
       case 'copy':
         await this.copySelectionToClipboard();
-        return;
+        break;
       case 'paste':
         await this.pasteClipboardToSession();
-        return;
+        break;
       case 'clear':
         this.clearTerminalView();
+        break;
+    }
+    this.emitSemanticState();
+  }
+
+  private async runSessionAction(action: TerminalSessionAction): Promise<void> {
+    switch (action) {
+      case 'copy':
+      case 'paste':
+      case 'clear':
+        await this.runShellCommand(action);
+        return;
+      case 'disconnect':
+        await this.disconnectSession();
+        return;
+      case 'reconnect':
+        await this.reconnectSession();
+        return;
+      case 'resize':
+        await this.syncResizeFromAction();
+        return;
+      case 'audit':
+        await this.refreshTerminalAuditFromAction();
         return;
     }
   }
 
-  private isTerminalShellCommand(action: unknown): action is TerminalShellCommand {
-    return action === 'copy' || action === 'paste' || action === 'clear';
+  private isTerminalSessionAction(action: unknown): action is TerminalSessionAction {
+    return TERMINAL_SESSION_ACTIONS.includes(action as TerminalSessionAction);
   }
 
   private async copySelectionToClipboard(): Promise<void> {
     const selection = this.xterm?.getSelection() ?? '';
     if (!selection) {
+      this.actionStatusMessage = 'Copy did not run: no terminal selection.';
       this.appendSystemOutput('No terminal selection to copy.\n');
       return;
     }
     if (!navigator.clipboard?.writeText) {
+      this.actionStatusMessage = 'Copy unavailable: clipboard write API is unavailable.';
       this.appendSystemOutput('Clipboard write is unavailable in this renderer.\n');
       return;
     }
 
     try {
       await navigator.clipboard.writeText(selection);
+      this.actionStatusMessage = 'Copied selected terminal text.';
       this.appendSystemOutput('Copied terminal selection.\n');
     } catch {
+      this.actionStatusMessage = 'Copy failed: clipboard write was rejected.';
       this.appendSystemOutput('Unable to copy terminal selection to clipboard.\n');
     }
   }
 
   private async pasteClipboardToSession(): Promise<void> {
     if (!this.activeSessionId) {
+      this.actionStatusMessage = 'Paste unavailable: start a session first.';
       this.appendSystemOutput('Start a session before pasting clipboard text.\n');
       return;
     }
     if (!navigator.clipboard?.readText) {
+      this.actionStatusMessage = 'Paste unavailable: clipboard read API is unavailable.';
       this.appendSystemOutput('Clipboard read is unavailable in this renderer.\n');
       return;
     }
@@ -754,23 +1332,28 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     try {
       const text = await navigator.clipboard.readText();
       if (!text) {
+        this.actionStatusMessage = 'Paste did not run: clipboard is empty.';
         this.appendSystemOutput('Clipboard is empty.\n');
         return;
       }
       await this.writeTerminalData(text);
+      this.actionStatusMessage = 'Pasted clipboard text into the active terminal session.';
       this.xterm?.focus();
     } catch {
+      this.actionStatusMessage = 'Paste failed: clipboard read or terminal write was rejected.';
       this.appendSystemOutput('Unable to paste clipboard text into terminal session.\n');
     }
   }
 
   private clearTerminalView(): void {
     if (!this.xterm) {
+      this.actionStatusMessage = 'Clear unavailable: terminal renderer is not ready.';
       return;
     }
 
     this.xterm.clear();
     this.xterm.focus();
+    this.actionStatusMessage = 'Cleared terminal view.';
   }
 
   private registerTerminalEvents(): void {
@@ -792,7 +1375,7 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
       return;
     }
 
-    this.recordConsumedTerminalEvent('output', event.sessionId);
+    this.recordConsumedTerminalEvent('output', event.sessionId, event.createdAt, `${event.stream} output event received.`);
     this.writeOutput(event);
   }
 
@@ -802,7 +1385,9 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
       return;
     }
 
-    this.recordConsumedTerminalEvent('status', event.sessionId);
+    this.recordConsumedTerminalEvent('status', event.sessionId, event.createdAt, event.message);
+    this.lastLifecycleSessionId = event.sessionId;
+    this.lastSessionHostId = event.hostId;
     this.sessionStatus = event.status;
     this.appendSystemOutput(`${event.message}\n`);
     this.emitSemanticState();
@@ -814,12 +1399,16 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
       return;
     }
 
-    this.recordConsumedTerminalEvent('exit', event.sessionId);
+    this.recordConsumedTerminalEvent('exit', event.sessionId, event.createdAt, event.message);
     this.sessionStatus = event.status;
     this.appendSystemOutput(`${event.message}\n`);
+    this.lastLifecycleSessionId = event.sessionId;
+    this.lastSessionHostId = event.hostId;
     this.activeSessionId = null;
     this.isStopping = false;
+    this.actionStatusMessage = event.message;
     this.emitSemanticState();
+    void this.refreshTerminalAudit();
   }
 
   private appendSystemOutput(data: string): void {
@@ -865,10 +1454,17 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     }
   }
 
-  private recordConsumedTerminalEvent(kind: PendingTerminalEvent['kind'], sessionId: string): void {
+  private recordConsumedTerminalEvent(
+    kind: PendingTerminalEvent['kind'],
+    sessionId: string,
+    createdAt: string,
+    message: string,
+  ): void {
     this.consumedTerminalEventCount += 1;
     this.lastTerminalEventKind = kind;
     this.lastTerminalEventSessionId = sessionId;
+    this.lastTerminalEventAt = createdAt;
+    this.lastTerminalEventMessage = message;
     this.emitSemanticState();
   }
 
@@ -920,15 +1516,144 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     this.emitSemanticState();
   }
 
-  private async syncBackendResize(): Promise<void> {
+  private async syncBackendResize(fromAction = false): Promise<TerminalResizeResult | null> {
     const api = getSwitchboardApi();
     const sessionId = this.activeSessionId;
     const terminal = this.xterm;
     if (!api || !sessionId || !terminal) {
+      return null;
+    }
+
+    try {
+      const result = await api.terminal.resize(sessionId, terminal.cols, terminal.rows);
+      this.resizeStatusMessage = result.success
+        ? `Backend size ${result.cols} x ${result.rows}.`
+        : result.message;
+      if (!fromAction) {
+        this.emitSemanticState();
+      }
+      void this.refreshTerminalAudit();
+      return result;
+    } catch {
+      this.resizeStatusMessage = 'Unable to sync terminal size with backend session.';
+      if (fromAction) {
+        this.actionStatusMessage = this.resizeStatusMessage;
+      }
+      this.emitSemanticState();
+      return null;
+    }
+  }
+
+  private async refreshTerminalAudit(): Promise<void> {
+    const api = getSwitchboardApi();
+    if (!api?.audit?.list) {
+      this.auditStatusMessage = 'Audit API is unavailable.';
+      this.emitSemanticState();
       return;
     }
 
-    await api.terminal.resize(sessionId, terminal.cols, terminal.rows).catch(() => undefined);
+    try {
+      const events = await api.audit.list();
+      this.terminalAuditEntries = events
+        .filter((event) => this.isTerminalAuditEvent(event))
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+        .slice(0, 6)
+        .map((event) => this.toTerminalAuditSummary(event));
+      this.auditLastRefreshedAt = new Date().toISOString();
+      this.auditStatusMessage = this.terminalAuditEntries.length > 0
+        ? `${this.terminalAuditEntries.length} sanitized terminal audit events loaded.`
+        : 'No terminal audit events matched this session or host.';
+    } catch {
+      this.auditStatusMessage = 'Unable to load terminal audit events.';
+    }
+    this.emitSemanticState();
+  }
+
+  private isTerminalAuditEvent(event: AuditEvent): boolean {
+    const metadata = event.metadata ?? {};
+    const metadataSessionId = this.stringMetadata(metadata['sessionId']);
+    const metadataHostId = this.stringMetadata(metadata['hostId']);
+    const route = this.stringMetadata(metadata['route']);
+    const action = this.stringMetadata(metadata['action']);
+    const terminalSessionIds = new Set(
+      [this.activeSessionId, this.lastLifecycleSessionId]
+        .filter((value): value is string => Boolean(value)),
+    );
+    const terminalHostIds = new Set(
+      [this.selectedHost?.id ?? null, this.lastSessionHostId || null]
+        .filter((value): value is string => Boolean(value)),
+    );
+
+    return event.type.startsWith('terminal.')
+      || event.entityType === 'terminal_session'
+      || (metadataSessionId !== null && terminalSessionIds.has(metadataSessionId))
+      || (metadataHostId !== null && terminalHostIds.has(metadataHostId) && event.type.includes('terminal'))
+      || Boolean(route?.startsWith('terminal:'))
+      || Boolean(action?.startsWith('terminal:'));
+  }
+
+  private toTerminalAuditSummary(event: AuditEvent): TerminalAuditSummary {
+    const metadata = event.metadata ?? {};
+    const metadataSessionId = this.stringMetadata(metadata['sessionId']);
+    const metadataHostId = this.stringMetadata(metadata['hostId']);
+    const cols = this.numberMetadata(metadata['cols']);
+    const rows = this.numberMetadata(metadata['rows']);
+    const terminalInputLogged = metadata['terminalInputLogged'] === true;
+    const terminalOutputLogged = metadata['terminalOutputLogged'] === true;
+    const summary: TerminalAuditSummary = {
+      id: event.id,
+      type: event.type,
+      message: event.message,
+      createdAt: event.createdAt,
+      sessionId: metadataSessionId ?? (event.entityType === 'terminal_session' ? event.entityId : null),
+      hostId: metadataHostId ?? (event.entityType === 'host' ? event.entityId : null),
+      resultStatus: this.stringMetadata(metadata['resultStatus']),
+      success: this.stringMetadata(metadata['success']),
+      size: cols && rows ? `${cols} x ${rows}` : null,
+      auditSafe: !terminalInputLogged && !terminalOutputLogged,
+    };
+
+    return summary;
+  }
+
+  private terminalActionStates(): TerminalActionState[] {
+    return [
+      { id: 'copy', label: 'Copy', disabled: this.copyActionDisabled, disabledReason: this.copyDisabledReason },
+      { id: 'paste', label: 'Paste', disabled: this.pasteActionDisabled, disabledReason: this.pasteDisabledReason },
+      { id: 'clear', label: 'Clear', disabled: this.clearActionDisabled, disabledReason: this.clearDisabledReason },
+      {
+        id: 'disconnect',
+        label: 'Disconnect',
+        disabled: this.disconnectActionDisabled,
+        disabledReason: this.disconnectDisabledReason,
+      },
+      {
+        id: 'reconnect',
+        label: 'Reconnect',
+        disabled: this.reconnectActionDisabled,
+        disabledReason: this.reconnectDisabledReason,
+      },
+      { id: 'resize', label: 'Resize', disabled: this.resizeActionDisabled, disabledReason: this.resizeDisabledReason },
+      { id: 'audit', label: 'Audit', disabled: this.auditActionDisabled, disabledReason: this.auditDisabledReason },
+    ];
+  }
+
+  private stringMetadata(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    return null;
+  }
+
+  private numberMetadata(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
+  private normalizedSessionStatus(): string {
+    return this.sessionStatus.trim().toLowerCase().replace(/\s+/g, '-') || 'disconnected';
   }
 
   private emitSemanticState(): void {
@@ -937,24 +1662,62 @@ export class TerminalComponent implements AfterViewInit, OnChanges, OnDestroy, O
     }
 
     const host = this.selectedHost;
+    const recentAudit = this.terminalAuditEntries[0] ?? null;
     const semanticState: ShellWindowSemanticState = {
       kind: 'terminal',
-      status: this.activeSessionId ? this.sessionStatus : 'idle',
+      status: this.sessionLifecycleState,
       summary: host
-        ? `Terminal ${this.activeSessionId ? 'attached' : 'ready'} for ${host.name}.`
+        ? `Terminal ${this.activeSessionId ? 'attached' : 'ready'} for ${host.name} at ${this.sshTargetLabel}.`
         : 'Terminal idle with no selected host.',
       metadata: {
         windowId: this.shellWindowId,
+        objectKind: 'terminal-session',
+        objectId: this.terminalObjectId,
+        objectOwner: 'terminal',
+        objectSource: 'terminal-session-object',
+        sessionOwned: true,
         hostId: host?.id ?? null,
         hostName: host?.name ?? null,
+        hostAddress: host ? host.address || host.hostname : null,
+        hostUsername: host?.username || null,
+        sshTarget: this.sshTargetLabel,
+        remoteWorkingDirectory: this.remoteWorkingDirectoryLabel,
+        remoteWorkingDirectoryState: this.remoteWorkingDirectoryState,
+        defaultShell: this.defaultShellLabel,
+        reachability: this.reachabilityLabel,
+        connectionState: this.connectionStateLabel,
+        sessionLifecycleState: this.sessionLifecycleState,
         selectedHostId: this.selectedHostId || null,
         hostContextLocked: this.hostContextLocked,
         activeSessionId: this.activeSessionId,
+        lastLifecycleSessionId: this.lastLifecycleSessionId || null,
         terminalSize: this.terminalSizeLabel,
+        terminalCols: this.xterm?.cols ?? null,
+        terminalRows: this.xterm?.rows ?? null,
         consumedTerminalEventCount: this.consumedTerminalEventCount,
         lastEventSessionId: this.lastTerminalEventSessionId || null,
         lastEventKind: this.lastTerminalEventKind || null,
+        lastEventAt: this.lastTerminalEventAt || null,
+        lastEventMessage: this.lastTerminalEventMessage || null,
+        recentTerminalAuditId: recentAudit?.id ?? null,
+        recentTerminalAuditType: recentAudit?.type ?? null,
+        recentTerminalAuditSessionId: recentAudit?.sessionId ?? null,
+        recentTerminalAuditHostId: recentAudit?.hostId ?? null,
+        recentTerminalAuditResultStatus: recentAudit?.resultStatus ?? null,
+        recentTerminalAuditSuccess: recentAudit?.success ?? null,
+        recentTerminalAuditSafe: recentAudit?.auditSafe ?? true,
+        actionIds: TERMINAL_SESSION_ACTIONS,
+        availableActions: this.terminalActionStates(),
+        lastSessionActionId: this.lastSessionActionId || null,
+        actionStatusMessage: this.actionStatusMessage,
+        resizeStatusMessage: this.resizeStatusMessage,
+        auditStatusMessage: this.auditStatusMessage,
+        auditLastRefreshedAt: this.auditLastRefreshedAt || null,
+        auditSafe: true,
         xterm: true,
+        localStorageSessionPersistence: false,
+        terminalInputStored: false,
+        terminalOutputStored: false,
         secretsStored: false,
       },
     };

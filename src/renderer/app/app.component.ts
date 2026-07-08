@@ -816,7 +816,7 @@ interface ContextMenuState {
   items: ContextMenuItem[];
 }
 
-type TerminalContextAction = 'copy' | 'paste' | 'clear';
+type TerminalContextAction = 'copy' | 'paste' | 'clear' | 'disconnect' | 'reconnect' | 'resize' | 'audit';
 type ShellNotificationKind = 'toast' | 'status' | 'error';
 
 interface ShellNotificationContext {
@@ -2417,16 +2417,20 @@ export class AppComponent implements OnInit, OnDestroy {
 
   openTerminalContextMenu(event: MouseEvent, windowItem: ShellWindow): void {
     const host = this.hostFor(windowItem);
+    const items = this.terminalContextItems(windowItem, host);
+    const object = this.terminalContextObject(windowItem, host, items);
     this.showContextMenu(
       event,
       'terminal',
       windowItem.title,
-      this.terminalContextItems(windowItem, host),
+      items,
       windowItem.appId,
       undefined,
       windowItem.windowId,
       undefined,
-      host?.id ?? windowItem.hostId ?? undefined,
+      object.hostId ?? host?.id ?? windowItem.hostId ?? undefined,
+      undefined,
+      object,
     );
   }
 
@@ -2700,6 +2704,18 @@ export class AppComponent implements OnInit, OnDestroy {
         return;
       case 'terminal-clear':
         this.dispatchTerminalContextAction(menu?.windowId, 'clear');
+        return;
+      case 'terminal-disconnect':
+        this.dispatchTerminalContextAction(menu?.windowId, 'disconnect');
+        return;
+      case 'terminal-reconnect':
+        this.dispatchTerminalContextAction(menu?.windowId, 'reconnect');
+        return;
+      case 'terminal-resize':
+        this.dispatchTerminalContextAction(menu?.windowId, 'resize');
+        return;
+      case 'terminal-audit':
+        this.dispatchTerminalContextAction(menu?.windowId, 'audit');
         return;
       case 'terminal-new-window':
         this.openNewWindowForContext(menu?.windowId, menu?.appId);
@@ -4935,6 +4951,7 @@ export class AppComponent implements OnInit, OnDestroy {
     notificationKind?: ShellNotificationKind;
     requiredCapabilities?: string[];
     workspacePath?: string;
+    hostId?: string;
   }): ShellPrimitiveObject {
     return {
       id: input.id,
@@ -4949,6 +4966,7 @@ export class AppComponent implements OnInit, OnDestroy {
       ...(input.notificationKind ? { notificationKind: input.notificationKind } : {}),
       ...(input.requiredCapabilities ? { requiredCapabilities: [...input.requiredCapabilities] } : {}),
       ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
+      ...(input.hostId ? { hostId: input.hostId } : {}),
     };
   }
 
@@ -5348,32 +5366,127 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private terminalContextItems(windowItem: ShellWindow, host: HostRecord | null): ContextMenuItem[] {
-    return [
+    const terminalHost = this.terminalHostForWindow(windowItem, host);
+    const activeSessionId = this.terminalSemanticString(windowItem, 'activeSessionId');
+    const hasActiveSession = Boolean(activeSessionId);
+    const isStarting = this.terminalSemanticString(windowItem, 'sessionLifecycleState') === 'starting';
+    const pasteDisabledReason = hasActiveSession ? undefined : 'Start a terminal session before pasting.';
+    const disconnectDisabledReason = hasActiveSession ? undefined : 'No active terminal session to disconnect.';
+    const reconnectDisabledReason = terminalHost
+      ? (hasActiveSession ? 'Disconnect the active session before reconnecting.' : undefined)
+      : 'Select a host before reconnecting.';
+    const resizeDisabledReason = hasActiveSession ? undefined : 'Start a terminal session before syncing size.';
+
+    return this.shellContextItems('terminal', [
       { id: 'terminal-copy', label: 'Copy', icon: 'C', shortcut: 'Ctrl+Shift+C', detail: 'Copy selected terminal text.' },
-      { id: 'terminal-paste', label: 'Paste', icon: 'P', shortcut: 'Ctrl+Shift+V', detail: 'Paste clipboard text into the active terminal session.' },
+      {
+        id: 'terminal-paste',
+        label: 'Paste',
+        icon: 'P',
+        shortcut: 'Ctrl+Shift+V',
+        detail: 'Paste clipboard text into the active terminal session.',
+        disabled: !hasActiveSession,
+        disabledReason: pasteDisabledReason,
+        requiredCapabilities: ['terminal:write'],
+      },
       { id: 'terminal-clear', label: 'Clear', icon: 'CL', shortcut: 'Ctrl+L', detail: 'Clear this terminal view.' },
+      {
+        id: 'terminal-disconnect',
+        label: 'Disconnect',
+        icon: 'DC',
+        danger: true,
+        separatorBefore: true,
+        disabled: !hasActiveSession,
+        disabledReason: disconnectDisabledReason,
+        detail: hasActiveSession ? `Stop terminal session ${activeSessionId}.` : 'Requires an active terminal session.',
+        requiredCapabilities: ['terminal:stop'],
+      },
+      {
+        id: 'terminal-reconnect',
+        label: 'Reconnect',
+        icon: 'RC',
+        disabled: Boolean(reconnectDisabledReason) || isStarting,
+        disabledReason: isStarting ? 'Session start is already in progress.' : reconnectDisabledReason,
+        detail: terminalHost ? `Start a new terminal session for ${terminalHost.name}.` : 'Requires a selected host.',
+        requiredCapabilities: ['terminal:start'],
+      },
+      {
+        id: 'terminal-resize',
+        label: 'Resize',
+        icon: 'RS',
+        disabled: !hasActiveSession,
+        disabledReason: resizeDisabledReason,
+        detail: 'Sync the visible terminal size to the backend session.',
+        requiredCapabilities: ['terminal:resize'],
+      },
+      {
+        id: 'terminal-audit',
+        label: 'Audit',
+        icon: 'A',
+        detail: 'Refresh sanitized terminal lifecycle audit state.',
+        requiredCapabilities: ['audit:read'],
+      },
       {
         id: 'terminal-new-window',
         label: 'Split/New Terminal',
         icon: 'T',
         separatorBefore: true,
-        detail: host ? `Open another terminal for ${host.name}.` : 'Open another terminal workspace.',
+        detail: terminalHost ? `Open another terminal for ${terminalHost.name}.` : 'Open another terminal workspace.',
+        requiredCapabilities: ['terminal:start'],
       },
       {
         id: 'terminal-open-host-dashboard',
         label: 'Open Host Dashboard',
         icon: 'HD',
-        disabled: !host,
-        detail: host ? host.name : 'Requires a host-scoped terminal.',
+        disabled: !terminalHost,
+        disabledReason: terminalHost ? undefined : 'Requires a selected host.',
+        detail: terminalHost ? terminalHost.name : 'Requires a selected host.',
+        requiredCapabilities: ['host:read'],
       },
       {
         id: 'terminal-properties',
-        label: host ? 'Session Properties' : 'Terminal Properties',
+        label: terminalHost ? 'Session Properties' : 'Terminal Properties',
         icon: 'I',
         separatorBefore: true,
-        detail: host ? `${host.username || 'user'}@${host.address || host.hostname}` : windowItem.windowId,
+        detail: terminalHost ? `${terminalHost.username || 'user'}@${terminalHost.address || terminalHost.hostname}` : windowItem.windowId,
       },
-    ];
+    ]);
+  }
+
+  private terminalContextObject(
+    windowItem: ShellWindow,
+    host: HostRecord | null,
+    items: ContextMenuItem[],
+  ): ShellPrimitiveObject {
+    const terminalHost = this.terminalHostForWindow(windowItem, host);
+    const actionIds = items.map((item) => item.actionId ?? item.id);
+    const requiredCapabilities = Array.from(new Set(items.flatMap((item) => item.requiredCapabilities ?? [])));
+    return this.createShellPrimitiveObject({
+      id: this.terminalSemanticString(windowItem, 'objectId') ?? `terminal-window:${windowItem.windowId}`,
+      kind: 'terminal-session',
+      label: windowItem.title,
+      targetScope: 'terminal',
+      sourceAppId: windowItem.appId,
+      windowId: windowItem.windowId,
+      hostId: terminalHost?.id,
+      actionIds,
+      requiredCapabilities,
+    });
+  }
+
+  private terminalHostForWindow(windowItem: ShellWindow, host: HostRecord | null): HostRecord | null {
+    if (host) {
+      return host;
+    }
+
+    const semanticHostId = this.terminalSemanticString(windowItem, 'selectedHostId')
+      ?? this.terminalSemanticString(windowItem, 'hostId');
+    return semanticHostId ? this.hosts.find((candidate) => candidate.id === semanticHostId) ?? null : null;
+  }
+
+  private terminalSemanticString(windowItem: ShellWindow, key: string): string | null {
+    const value = windowItem.semanticState?.metadata?.[key];
+    return typeof value === 'string' && value.trim() ? value : null;
   }
 
   private notificationContextItems(): ContextMenuItem[] {
