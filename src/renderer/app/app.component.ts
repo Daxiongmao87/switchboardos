@@ -4784,6 +4784,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private restoreProfileLayout(profile: WorkspaceProfile): boolean {
     const definitionFor = (appId: string): ShellAppDefinition | null => this.getAppDefinition(appId as ShellAppId);
+    const profileHadLegacyDefaultClutter = this.workspaceLayoutHasLegacyDefaultDesktopClutter(profile.layout);
     const layout = this.normalizeWorkspaceLayout(profile.layout ?? this.emptyWorkspaceLayout());
     this.desktopShortcuts = layout.desktopShortcutIds
       .map((shortcut) => {
@@ -4802,7 +4803,8 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.desktopShortcuts.length === 0) {
       this.desktopShortcuts = this.defaultDesktopShortcuts();
     }
-    const migratedDesktopShortcuts = this.reconcilePendingLegacyDesktopShortcutPins();
+    const reconciledPendingPins = this.reconcilePendingLegacyDesktopShortcutPins();
+    const migratedDesktopShortcuts = profileHadLegacyDefaultClutter || reconciledPendingPins;
     this.desktopIconPositions = this.restoreShortcutPositionTargets(this.desktopIconPositions);
     this.ensureDefaultIconPositions();
     this.saveDesktopShortcuts();
@@ -4819,6 +4821,16 @@ export class AppComponent implements OnInit, OnDestroy {
     this.nextZIndex = Math.max(10, ...this.windows.map((windowItem) => windowItem.zIndex + 1));
     this.focusTopWindow();
     return migratedDesktopShortcuts;
+  }
+
+  private workspaceLayoutHasLegacyDefaultDesktopClutter(layout: WorkspaceProfile['layout'] | null | undefined): boolean {
+    if (!layout || typeof layout !== 'object') {
+      return false;
+    }
+
+    const desktopShortcutIds = (layout as Partial<WorkspaceLayoutSnapshot>).desktopShortcutIds;
+    return Array.isArray(desktopShortcutIds)
+      && this.isLegacyDefaultShortcutSet(this.desktopShortcutAppIdsFromUnknownList(desktopShortcutIds as unknown[]));
   }
 
   private emptyWorkspaceLayout(): WorkspaceLayoutSnapshot {

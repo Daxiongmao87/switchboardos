@@ -184,16 +184,31 @@ async function runLegacyDefaultDesktopMigrationSmoke(cdp) {
     label: 'Bootstrap Pin',
   };
 
-  await cdp.evaluate(`(() => {
-    localStorage.setItem(${JSON.stringify(desktopShortcutsKey)}, ${JSON.stringify(JSON.stringify([
+  const legacyShortcutSeed = [
     ...legacyDefaultShortcutObjects,
     explicitUserPin,
-  ]))});
+  ];
+
+  await cdp.evaluate(`(async () => {
+    const legacyShortcutSeed = ${JSON.stringify(legacyShortcutSeed)};
+    localStorage.setItem(${JSON.stringify(desktopShortcutsKey)}, JSON.stringify(legacyShortcutSeed));
     localStorage.setItem(${JSON.stringify(desktopIconPositionsKey)}, ${JSON.stringify(JSON.stringify({
     'shortcut-hosts': { x: 24, y: 24 },
     'shortcut-terminal': { x: 24, y: 132 },
     'shortcut-bootstrap-explicit-pin-smoke': { x: 24, y: 240 },
   }))});
+    const workspaceApi = window.sb && window.sb.workspace;
+    const activeProfileId = workspaceApi && workspaceApi.getActiveProfileId
+      ? await workspaceApi.getActiveProfileId()
+      : null;
+    if (activeProfileId && workspaceApi && workspaceApi.updateProfile) {
+      await workspaceApi.updateProfile(activeProfileId, {
+        layout: {
+          desktopShortcutIds: legacyShortcutSeed,
+          windows: [],
+        },
+      });
+    }
     return true;
   })()`);
   await reloadRendererPage(cdp);
