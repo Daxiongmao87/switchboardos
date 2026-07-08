@@ -566,6 +566,22 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:PATCH:/api/hosts/:id/group',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/hosts/:id/favorite',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/hosts/:id/duplicate',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/hosts/import',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:GET:/api/host-groups',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -998,6 +1014,13 @@ const REQUIRED_HOST_GROUP_TAG_PARITY = new Map([
   ['ipc:host-tag:delete', 'hosted:DELETE:/api/host-tags/:id'],
 ]);
 
+const REQUIRED_HOST_SECONDARY_ACTION_PARITY = new Map([
+  ['ipc:host:updateGroup', 'hosted:PATCH:/api/hosts/:id/group'],
+  ['ipc:host:setFavorite', 'hosted:PATCH:/api/hosts/:id/favorite'],
+  ['ipc:host:duplicate', 'hosted:POST:/api/hosts/:id/duplicate'],
+  ['ipc:host:import', 'hosted:POST:/api/hosts/import'],
+]);
+
 const failures = [];
 
 function fail(message) {
@@ -1254,6 +1277,34 @@ function validateHostGroupTagParity(contracts) {
   }
 }
 
+function validateHostSecondaryActionParity(contracts) {
+  const contractsById = new Map(contracts.map((contract) => [contract.id, contract]));
+  for (const [ipcId, hostedId] of REQUIRED_HOST_SECONDARY_ACTION_PARITY.entries()) {
+    const ipcContract = contractsById.get(ipcId);
+    if (!ipcContract) {
+      fail(`Missing IPC host secondary action parity source contract ${ipcId}.`);
+      continue;
+    }
+    const ipcParity = parseParity(ipcContract);
+    if (ipcParity.kind !== 'paired' || ipcParity.peerRouteId !== hostedId) {
+      fail(`IPC host secondary action contract ${ipcId} must be paired with ${hostedId}, not ${ipcParity.kind ?? 'missing parity'}.`);
+    }
+    if (ipcParity.kind === 'exception' || ipcParity.reason) {
+      fail(`IPC host secondary action contract ${ipcId} still carries a hosted parity exception.`);
+    }
+
+    const hostedContract = contractsById.get(hostedId);
+    if (!hostedContract) {
+      fail(`Missing hosted host secondary action parity peer contract ${hostedId}.`);
+      continue;
+    }
+    const hostedParity = parseParity(hostedContract);
+    if (hostedParity.kind !== 'paired' || hostedParity.peerRouteId !== ipcId) {
+      fail(`Hosted host secondary action contract ${hostedId} must be paired with ${ipcId}, not ${hostedParity.kind ?? 'missing parity'}.`);
+    }
+  }
+}
+
 function parsePolicyFullCapabilities() {
   const source = ts.createSourceFile('policy-service.ts', policyText, ts.ScriptTarget.ES2020, true);
   let capabilities = [];
@@ -1351,6 +1402,51 @@ function validateHostedDispatches() {
 
   if (!hostedText.includes('runHostRouteContract({')) {
     fail('Hosted route handlers are not using runHostRouteContract.');
+  }
+
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => REQUIRED_HOST_SECONDARY_ACTION_PARITY.has(entry.id)
+    || [...REQUIRED_HOST_SECONDARY_ACTION_PARITY.values()].includes(entry.id))) {
+    const hostActionHelperIndex = hostedText.indexOf('private runHostedHostActionRoute');
+    if (hostActionHelperIndex === -1) {
+      fail('Hosted host secondary action routes are not using runHostedHostActionRoute.');
+    } else {
+      const helperBody = hostedText.slice(hostActionHelperIndex, hostActionHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted host secondary action helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
+  if (!hostedText.includes("contractId: 'hosted:PATCH:/api/hosts/:id/group'")
+    || !hostedText.includes("contractId: 'hosted:PATCH:/api/hosts/:id/favorite'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/hosts/:id/duplicate'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/hosts/import'")
+    || !hostedText.includes("this.options.store.assignHostToGroup(hostId, groupName)")
+    || !hostedText.includes("this.options.store.setHostFavorite(hostId, favorite)")
+    || !hostedText.includes('this.options.store.duplicateHost(hostId)')
+    || !hostedText.includes('this.options.store.importHosts(input)')) {
+    fail('Hosted host secondary action routes must dispatch updateGroup, setFavorite, duplicate, and import through route contracts.');
+  }
+
+  if (!hostedApiText.includes('updateGroup: (id: string, groupName: string)')
+    || !hostedApiText.includes('/api/hosts/${encodeURIComponent(id)}/group')
+    || !hostedApiText.includes('setFavorite: (id: string, favorite: boolean)')
+    || !hostedApiText.includes('/api/hosts/${encodeURIComponent(id)}/favorite')
+    || !hostedApiText.includes('/api/hosts/${encodeURIComponent(id)}/duplicate')
+    || !hostedApiText.includes('/api/hosts/import')) {
+    fail('Hosted browser API must expose host updateGroup, setFavorite, duplicate, and import methods.');
+  }
+
+  if (!hostedText.includes('hostSecondaryActionRouteSuccessMetadata')
+    || !hostedText.includes('hostImportRouteSuccessMetadata')
+    || !hostedText.includes('hostRecordLogged: false')
+    || !hostedText.includes('hostRecordsLogged: false')
+    || !hostedText.includes('hostCredentialsLogged: false')
+    || !hostedText.includes('hostNameLogged: false')
+    || !hostedText.includes('hostAddressLogged: false')
+    || !hostedText.includes('importedHostIdsLogged: false')
+    || !hostedText.includes('secretsLogged: false')) {
+    fail('Hosted host secondary action routes must keep sanitized success audit metadata.');
   }
 
   if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/host-groups') || entry.id.includes('/api/host-tags'))) {
@@ -2030,6 +2126,7 @@ function validateHostedNoAuthDefaults() {
 const contracts = parseContractsFromSource();
 const contractIds = validateContractMetadata(contracts);
 validateHostGroupTagParity(contracts);
+validateHostSecondaryActionParity(contracts);
 const requiredContractIds = new Set(REQUIRED_HOST_CONTRACTS.map((entry) => entry.id));
 for (const required of requiredContractIds) {
   if (!contractIds.has(required)) {

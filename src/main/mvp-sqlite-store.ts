@@ -434,8 +434,9 @@ export class MvpSqliteStore {
     this.ensureDb();
     const now = new Date().toISOString();
     const address = stringValue(input.address, stringValue(input.hostname, ''));
+    const requestedId = stringValue((input as Partial<HostRecord>).id, '').trim();
     const host: HostRecord = {
-      id: randomUUID(),
+      id: requestedId || randomUUID(),
       name: stringValue(input.name, address || 'Untitled host'),
       address,
       hostname: stringValue(input.hostname, address),

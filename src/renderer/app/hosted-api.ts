@@ -119,6 +119,10 @@ interface HostedSwitchboardApi {
     update: (id: string, data: UpdateHostInput) => Promise<HostRecord | null>;
     remove: (id: string) => Promise<boolean>;
     testConnection: (id: string) => Promise<ConnectionTestResult>;
+    updateGroup: (id: string, groupName: string) => Promise<HostRecord | null>;
+    setFavorite: (id: string, favorite: boolean) => Promise<HostRecord | null>;
+    duplicate: (id: string) => Promise<HostRecord | null>;
+    import: (hosts: HostRecord[]) => Promise<string[]>;
   };
   settings: {
     get: () => Promise<MvpSettings>;
@@ -279,6 +283,13 @@ function createHostedApi(): HostedSwitchboardApi {
         request(`/api/hosts/${encodeURIComponent(id)}`, { method: 'PATCH', body: data }),
       remove: (id: string) => request(`/api/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
       testConnection: (id: string) => request(`/api/hosts/${encodeURIComponent(id)}/test`, { method: 'POST' }),
+      updateGroup: (id: string, groupName: string) =>
+        request(`/api/hosts/${encodeURIComponent(id)}/group`, { method: 'PATCH', body: { groupName } }),
+      setFavorite: (id: string, favorite: boolean) =>
+        request(`/api/hosts/${encodeURIComponent(id)}/favorite`, { method: 'PATCH', body: { favorite } }),
+      duplicate: (id: string) =>
+        request(`/api/hosts/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
+      import: (hosts: HostRecord[]) => request('/api/hosts/import', { method: 'POST', body: hosts }),
     },
     settings: {
       get: () => request('/api/settings'),

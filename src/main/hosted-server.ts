@@ -37,10 +37,13 @@ import {
   validateCommandHistoryCreateInput,
   validateCommandHistoryEntryIdInput,
   validateHostCreateInput,
+  validateHostFavoriteInput,
+  validateHostGroupNameInput,
   validateHostGroupCreateInput,
   validateHostGroupIdInput,
   validateHostGroupUpdateInput,
   validateHostIdInput,
+  validateHostImportInput,
   validateHostUpdateInput,
   validateHostTagCreateInput,
   validateHostTagIdInput,
@@ -694,6 +697,60 @@ export class HostedServer {
           execute: () => this.options.store.testConnection(hostId),
         });
       }
+      if (actionOrId === 'import' && subAction === undefined && method === 'POST') {
+        const input = validateHostImportInput(body);
+        return this.runHostedHostActionRoute({
+          contractId: 'hosted:POST:/api/hosts/import',
+          session,
+          route: '/api/hosts/import',
+          action: 'POST /api/hosts/import',
+          input,
+          execute: () => this.options.store.importHosts(input),
+          successAuditMetadata: hostImportRouteSuccessMetadata,
+        });
+      }
+      if (actionOrId && subAction === 'group' && method === 'PATCH') {
+        const hostId = validateHostIdInput(decodeURIComponent(actionOrId));
+        const groupName = validateHostGroupNameInput(asRecord(body).groupName);
+        return this.runHostedHostActionRoute({
+          contractId: 'hosted:PATCH:/api/hosts/:id/group',
+          session,
+          route: `/api/hosts/${hostId}/group`,
+          action: 'PATCH /api/hosts/:id/group',
+          hostId,
+          input: groupName,
+          execute: () => this.options.store.assignHostToGroup(hostId, groupName),
+          successAuditMetadata: hostSecondaryActionRouteSuccessMetadata,
+        });
+      }
+      if (actionOrId && subAction === 'favorite' && method === 'PATCH') {
+        const hostId = validateHostIdInput(decodeURIComponent(actionOrId));
+        const favorite = validateHostFavoriteInput(asRecord(body).favorite);
+        return this.runHostedHostActionRoute({
+          contractId: 'hosted:PATCH:/api/hosts/:id/favorite',
+          session,
+          route: `/api/hosts/${hostId}/favorite`,
+          action: 'PATCH /api/hosts/:id/favorite',
+          hostId,
+          input: favorite,
+          execute: () => this.options.store.setHostFavorite(hostId, favorite),
+          successAuditMetadata: hostSecondaryActionRouteSuccessMetadata,
+        });
+      }
+      if (actionOrId && subAction === 'duplicate' && method === 'POST') {
+        validateHostedNoRequestBody(body);
+        const hostId = validateHostIdInput(decodeURIComponent(actionOrId));
+        return this.runHostedHostActionRoute({
+          contractId: 'hosted:POST:/api/hosts/:id/duplicate',
+          session,
+          route: `/api/hosts/${hostId}/duplicate`,
+          action: 'POST /api/hosts/:id/duplicate',
+          hostId,
+          input: hostId,
+          execute: () => this.options.store.duplicateHost(hostId),
+          successAuditMetadata: hostSecondaryActionRouteSuccessMetadata,
+        });
+      }
     }
 
     if (resource === 'host-groups') {
@@ -980,6 +1037,36 @@ export class HostedServer {
       throw new HttpError(500, `Missing route access contract: ${contractId}`);
     }
     return contract;
+  }
+
+  private runHostedHostActionRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      hostId?: string | null;
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        hostId: params.hostId ?? null,
+        entityType: 'host',
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
   }
 
   private runHostedHostOrganizationRoute<TResult>(
@@ -3313,6 +3400,44 @@ function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | nul
     appId: result.appId,
     capability: result.capability,
     granted: result.granted,
+  };
+}
+
+function hostSecondaryActionRouteSuccessMetadata(result: HostRecord | null): Record<string, unknown> {
+  if (!result) {
+    return {
+      hostFound: false,
+      hostNameLogged: false,
+      hostAddressLogged: false,
+      hostRecordLogged: false,
+      hostCredentialsLogged: false,
+      keyPathLogged: false,
+      secretsLogged: false,
+    };
+  }
+
+  return {
+    hostFound: true,
+    tagCount: result.tags.length,
+    capabilityCount: result.capabilities.length,
+    hasCredentialRef: Boolean(result.credentialRefId),
+    hostNameLogged: false,
+    hostAddressLogged: false,
+    hostRecordLogged: false,
+    hostCredentialsLogged: false,
+    keyPathLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function hostImportRouteSuccessMetadata(result: string[]): Record<string, unknown> {
+  return {
+    importedHostCount: result.length,
+    importedHostIdsLogged: false,
+    hostRecordsLogged: false,
+    hostCredentialsLogged: false,
+    keyPathsLogged: false,
+    secretsLogged: false,
   };
 }
 
