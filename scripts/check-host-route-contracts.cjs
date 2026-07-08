@@ -566,6 +566,46 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/hosted-server.ts',
   },
   {
+    id: 'hosted:GET:/api/host-groups',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/host-groups',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/host-groups/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/host-groups/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/host-groups/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/host-tags',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/host-tags',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/host-tags/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/host-tags/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/host-tags/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'hosted:POST:/api/host-operations/run',
     contextFile: 'src/main/hosted-server.ts',
   },
@@ -945,6 +985,19 @@ const REQUIRED_HOST_CAPABILITIES = [
   'audit:write',
 ];
 
+const REQUIRED_HOST_GROUP_TAG_PARITY = new Map([
+  ['ipc:host-group:list', 'hosted:GET:/api/host-groups'],
+  ['ipc:host-group:get', 'hosted:GET:/api/host-groups/:id'],
+  ['ipc:host-group:create', 'hosted:POST:/api/host-groups'],
+  ['ipc:host-group:update', 'hosted:PATCH:/api/host-groups/:id'],
+  ['ipc:host-group:delete', 'hosted:DELETE:/api/host-groups/:id'],
+  ['ipc:host-tag:list', 'hosted:GET:/api/host-tags'],
+  ['ipc:host-tag:get', 'hosted:GET:/api/host-tags/:id'],
+  ['ipc:host-tag:create', 'hosted:POST:/api/host-tags'],
+  ['ipc:host-tag:update', 'hosted:PATCH:/api/host-tags/:id'],
+  ['ipc:host-tag:delete', 'hosted:DELETE:/api/host-tags/:id'],
+]);
+
 const failures = [];
 
 function fail(message) {
@@ -990,6 +1043,9 @@ function asArrayExpression(node) {
 }
 
 function parseString(node) {
+  if (!node) {
+    return null;
+  }
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
     return node.text;
   }
@@ -1158,6 +1214,46 @@ function validateContractMetadata(contracts) {
   return seen;
 }
 
+function parseParity(contract) {
+  if (!(contract.parity && ts.isObjectLiteralExpression(contract.parity))) {
+    return {};
+  }
+  const parityProps = findPropertyMap(contract.parity);
+  return {
+    kind: parseString(parityProps.get('kind')),
+    peerRouteId: parseString(parityProps.get('peerRouteId')),
+    reason: parseString(parityProps.get('reason')),
+  };
+}
+
+function validateHostGroupTagParity(contracts) {
+  const contractsById = new Map(contracts.map((contract) => [contract.id, contract]));
+  for (const [ipcId, hostedId] of REQUIRED_HOST_GROUP_TAG_PARITY.entries()) {
+    const ipcContract = contractsById.get(ipcId);
+    if (!ipcContract) {
+      fail(`Missing IPC host group/tag parity source contract ${ipcId}.`);
+      continue;
+    }
+    const ipcParity = parseParity(ipcContract);
+    if (ipcParity.kind !== 'paired' || ipcParity.peerRouteId !== hostedId) {
+      fail(`IPC host group/tag contract ${ipcId} must be paired with ${hostedId}, not ${ipcParity.kind ?? 'missing parity'}.`);
+    }
+    if (ipcParity.kind === 'exception' || ipcParity.reason) {
+      fail(`IPC host group/tag contract ${ipcId} still carries a hosted parity exception.`);
+    }
+
+    const hostedContract = contractsById.get(hostedId);
+    if (!hostedContract) {
+      fail(`Missing hosted host group/tag parity peer contract ${hostedId}.`);
+      continue;
+    }
+    const hostedParity = parseParity(hostedContract);
+    if (hostedParity.kind !== 'paired' || hostedParity.peerRouteId !== ipcId) {
+      fail(`Hosted host group/tag contract ${hostedId} must be paired with ${ipcId}, not ${hostedParity.kind ?? 'missing parity'}.`);
+    }
+  }
+}
+
 function parsePolicyFullCapabilities() {
   const source = ts.createSourceFile('policy-service.ts', policyText, ts.ScriptTarget.ES2020, true);
   let capabilities = [];
@@ -1255,6 +1351,56 @@ function validateHostedDispatches() {
 
   if (!hostedText.includes('runHostRouteContract({')) {
     fail('Hosted route handlers are not using runHostRouteContract.');
+  }
+
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/host-groups') || entry.id.includes('/api/host-tags'))) {
+    const hostOrganizationHelperIndex = hostedText.indexOf('private runHostedHostOrganizationRoute');
+    if (hostOrganizationHelperIndex === -1) {
+      fail('Hosted host group/tag routes are not using runHostedHostOrganizationRoute.');
+    } else {
+      const helperBody = hostedText.slice(hostOrganizationHelperIndex, hostOrganizationHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted host group/tag helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
+  if (!hostedText.includes("if (resource === 'host-groups')")
+    || !hostedText.includes("if (resource === 'host-tags')")
+    || !hostedText.includes("contractId: 'hosted:GET:/api/host-groups'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/host-groups'")
+    || !hostedText.includes("contractId: 'hosted:GET:/api/host-groups/:id'")
+    || !hostedText.includes("contractId: 'hosted:PATCH:/api/host-groups/:id'")
+    || !hostedText.includes("contractId: 'hosted:DELETE:/api/host-groups/:id'")
+    || !hostedText.includes("contractId: 'hosted:GET:/api/host-tags'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/host-tags'")
+    || !hostedText.includes("contractId: 'hosted:GET:/api/host-tags/:id'")
+    || !hostedText.includes("contractId: 'hosted:PATCH:/api/host-tags/:id'")
+    || !hostedText.includes("contractId: 'hosted:DELETE:/api/host-tags/:id'")) {
+    fail('Hosted host group/tag CRUD routes must expose all ten route-contract dispatches.');
+  }
+
+  if (!hostedText.includes('hostGroupRouteSuccessMetadata')
+    || !hostedText.includes('hostTagRouteSuccessMetadata')
+    || !hostedText.includes('hostRecordsLogged: false')
+    || !hostedText.includes('hostCredentialsLogged: false')
+    || !hostedText.includes('hostGroupNameLogged: false')
+    || !hostedText.includes('hostTagNameLogged: false')
+    || !hostedText.includes('secretsLogged: false')) {
+    fail('Hosted host group/tag routes must keep sanitized success audit metadata.');
+  }
+
+  if (hostedText.includes('return this.options.store.listHostGroups();')
+    || hostedText.includes('return this.options.store.getHostGroup(')
+    || hostedText.includes('return this.options.store.createHostGroup(')
+    || hostedText.includes('return this.options.store.updateHostGroup(')
+    || hostedText.includes('return this.options.store.deleteHostGroup(')
+    || hostedText.includes('return this.options.store.listHostTags();')
+    || hostedText.includes('return this.options.store.getHostTag(')
+    || hostedText.includes('return this.options.store.createHostTag(')
+    || hostedText.includes('return this.options.store.updateHostTag(')
+    || hostedText.includes('return this.options.store.deleteHostTag(')) {
+    fail('Direct hosted host group/tag store fallback detected in hosted-server.ts.');
   }
 
   if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/workspace-files') || entry.id.includes('/api/workspace-artifacts'))) {
@@ -1883,6 +2029,7 @@ function validateHostedNoAuthDefaults() {
 
 const contracts = parseContractsFromSource();
 const contractIds = validateContractMetadata(contracts);
+validateHostGroupTagParity(contracts);
 const requiredContractIds = new Set(REQUIRED_HOST_CONTRACTS.map((entry) => entry.id));
 for (const required of requiredContractIds) {
   if (!contractIds.has(required)) {

@@ -37,8 +37,14 @@ import {
   validateCommandHistoryCreateInput,
   validateCommandHistoryEntryIdInput,
   validateHostCreateInput,
+  validateHostGroupCreateInput,
+  validateHostGroupIdInput,
+  validateHostGroupUpdateInput,
   validateHostIdInput,
   validateHostUpdateInput,
+  validateHostTagCreateInput,
+  validateHostTagIdInput,
+  validateHostTagUpdateInput,
   validateHostOperationInput,
   validateOperatorActionExecuteInput,
   validateOperatorProposeInput,
@@ -89,7 +95,9 @@ import type {
   GeneratedAppHostSummary,
   GeneratedAppHostTargetInput,
   GeneratedAppHostTestConnectionResult,
+  HostGroup,
   HostRecord,
+  HostTag,
   BootstrapPresetRecord,
   BootstrapGenerateInput,
   BootstrapGenerateResult,
@@ -688,6 +696,14 @@ export class HostedServer {
       }
     }
 
+    if (resource === 'host-groups') {
+      return this.routeHostGroupApi(method, actionOrId, subAction, body, session);
+    }
+
+    if (resource === 'host-tags') {
+      return this.routeHostTagApi(method, actionOrId, subAction, body, session);
+    }
+
     if (resource === 'settings') {
       if (method === 'GET') {
         validateHostedNoRequestBody(body);
@@ -964,6 +980,213 @@ export class HostedServer {
       throw new HttpError(500, `Missing route access contract: ${contractId}`);
     }
     return contract;
+  }
+
+  private runHostedHostOrganizationRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      entityType: 'host_group' | 'host_tag';
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: params.entityType,
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private routeHostGroupApi(
+    method: string,
+    groupIdSegment: string | undefined,
+    subAction: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
+    if (subAction) {
+      throw new HttpError(404, `No hosted host group route for ${method}.`);
+    }
+
+    if (!groupIdSegment && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:GET:/api/host-groups',
+        session,
+        route: '/api/host-groups',
+        action: 'GET /api/host-groups',
+        entityType: 'host_group',
+        input: null,
+        execute: () => this.options.store.listHostGroups(),
+      });
+    }
+
+    if (!groupIdSegment && method === 'POST') {
+      const input = validateHostGroupCreateInput(body);
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:POST:/api/host-groups',
+        session,
+        route: '/api/host-groups',
+        action: 'POST /api/host-groups',
+        entityType: 'host_group',
+        input,
+        execute: () => this.options.store.createHostGroup(input),
+        successAuditMetadata: hostGroupRouteSuccessMetadata,
+      });
+    }
+
+    if (groupIdSegment && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      const groupId = validateHostGroupIdInput(decodeURIComponent(groupIdSegment));
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:GET:/api/host-groups/:id',
+        session,
+        route: `/api/host-groups/${groupId}`,
+        action: 'GET /api/host-groups/:id',
+        entityId: groupId,
+        entityType: 'host_group',
+        input: groupId,
+        execute: () => this.options.store.getHostGroup(groupId),
+      });
+    }
+
+    if (groupIdSegment && method === 'PATCH') {
+      const groupId = validateHostGroupIdInput(decodeURIComponent(groupIdSegment));
+      const input = validateHostGroupUpdateInput(body);
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:PATCH:/api/host-groups/:id',
+        session,
+        route: `/api/host-groups/${groupId}`,
+        action: 'PATCH /api/host-groups/:id',
+        entityId: groupId,
+        entityType: 'host_group',
+        input,
+        execute: () => this.options.store.updateHostGroup(groupId, input),
+        successAuditMetadata: hostGroupRouteSuccessMetadata,
+      });
+    }
+
+    if (groupIdSegment && method === 'DELETE') {
+      validateHostedNoRequestBody(body);
+      const groupId = validateHostGroupIdInput(decodeURIComponent(groupIdSegment));
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:DELETE:/api/host-groups/:id',
+        session,
+        route: `/api/host-groups/${groupId}`,
+        action: 'DELETE /api/host-groups/:id',
+        entityId: groupId,
+        entityType: 'host_group',
+        input: groupId,
+        execute: () => this.options.store.deleteHostGroup(groupId),
+        successAuditMetadata: hostGroupRouteSuccessMetadata,
+      });
+    }
+
+    throw new HttpError(404, `No hosted host group route for ${method}.`);
+  }
+
+  private routeHostTagApi(
+    method: string,
+    tagIdSegment: string | undefined,
+    subAction: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
+    if (subAction) {
+      throw new HttpError(404, `No hosted host tag route for ${method}.`);
+    }
+
+    if (!tagIdSegment && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:GET:/api/host-tags',
+        session,
+        route: '/api/host-tags',
+        action: 'GET /api/host-tags',
+        entityType: 'host_tag',
+        input: null,
+        execute: () => this.options.store.listHostTags(),
+      });
+    }
+
+    if (!tagIdSegment && method === 'POST') {
+      const input = validateHostTagCreateInput(body);
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:POST:/api/host-tags',
+        session,
+        route: '/api/host-tags',
+        action: 'POST /api/host-tags',
+        entityType: 'host_tag',
+        input,
+        execute: () => this.options.store.createHostTag(input),
+        successAuditMetadata: hostTagRouteSuccessMetadata,
+      });
+    }
+
+    if (tagIdSegment && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      const tagId = validateHostTagIdInput(decodeURIComponent(tagIdSegment));
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:GET:/api/host-tags/:id',
+        session,
+        route: `/api/host-tags/${tagId}`,
+        action: 'GET /api/host-tags/:id',
+        entityId: tagId,
+        entityType: 'host_tag',
+        input: tagId,
+        execute: () => this.options.store.getHostTag(tagId),
+      });
+    }
+
+    if (tagIdSegment && method === 'PATCH') {
+      const tagId = validateHostTagIdInput(decodeURIComponent(tagIdSegment));
+      const input = validateHostTagUpdateInput(body);
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:PATCH:/api/host-tags/:id',
+        session,
+        route: `/api/host-tags/${tagId}`,
+        action: 'PATCH /api/host-tags/:id',
+        entityId: tagId,
+        entityType: 'host_tag',
+        input,
+        execute: () => this.options.store.updateHostTag(tagId, input),
+        successAuditMetadata: hostTagRouteSuccessMetadata,
+      });
+    }
+
+    if (tagIdSegment && method === 'DELETE') {
+      validateHostedNoRequestBody(body);
+      const tagId = validateHostTagIdInput(decodeURIComponent(tagIdSegment));
+      return this.runHostedHostOrganizationRoute({
+        contractId: 'hosted:DELETE:/api/host-tags/:id',
+        session,
+        route: `/api/host-tags/${tagId}`,
+        action: 'DELETE /api/host-tags/:id',
+        entityId: tagId,
+        entityType: 'host_tag',
+        input: tagId,
+        execute: () => this.options.store.deleteHostTag(tagId),
+        successAuditMetadata: hostTagRouteSuccessMetadata,
+      });
+    }
+
+    throw new HttpError(404, `No hosted host tag route for ${method}.`);
   }
 
   private runHostedAuditRoute<TResult>(
@@ -3090,6 +3313,54 @@ function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | nul
     appId: result.appId,
     capability: result.capability,
     granted: result.granted,
+  };
+}
+
+function hostGroupRouteSuccessMetadata(result: HostGroup | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      groupFound: Boolean(result),
+      hostGroupNameLogged: false,
+      hostGroupColorLogged: false,
+      hostRecordsLogged: false,
+      hostCredentialsLogged: false,
+      secretsLogged: false,
+    };
+  }
+
+  return {
+    groupId: result.id,
+    groupNameLength: result.name.length,
+    groupColorLength: result.color.length,
+    hostGroupNameLogged: false,
+    hostGroupColorLogged: false,
+    hostRecordsLogged: false,
+    hostCredentialsLogged: false,
+    secretsLogged: false,
+  };
+}
+
+function hostTagRouteSuccessMetadata(result: HostTag | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      tagFound: Boolean(result),
+      hostTagNameLogged: false,
+      hostTagColorLogged: false,
+      hostRecordsLogged: false,
+      hostCredentialsLogged: false,
+      secretsLogged: false,
+    };
+  }
+
+  return {
+    tagId: result.id,
+    tagNameLength: result.name.length,
+    tagColorLength: result.color.length,
+    hostTagNameLogged: false,
+    hostTagColorLogged: false,
+    hostRecordsLogged: false,
+    hostCredentialsLogged: false,
+    secretsLogged: false,
   };
 }
 
