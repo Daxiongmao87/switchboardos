@@ -247,6 +247,14 @@ async function main() {
       const byTestId = (testId) => document.querySelector('[data-testid="' + String(testId).replace(/"/g, '\\\\"') + '"]');
       const text = (testId) => byTestId(testId)?.textContent?.trim() || '';
       const textIncludes = (testId, expected) => text(testId).includes(expected);
+      const openOperatorWindow = () => {
+        const existing = document.querySelector('.desktop-window[data-app-id="agents"]');
+        if (existing) {
+          return existing;
+        }
+        window.postMessage({ type: 'sb:navigate', route: '/agents' }, '*');
+        return null;
+      };
       const localStorageOperatorKeys = () => Object.keys(localStorage).filter((key) =>
         /operator.*(proposal|action|source)|(?:proposal|action|source).*operator|agentOperator.*source/i.test(key),
       );
@@ -276,9 +284,8 @@ async function main() {
             policy: 'manual-approval',
           },
         });
-        window.sb.window.navigate('/agents');
         const operatorWindow = await waitFor(
-          () => document.querySelector('.desktop-window[data-app-id="agents"]'),
+          openOperatorWindow,
           'Operator shell window',
         );
         const refreshButton = await waitFor(
@@ -287,12 +294,19 @@ async function main() {
         );
         const generateButton = await waitFor(() => byTestId('operator-generate-proposals'), 'generate proposals button');
         click(generateButton);
-        const firstProposal = await waitFor(
-          () => operatorWindow.querySelector('[data-proposal-id]'),
-          'generated Operator proposal card',
+        await waitFor(
+          () => operatorWindow.querySelectorAll('[data-proposal-id]').length >= 2,
+          'at least two generated Operator proposal cards',
         );
-        const proposalId = firstProposal.getAttribute('data-proposal-id') || '';
+        const proposalCards = [...operatorWindow.querySelectorAll('[data-proposal-id]')];
+        const rejectedProposalId = proposalCards[0].getAttribute('data-proposal-id') || '';
+        const proposalId = proposalCards[1].getAttribute('data-proposal-id') || '';
         const approveTestId = 'operator-proposal-approve-' + proposalId;
+        const rejectedApproveTestId = 'operator-proposal-approve-' + rejectedProposalId;
+        const executeActionCalls = [];
+        window.addEventListener('sb:operator-execute-action-call', (event) => {
+          executeActionCalls.push(event.detail);
+        });
         await window.sb.settings.update({
           operator: {
             ...originalSettings.operator,
@@ -307,6 +321,41 @@ async function main() {
           'policy disabled reason',
         );
         const disabledApproveState = byTestId(approveTestId)?.disabled === true;
+        click(byTestId('operator-proposal-inspect-' + rejectedProposalId));
+        const rejectedInspectDetails = await waitFor(
+          () => byTestId('operator-proposal-inspect-details-' + rejectedProposalId),
+          'proposal inspect details',
+        );
+        const inspectBeforeReject = {
+          target: text('operator-proposal-inspect-target-' + rejectedProposalId),
+          riskSource: text('operator-proposal-inspect-risk-source-' + rejectedProposalId),
+          actionKind: text('operator-proposal-inspect-action-kind-' + rejectedProposalId),
+          capability: text('operator-proposal-inspect-capability-' + rejectedProposalId),
+          route: text('operator-proposal-inspect-route-' + rejectedProposalId),
+          rationale: text('operator-proposal-inspect-rationale-' + rejectedProposalId),
+          expectedEffect: text('operator-proposal-inspect-expected-effect-' + rejectedProposalId),
+          approvalRequirement: text('operator-proposal-inspect-approval-requirement-' + rejectedProposalId),
+          disabledReasons: text('operator-proposal-inspect-disabled-reasons-' + rejectedProposalId),
+          commandPreview: text('operator-proposal-inspect-command-preview-' + rejectedProposalId),
+          approvalTrace: text('operator-proposal-inspect-approval-trace-' + rejectedProposalId),
+          auditTrace: text('operator-proposal-inspect-audit-trace-' + rejectedProposalId),
+          sanitizerProof: text('operator-proposal-inspect-sanitizer-proof-' + rejectedProposalId),
+          rawJsonVisible: rejectedInspectDetails.textContent.includes('{"') || rejectedInspectDetails.textContent.includes('"metadata"'),
+        };
+        click(byTestId('operator-proposal-reject-' + rejectedProposalId));
+        await waitFor(
+          () => text('operator-proposal-review-status-' + rejectedProposalId).includes('rejected'),
+          'proposal rejected status',
+        );
+        const rejectState = {
+          status: text('operator-proposal-review-status-' + rejectedProposalId),
+          approvalStatus: text('operator-proposal-approval-status-' + rejectedProposalId),
+          auditStatus: text('operator-proposal-audit-status-' + rejectedProposalId),
+          disabledReasons: text('operator-proposal-disabled-reasons-' + rejectedProposalId),
+          approveDisabled: byTestId(rejectedApproveTestId)?.disabled === true,
+          executeCallsAfterReject: executeActionCalls.length,
+        };
+
         const metadataBeforeApproval = {
           target: text('operator-proposal-target-' + proposalId),
           actionKind: text('operator-proposal-action-kind-' + proposalId),
@@ -316,6 +365,40 @@ async function main() {
           expectedEffect: text('operator-proposal-expected-effect-' + proposalId),
           approvalStatus: text('operator-proposal-approval-status-' + proposalId),
           backendStatus: text('operator-proposal-backend-status-' + proposalId),
+        };
+
+        click(byTestId('operator-proposal-inspect-' + proposalId));
+        await waitFor(() => byTestId('operator-proposal-inspect-details-' + proposalId), 'editable proposal inspect details');
+        click(byTestId('operator-proposal-edit-' + proposalId));
+        const firstEditInput = await waitFor(() => byTestId('operator-proposal-edit-command-' + proposalId), 'first edit command input');
+        firstEditInput.value = 'echo canceled-operator-edit';
+        firstEditInput.dispatchEvent(new Event('input', { bubbles: true }));
+        click(byTestId('operator-proposal-cancel-edit-' + proposalId));
+        await waitFor(
+          () => !byTestId('operator-proposal-edit-form-' + proposalId),
+          'edit form hidden after cancel',
+        );
+        const canceledEditPreview = text('operator-proposal-command-preview-' + proposalId);
+        click(byTestId('operator-proposal-edit-' + proposalId));
+        const editInput = await waitFor(() => byTestId('operator-proposal-edit-command-' + proposalId), 'edit command input');
+        editInput.value = 'printf switchboardos-operator-edited';
+        editInput.dispatchEvent(new Event('input', { bubbles: true }));
+        click(byTestId('operator-proposal-save-edit-' + proposalId));
+        await waitFor(
+          () => text('operator-proposal-edited-state-' + proposalId).includes('Edited before approval'),
+          'edited state visible',
+        );
+        const editState = {
+          canceledPreview: canceledEditPreview,
+          editedPreview: text('operator-proposal-command-preview-' + proposalId),
+          originalCommand: text('operator-proposal-original-command-' + proposalId),
+          status: text('operator-proposal-review-status-' + proposalId),
+          expectedEffect: text('operator-proposal-expected-effect-' + proposalId),
+          inspectExpectedEffect: text('operator-proposal-inspect-expected-effect-' + proposalId),
+          inspectCommandPreview: text('operator-proposal-inspect-command-preview-' + proposalId),
+          approvalRequirement: text('operator-proposal-inspect-approval-requirement-' + proposalId),
+          backendStatusAfterEdit: text('operator-proposal-backend-status-' + proposalId),
+          executeCallsAfterEdit: executeActionCalls.length,
         };
 
         await window.sb.settings.update({
@@ -352,6 +435,11 @@ async function main() {
           auditSanitization: text('operator-proposal-audit-sanitization-' + proposalId),
         };
         const audit = await window.sb.audit.list();
+        const rejectedExecutionAudit = audit.find((event) =>
+          (event.type === 'agent.action.execution_succeeded' || event.type === 'agent.action.execution_failed')
+          && event.metadata?.proposalId === rejectedProposalId
+          && event.metadata?.hostId === host.id,
+        );
         const executionAudit = audit.find((event) =>
           (event.type === 'agent.action.execution_succeeded' || event.type === 'agent.action.execution_failed')
           && event.metadata?.proposalId === proposalId
@@ -361,10 +449,14 @@ async function main() {
 
         return {
           hostId: host.id,
+          rejectedProposalId,
           proposalId,
+          inspectBeforeReject,
+          rejectState,
           disabledText,
           disabledApproveState,
           metadataBeforeApproval,
+          editState,
           trace,
           audit: executionAudit ? {
             id: executionAudit.id,
@@ -382,7 +474,11 @@ async function main() {
             secretsLogged: executionAudit.metadata?.secretsLogged,
             structuredActionExecution: executionAudit.metadata?.structuredActionExecution,
           } : null,
-          auditHasApprovedCommandOutput: auditJson.includes('uname -a\\n') || auditJson.includes('systemctl --failed'),
+          rejectedExecutionAuditPresent: Boolean(rejectedExecutionAudit),
+          executeActionCalls,
+          auditHasApprovedCommandOutput: auditJson.includes('uname -a\\n')
+            || auditJson.includes('systemctl --failed')
+            || auditJson.includes('switchboardos-operator-edited'),
           localStorageOperatorKeys: localStorageOperatorKeys(),
         };
       } finally {
@@ -392,14 +488,44 @@ async function main() {
 
     assert.equal(report.disabledText.includes('Operator execution is disabled by local policy.'), true, 'Policy-disabled state shows proposal disabled reason.');
     assert.equal(report.disabledApproveState, true, 'Policy-disabled proposal cannot be approved from the card.');
+    assert.equal(report.inspectBeforeReject.target.includes('Operator Trace Smoke Host'), true, 'Inspect details show target host.');
+    assert.match(report.inspectBeforeReject.riskSource, /low|medium|high/, 'Inspect details show risk and source.');
+    assert.equal(report.inspectBeforeReject.actionKind, 'ssh-command', 'Inspect details show action kind.');
+    assert.equal(report.inspectBeforeReject.capability, 'agent:execute-action', 'Inspect details show required capability.');
+    assert.match(report.inspectBeforeReject.route, /agent:execute-action|\/api\/agent\/execute-action/, 'Inspect details show route.');
+    assert.equal(report.inspectBeforeReject.rationale.length > 0, true, 'Inspect details show rationale.');
+    assert.equal(report.inspectBeforeReject.expectedEffect.includes('backend terminal execution'), true, 'Inspect details show expected effect.');
+    assert.equal(report.inspectBeforeReject.approvalRequirement, 'Explicit approval required', 'Inspect details show approval requirement.');
+    assert.equal(report.inspectBeforeReject.disabledReasons.includes('Operator execution is disabled by local policy.'), true, 'Inspect details show disabled reason.');
+    assert.equal(report.inspectBeforeReject.commandPreview.length > 0, true, 'Inspect details show command preview.');
+    assert.equal(report.inspectBeforeReject.approvalTrace, 'Awaiting approval', 'Inspect details show approval trace.');
+    assert.equal(report.inspectBeforeReject.auditTrace.includes('Not dispatched'), true, 'Inspect details show audit trace without dispatch.');
+    assert.equal(report.inspectBeforeReject.sanitizerProof.includes('No correlated audit event yet'), true, 'Inspect details show sanitizer proof state.');
+    assert.equal(report.inspectBeforeReject.rawJsonVisible, false, 'Inspect details do not render raw audit JSON.');
+    assert.equal(report.rejectState.status.includes('rejected'), true, 'Rejected proposal shows rejected status and reason.');
+    assert.equal(report.rejectState.approvalStatus, 'Rejected', 'Rejected proposal trace shows rejected approval status.');
+    assert.equal(report.rejectState.auditStatus.includes('no backend execution request'), true, 'Rejected proposal audit trace states no execution request.');
+    assert.equal(report.rejectState.disabledReasons.includes('rejected by the user'), true, 'Rejected proposal disables approval with a reason.');
+    assert.equal(report.rejectState.approveDisabled, true, 'Rejected proposal approve button is disabled.');
+    assert.equal(report.rejectState.executeCallsAfterReject, 0, 'Reject does not call typed executeAction.');
     assert.equal(report.metadataBeforeApproval.target.includes('Operator Trace Smoke Host'), true, 'Proposal card shows target host before approval.');
     assert.equal(report.metadataBeforeApproval.actionKind, 'ssh-command', 'Proposal card shows action kind.');
     assert.equal(report.metadataBeforeApproval.capability, 'agent:execute-action', 'Proposal card shows required capability.');
     assert.match(report.metadataBeforeApproval.route, /agent:execute-action|\/api\/agent\/execute-action/, 'Proposal card shows execution route.');
-    assert.equal(report.metadataBeforeApproval.approvalRequirement, 'Blocked by local policy', 'Policy-disabled approval requirement is visible.');
+    assert.equal(report.metadataBeforeApproval.approvalRequirement, 'Explicit approval required', 'Proposal card keeps explicit approval requirement while policy-disabled.');
     assert.equal(report.metadataBeforeApproval.expectedEffect.includes('backend terminal execution'), true, 'Proposal card shows expected effect.');
     assert.equal(report.metadataBeforeApproval.approvalStatus, 'Awaiting approval', 'Proposal starts in awaiting approval status.');
     assert.equal(report.metadataBeforeApproval.backendStatus, 'Not dispatched', 'Proposal starts with no backend dispatch.');
+    assert.notEqual(report.editState.canceledPreview, 'echo canceled-operator-edit', 'Cancel edit restores the active command preview.');
+    assert.equal(report.editState.editedPreview, 'printf switchboardos-operator-edited', 'Saved edit updates command preview.');
+    assert.notEqual(report.editState.originalCommand, report.editState.editedPreview, 'Edit surface keeps original command visible.');
+    assert.equal(report.editState.status.includes('edited command saved'), true, 'Saved edit is visible as pending approval.');
+    assert.equal(report.editState.expectedEffect.includes('approved edited ssh-command'), true, 'Saved edit updates card expected effect.');
+    assert.equal(report.editState.inspectExpectedEffect.includes('approved edited ssh-command'), true, 'Saved edit updates inspect expected effect.');
+    assert.equal(report.editState.inspectCommandPreview, 'printf switchboardos-operator-edited', 'Inspect command preview uses saved edited command.');
+    assert.equal(report.editState.approvalRequirement, 'Explicit approval required', 'Edit retains explicit approval requirement while policy-disabled.');
+    assert.equal(report.editState.backendStatusAfterEdit, 'Not dispatched', 'Saving an edit does not dispatch before approval.');
+    assert.equal(report.editState.executeCallsAfterEdit, 0, 'Saving an edit does not call typed executeAction.');
     assert.match(report.trace.approvalStatus, /Dispatched|Failed/, 'Proposal card surfaces final approval status.');
     assert.match(report.trace.backendStatus, /dispatched|failed|unsupported/, 'Proposal card surfaces backend execution status.');
     assert.equal(report.trace.backendMessage.length > 0, true, 'Proposal card surfaces backend message.');
@@ -418,6 +544,13 @@ async function main() {
     assert.equal(report.audit.providerPayloadLogged, false, 'Execution audit does not log provider payload.');
     assert.equal(report.audit.secretsLogged, false, 'Execution audit does not log secrets.');
     assert.equal(report.audit.structuredActionExecution, true, 'Execution audit marks structured action execution.');
+    assert.equal(report.rejectedExecutionAuditPresent, false, 'Rejected proposal does not create an execution audit.');
+    assert.equal(report.executeActionCalls.length, 1, 'Only edited approval calls typed executeAction.');
+    assert.equal(report.executeActionCalls[0].proposalId, report.proposalId, 'executeAction is called for the edited proposal.');
+    assert.equal(report.executeActionCalls[0].proposalCommand, 'printf switchboardos-operator-edited', 'executeAction receives edited approved proposal command.');
+    assert.equal(report.executeActionCalls[0].actionKind, 'ssh-command', 'executeAction receives typed action kind.');
+    assert.equal(report.executeActionCalls[0].actionCommand, 'printf switchboardos-operator-edited', 'executeAction receives edited command descriptor.');
+    assert.equal(report.executeActionCalls[0].approved, true, 'executeAction keeps explicit user approval.');
     assert.equal(report.auditHasApprovedCommandOutput, false, 'Execution audit does not expose terminal input/output content.');
     assert.deepEqual(report.localStorageOperatorKeys, [], 'Operator proposal/action source is not persisted in localStorage.');
 

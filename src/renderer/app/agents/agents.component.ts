@@ -14,10 +14,20 @@ import { getSwitchboardApi, type AppInfo } from '../switchboard-api';
 type DiagnosticProposal = OperatorProposal;
 type OperatorProposalApprovalStatus =
   | 'Awaiting approval'
+  | 'Rejected'
   | 'Approved by user'
   | 'Dispatching approved action'
   | 'Dispatched'
   | 'Failed';
+
+interface OperatorProposalReviewState {
+  inspected: boolean;
+  editing: boolean;
+  draftCommand: string;
+  savedCommand: string | null;
+  rejected: boolean;
+  rejectionReason: string;
+}
 
 interface OperatorProposalTrace {
   proposalId: string;
@@ -217,7 +227,83 @@ interface OperatorProposalTrace {
                 </span>
               </div>
 
-              <code>{{ proposal.command }}</code>
+              <div class="proposal-review-actions">
+                <button
+                  type="button"
+                  class="secondary-action compact-action"
+                  (click)="toggleInspect(proposal)"
+                  [attr.aria-expanded]="proposalReviewState(proposal).inspected"
+                  [attr.data-testid]="'operator-proposal-inspect-' + proposal.id"
+                >
+                  {{ proposalReviewState(proposal).inspected ? 'Hide inspect' : 'Inspect' }}
+                </button>
+                <button
+                  type="button"
+                  class="secondary-action compact-action"
+                  (click)="beginProposalEdit(proposal)"
+                  [disabled]="!canEditProposal(proposal)"
+                  [attr.data-testid]="'operator-proposal-edit-' + proposal.id"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  class="secondary-action compact-action danger-action"
+                  (click)="rejectProposal(proposal)"
+                  [disabled]="!canRejectProposal(proposal)"
+                  [attr.data-testid]="'operator-proposal-reject-' + proposal.id"
+                >
+                  Reject
+                </button>
+              </div>
+
+              <section class="proposal-command">
+                <div class="command-label">
+                  <span>Command preview</span>
+                  <span *ngIf="proposalWasEdited(proposal)" [attr.data-testid]="'operator-proposal-edited-state-' + proposal.id">
+                    Edited before approval
+                  </span>
+                </div>
+                <code [attr.data-testid]="'operator-proposal-command-preview-' + proposal.id">{{ effectiveProposalCommand(proposal) }}</code>
+                <p *ngIf="proposalWasEdited(proposal)" class="edit-comparison">
+                  <strong>Original:</strong>
+                  <code [attr.data-testid]="'operator-proposal-original-command-' + proposal.id">{{ proposal.command }}</code>
+                </p>
+              </section>
+
+              <section
+                *ngIf="proposalReviewState(proposal).editing"
+                class="proposal-edit"
+                [attr.data-testid]="'operator-proposal-edit-form-' + proposal.id"
+              >
+                <label>
+                  Edited command
+                  <textarea
+                    rows="3"
+                    [ngModel]="proposalReviewState(proposal).draftCommand"
+                    (ngModelChange)="updateProposalDraft(proposal, $event)"
+                    [attr.data-testid]="'operator-proposal-edit-command-' + proposal.id"
+                  ></textarea>
+                </label>
+                <div class="proposal-review-actions">
+                  <button
+                    type="button"
+                    class="primary-action compact-action"
+                    (click)="saveProposalEdit(proposal)"
+                    [attr.data-testid]="'operator-proposal-save-edit-' + proposal.id"
+                  >
+                    Save edit
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-action compact-action"
+                    (click)="cancelProposalEdit(proposal)"
+                    [attr.data-testid]="'operator-proposal-cancel-edit-' + proposal.id"
+                  >
+                    Cancel edit
+                  </button>
+                </div>
+              </section>
 
               <dl class="proposal-metadata" [attr.data-testid]="'operator-proposal-metadata-' + proposal.id">
                 <div>
@@ -236,17 +322,92 @@ interface OperatorProposalTrace {
                   <dt>Route</dt>
                   <dd [attr.data-testid]="'operator-proposal-route-' + proposal.id">{{ operatorExecutionRouteId() }}</dd>
                 </div>
-                <div>
-                  <dt>Approval</dt>
-                  <dd [attr.data-testid]="'operator-proposal-approval-requirement-' + proposal.id">
-                    {{ executionDisabled ? 'Blocked by local policy' : 'Explicit approval required' }}
-                  </dd>
-                </div>
+                  <div>
+                    <dt>Approval</dt>
+                    <dd [attr.data-testid]="'operator-proposal-approval-requirement-' + proposal.id">
+                      Explicit approval required
+                    </dd>
+                  </div>
                 <div>
                   <dt>Expected effect</dt>
                   <dd [attr.data-testid]="'operator-proposal-expected-effect-' + proposal.id">{{ proposalExpectedEffect(proposal) }}</dd>
                 </div>
               </dl>
+
+              <section
+                *ngIf="proposalReviewState(proposal).inspected"
+                class="proposal-inspect"
+                [attr.data-testid]="'operator-proposal-inspect-details-' + proposal.id"
+              >
+                <div class="trace-heading">
+                  <h4>Proposal inspection</h4>
+                  <span [attr.data-testid]="'operator-proposal-inspect-status-' + proposal.id">
+                    {{ proposalReviewStatusLabel(proposal) }}
+                  </span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>Target host</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-target-' + proposal.id">{{ proposalTargetLabel(proposal) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Risk and source</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-risk-source-' + proposal.id">{{ proposal.risk }} / {{ proposal.source }}</dd>
+                  </div>
+                  <div>
+                    <dt>Action kind</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-action-kind-' + proposal.id">{{ proposalActionKind(proposal) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Required capability</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-capability-' + proposal.id">{{ proposalRequiredCapabilities(proposal).join(', ') }}</dd>
+                  </div>
+                  <div>
+                    <dt>Route</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-route-' + proposal.id">{{ operatorExecutionRouteId() }}</dd>
+                  </div>
+                  <div>
+                    <dt>Rationale</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-rationale-' + proposal.id">{{ proposal.rationale }}</dd>
+                  </div>
+                  <div>
+                    <dt>Expected effect</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-expected-effect-' + proposal.id">{{ proposalExpectedEffect(proposal) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Approval requirement</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-approval-requirement-' + proposal.id">
+                      Explicit approval required
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Disabled reasons</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-disabled-reasons-' + proposal.id">
+                      {{ proposalInspectDisabledReasons(proposal) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Command preview</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-command-preview-' + proposal.id">{{ effectiveProposalCommand(proposal) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Approval trace</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-approval-trace-' + proposal.id">
+                      {{ proposalTrace(proposal).approvalStatus }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Audit trace</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-audit-trace-' + proposal.id">{{ proposalTrace(proposal).auditStatus }}</dd>
+                  </div>
+                  <div>
+                    <dt>Sanitizer proof</dt>
+                    <dd [attr.data-testid]="'operator-proposal-inspect-sanitizer-proof-' + proposal.id">
+                      {{ auditSanitizationLabel(proposalTrace(proposal)) }}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
 
               <ul
                 *ngIf="dispatchDisabledReasons(proposal).length > 0"
@@ -324,7 +485,9 @@ interface OperatorProposalTrace {
               </section>
 
               <div class="proposal-footer">
-                <span class="proposal-status">{{ proposal.status }}{{ proposal.message ? ': ' + proposal.message : '' }}</span>
+                <span class="proposal-status" [attr.data-testid]="'operator-proposal-review-status-' + proposal.id">
+                  {{ proposalReviewStatusLabel(proposal) }}
+                </span>
                 <button
                   type="button"
                   class="primary-action"
@@ -332,7 +495,7 @@ interface OperatorProposalTrace {
                   [disabled]="!canDispatch(proposal)"
                   [attr.data-testid]="'operator-proposal-approve-' + proposal.id"
                 >
-                  {{ dispatchingProposalId === proposal.id ? 'Dispatching' : 'Approve and dispatch' }}
+                  {{ dispatchingProposalId === proposal.id ? 'Dispatching' : (proposalWasEdited(proposal) ? 'Approve edited action' : 'Approve and dispatch') }}
                 </button>
               </div>
             </section>
@@ -375,7 +538,9 @@ interface OperatorProposalTrace {
     .panel-heading,
     .proposal-header,
     .proposal-footer,
-    .trace-heading {
+    .trace-heading,
+    .proposal-review-actions,
+    .command-label {
       display: flex;
       gap: 12px;
       align-items: flex-start;
@@ -384,7 +549,9 @@ interface OperatorProposalTrace {
 
     .header-actions,
     .proposal-footer,
-    .trace-heading {
+    .trace-heading,
+    .proposal-review-actions,
+    .command-label {
       align-items: center;
       flex-wrap: wrap;
     }
@@ -423,6 +590,18 @@ interface OperatorProposalTrace {
     .proposal-disabled-reasons {
       color: #94a3b8;
       font-size: 12px;
+    }
+
+    textarea {
+      border: 1px solid #334155;
+      border-radius: 6px;
+      background: #101318;
+      color: #cbd5e1;
+      font: inherit;
+      font-size: 12px;
+      min-height: 76px;
+      padding: 8px;
+      resize: vertical;
     }
 
     .status-pill {
@@ -528,6 +707,8 @@ interface OperatorProposalTrace {
     .selected-host,
     .proposal-item,
     .empty-state,
+    .proposal-edit,
+    .proposal-inspect,
     .proposal-trace {
       border: 1px solid #334155;
       border-radius: 6px;
@@ -565,15 +746,36 @@ interface OperatorProposalTrace {
       background: #0f172a;
     }
 
+    .proposal-inspect,
+    .proposal-edit,
+    .proposal-command {
+      margin-top: 10px;
+    }
+
+    .proposal-inspect {
+      background: #101827;
+    }
+
+    .proposal-inspect dl,
     .proposal-trace dl {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px 12px;
     }
 
+    .proposal-review-actions {
+      justify-content: flex-start;
+      margin-top: 10px;
+    }
+
     .compact-action {
       min-height: 28px;
       padding: 5px 9px;
+    }
+
+    .danger-action {
+      border-color: #7f1d1d;
+      color: #fecaca;
     }
 
     .empty-state {
@@ -597,6 +799,17 @@ interface OperatorProposalTrace {
       font-size: 12px;
       overflow-x: auto;
       white-space: pre;
+    }
+
+    .edit-comparison {
+      display: grid;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .edit-comparison code {
+      margin: 0;
+      color: #cbd5e1;
     }
 
     .risk {
@@ -690,6 +903,7 @@ interface OperatorProposalTrace {
       }
 
       .proposal-metadata,
+      .proposal-inspect dl,
       .proposal-trace dl {
         grid-template-columns: 1fr;
       }
@@ -706,6 +920,7 @@ export class AgentsComponent implements OnInit {
   selectedHostId = '';
   proposals: DiagnosticProposal[] = [];
   proposalTraces: Record<string, OperatorProposalTrace> = {};
+  proposalReviewStates: Record<string, OperatorProposalReviewState> = {};
   operatorResult: OperatorProposeResult | null = null;
   operatorWarnings: string[] = [];
   terminalSessionId: string | null = null;
@@ -895,19 +1110,22 @@ export class AgentsComponent implements OnInit {
     });
 
     try {
+      const approvedCommand = this.effectiveProposalCommand(proposal);
       const input: OperatorActionExecuteInput = {
         hostId: host.id,
         proposal: {
           ...proposal,
+          command: approvedCommand,
           status: 'approved',
           message: proposal.message,
         },
         action: {
           kind: 'ssh-command',
-          command: proposal.command,
+          command: approvedCommand,
         },
         approved: true,
       };
+      this.emitOperatorExecuteActionCall(input);
       const result = await api.agent.executeAction(input);
       if (result.terminalSessionId) {
         this.terminalSessionId = result.terminalSessionId;
@@ -955,6 +1173,19 @@ export class AgentsComponent implements OnInit {
     this.syncProposalTraces();
   }
 
+  private emitOperatorExecuteActionCall(input: OperatorActionExecuteInput): void {
+    window.dispatchEvent(new CustomEvent('sb:operator-execute-action-call', {
+      detail: {
+        hostId: input.hostId,
+        proposalId: input.proposal.id,
+        proposalCommand: input.proposal.command,
+        actionKind: input.action.kind,
+        actionCommand: input.action.command,
+        approved: input.approved,
+      },
+    }));
+  }
+
   formatDate(value: string): string {
     return new Date(value).toLocaleString();
   }
@@ -981,11 +1212,13 @@ export class AgentsComponent implements OnInit {
   }
 
   proposalExpectedEffect(proposal: DiagnosticProposal): string {
-    return `Runs the approved ${this.proposalActionKind(proposal)} through backend terminal execution for ${this.proposalTargetLabel(proposal)}.`;
+    const editLabel = this.proposalWasEdited(proposal) ? 'edited ' : '';
+    return `Runs the approved ${editLabel}${this.proposalActionKind(proposal)} through backend terminal execution for ${this.proposalTargetLabel(proposal)}.`;
   }
 
   dispatchDisabledReasons(proposal: DiagnosticProposal): string[] {
     const reasons: string[] = [];
+    const reviewState = this.proposalReviewState(proposal);
     const api = getSwitchboardApi();
     if (!api) {
       reasons.push('Switchboard API is unavailable. Run the app through Electron or hosted SwitchboardOS.');
@@ -999,6 +1232,15 @@ export class AgentsComponent implements OnInit {
     if (api && !api.agent?.executeAction) {
       reasons.push('Structured Operator action execution API is unavailable.');
     }
+    if (reviewState.rejected) {
+      reasons.push('This proposal was rejected by the user.');
+    }
+    if (reviewState.editing) {
+      reasons.push('Save or cancel the command edit before approval.');
+    }
+    if (!this.effectiveProposalCommand(proposal).trim()) {
+      reasons.push('Command preview is empty.');
+    }
     if (this.dispatchingProposalId === proposal.id) {
       reasons.push('This proposal is dispatching.');
     } else if (this.dispatchingProposalId) {
@@ -1008,6 +1250,196 @@ export class AgentsComponent implements OnInit {
       reasons.push('This proposal was already dispatched.');
     }
     return reasons;
+  }
+
+  proposalReviewState(proposal: DiagnosticProposal): OperatorProposalReviewState {
+    const existing = this.proposalReviewStates[proposal.id];
+    if (existing) {
+      return existing;
+    }
+    const created: OperatorProposalReviewState = {
+      inspected: false,
+      editing: false,
+      draftCommand: proposal.command,
+      savedCommand: null,
+      rejected: false,
+      rejectionReason: '',
+    };
+    this.proposalReviewStates = {
+      ...this.proposalReviewStates,
+      [proposal.id]: created,
+    };
+    return created;
+  }
+
+  effectiveProposalCommand(proposal: DiagnosticProposal): string {
+    const savedCommand = this.proposalReviewState(proposal).savedCommand;
+    return savedCommand ?? proposal.command;
+  }
+
+  proposalWasEdited(proposal: DiagnosticProposal): boolean {
+    return this.proposalReviewState(proposal).savedCommand !== null;
+  }
+
+  toggleInspect(proposal: DiagnosticProposal): void {
+    const state = this.proposalReviewState(proposal);
+    this.proposalReviewStates = {
+      ...this.proposalReviewStates,
+      [proposal.id]: {
+        ...state,
+        inspected: !state.inspected,
+      },
+    };
+  }
+
+  canEditProposal(proposal: DiagnosticProposal): boolean {
+    const state = this.proposalReviewState(proposal);
+    return !state.rejected
+      && !state.editing
+      && !this.dispatchingProposalId
+      && proposal.status !== 'approved'
+      && proposal.status !== 'dispatched';
+  }
+
+  beginProposalEdit(proposal: DiagnosticProposal): void {
+    if (!this.canEditProposal(proposal)) {
+      return;
+    }
+    const state = this.proposalReviewState(proposal);
+    this.proposalReviewStates = {
+      ...this.proposalReviewStates,
+      [proposal.id]: {
+        ...state,
+        inspected: true,
+        editing: true,
+        draftCommand: this.effectiveProposalCommand(proposal),
+      },
+    };
+    this.updateProposalTrace(proposal, {
+      expectedEffect: this.proposalExpectedEffect(proposal),
+      auditStatus: 'Command edit is local and requires explicit approval before backend execution.',
+    });
+  }
+
+  updateProposalDraft(proposal: DiagnosticProposal, value: string): void {
+    const state = this.proposalReviewState(proposal);
+    this.proposalReviewStates = {
+      ...this.proposalReviewStates,
+      [proposal.id]: {
+        ...state,
+        draftCommand: value,
+      },
+    };
+  }
+
+  saveProposalEdit(proposal: DiagnosticProposal): void {
+    const state = this.proposalReviewState(proposal);
+    const command = state.draftCommand.trim();
+    if (!command) {
+      this.errorMessage = 'Edited Operator command cannot be empty.';
+      this.updateProposalTrace(proposal, {
+        disabledReasons: ['Command preview is empty.'],
+        auditStatus: 'Command edit was not saved because the command preview is empty.',
+      });
+      return;
+    }
+    const savedCommand = command === proposal.command ? null : command;
+    this.errorMessage = '';
+    this.statusMessage = savedCommand
+      ? 'Edited command saved. Explicit approval is still required before dispatch.'
+      : 'Command edit matches the original proposal. Explicit approval is still required before dispatch.';
+    this.proposalReviewStates = {
+      ...this.proposalReviewStates,
+      [proposal.id]: {
+        ...state,
+        editing: false,
+        inspected: true,
+        draftCommand: command,
+        savedCommand,
+      },
+    };
+    proposal.message = savedCommand ? 'Edited command saved; approval required.' : '';
+    this.updateProposalTrace(proposal, {
+      approvalStatus: 'Awaiting approval',
+      expectedEffect: this.proposalExpectedEffect(proposal),
+      auditStatus: 'Edited command saved locally; no backend execution has occurred.',
+      disabledReasons: this.dispatchDisabledReasons(proposal),
+    });
+    this.syncProposalTraces();
+  }
+
+  cancelProposalEdit(proposal: DiagnosticProposal): void {
+    const state = this.proposalReviewState(proposal);
+    this.proposalReviewStates = {
+      ...this.proposalReviewStates,
+      [proposal.id]: {
+        ...state,
+        editing: false,
+        draftCommand: this.effectiveProposalCommand(proposal),
+      },
+    };
+    this.statusMessage = 'Command edit canceled. Original approval requirement is unchanged.';
+    this.updateProposalTrace(proposal, {
+      disabledReasons: this.dispatchDisabledReasons(proposal),
+      auditStatus: 'Command edit canceled; no backend execution has occurred.',
+    });
+    this.syncProposalTraces();
+  }
+
+  canRejectProposal(proposal: DiagnosticProposal): boolean {
+    const state = this.proposalReviewState(proposal);
+    return !state.rejected
+      && !this.dispatchingProposalId
+      && proposal.status !== 'approved'
+      && proposal.status !== 'dispatched';
+  }
+
+  rejectProposal(proposal: DiagnosticProposal): void {
+    if (!this.canRejectProposal(proposal)) {
+      return;
+    }
+    const state = this.proposalReviewState(proposal);
+    const rejectionReason = 'Rejected by user before approval.';
+    this.proposalReviewStates = {
+      ...this.proposalReviewStates,
+      [proposal.id]: {
+        ...state,
+        inspected: true,
+        editing: false,
+        rejected: true,
+        rejectionReason,
+      },
+    };
+    proposal.message = rejectionReason;
+    this.errorMessage = '';
+    this.statusMessage = rejectionReason;
+    this.updateProposalTrace(proposal, {
+      approved: false,
+      approvalStatus: 'Rejected',
+      disabledReasons: ['This proposal was rejected by the user.'],
+      auditStatus: 'Rejected locally; no backend execution request was sent.',
+      result: null,
+    });
+    this.syncProposalTraces();
+  }
+
+  proposalReviewStatusLabel(proposal: DiagnosticProposal): string {
+    const state = this.proposalReviewState(proposal);
+    if (state.rejected) {
+      return `rejected: ${state.rejectionReason}`;
+    }
+    if (state.editing) {
+      return 'editing: save or cancel before approval';
+    }
+    if (this.proposalWasEdited(proposal) && proposal.status === 'pending') {
+      return 'pending approval: edited command saved';
+    }
+    return `${proposal.status}${proposal.message ? ': ' + proposal.message : ''}`;
+  }
+
+  proposalInspectDisabledReasons(proposal: DiagnosticProposal): string {
+    const reasons = this.dispatchDisabledReasons(proposal);
+    return reasons.length > 0 ? reasons.join(' ') : 'None';
   }
 
   proposalTrace(proposal: DiagnosticProposal): OperatorProposalTrace {
@@ -1107,12 +1539,28 @@ export class AgentsComponent implements OnInit {
   }
 
   private initializeProposalTraces(): void {
+    this.initializeProposalReviewStates();
     const nextTraces: Record<string, OperatorProposalTrace> = {};
     for (const proposal of this.proposals) {
       nextTraces[proposal.id] = this.createProposalTrace(proposal);
     }
     this.proposalTraces = nextTraces;
     this.syncProposalTraces();
+  }
+
+  private initializeProposalReviewStates(): void {
+    const nextStates: Record<string, OperatorProposalReviewState> = {};
+    for (const proposal of this.proposals) {
+      nextStates[proposal.id] = {
+        inspected: false,
+        editing: false,
+        draftCommand: proposal.command,
+        savedCommand: null,
+        rejected: false,
+        rejectionReason: '',
+      };
+    }
+    this.proposalReviewStates = nextStates;
   }
 
   private createProposalTrace(proposal: DiagnosticProposal): OperatorProposalTrace {
@@ -1165,7 +1613,8 @@ export class AgentsComponent implements OnInit {
         requiredCapabilities: this.proposalRequiredCapabilities(proposal),
         actionKind: this.proposalActionKind(proposal),
         approvalRequired: true,
-        approved: existing.approved || proposal.status === 'approved' || proposal.status === 'dispatched',
+        approved: !this.proposalReviewState(proposal).rejected
+          && (existing.approved || proposal.status === 'approved' || proposal.status === 'dispatched'),
         approvalStatus: this.dispatchingProposalId === proposal.id
           ? 'Dispatching approved action'
           : this.approvalStatusForProposal(proposal),
@@ -1187,6 +1636,9 @@ export class AgentsComponent implements OnInit {
   }
 
   private approvalStatusForProposal(proposal: DiagnosticProposal): OperatorProposalApprovalStatus {
+    if (this.proposalReviewState(proposal).rejected) {
+      return 'Rejected';
+    }
     if (proposal.status === 'dispatched') {
       return 'Dispatched';
     }
