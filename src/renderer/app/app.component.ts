@@ -7,6 +7,7 @@ import type {
   ConnectionTestResult,
   CreateAppManifestInput,
   CreateAppPermissionInput,
+  CreateAuditEventInput,
   HostRecord,
   HostOperationKind,
   HostOperationResult,
@@ -53,6 +54,7 @@ interface ShellApi {
   };
   audit: {
     list: () => Promise<AuditEvent[]>;
+    log: (event: CreateAuditEventInput) => Promise<AuditEvent>;
   };
   settings: {
     get: () => Promise<MvpSettings>;
@@ -192,6 +194,7 @@ interface ShellPrimitiveObject {
   notificationKind?: ShellNotificationKind;
   requiredCapabilities?: string[];
   remotePath?: string;
+  workspacePath?: string;
   hostId?: string;
 }
 
@@ -646,6 +649,22 @@ function generatedAppSourceFromArtifact(record: WorkspaceArtifactContentRecord):
   }
 
   return '';
+}
+
+function manifestStringField(record: Record<string, unknown>, key: string, fallback = ''): string {
+  const value = record[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function manifestStringArrayField(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return Array.from(new Set(value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)));
 }
 
 interface DesktopIconPosition {
@@ -2386,15 +2405,13 @@ export class AppComponent implements OnInit, OnDestroy {
 
   openWorkspaceArtifactContextMenu(event: MouseEvent, artifact: WorkspaceArtifact): void {
     this.showWorkspaceArtifactProperties(artifact);
-    this.showContextMenu(
-      event,
-      'workspace-file',
-      artifact.name,
-      this.workspaceArtifactContextItems(artifact),
-      undefined,
-      undefined,
-      undefined,
+    event.preventDefault();
+    event.stopPropagation();
+    this.showWorkspaceArtifactContextMenuAt(
+      event.clientX,
+      event.clientY,
       artifact,
+      event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined,
     );
   }
 
@@ -2492,6 +2509,11 @@ export class AppComponent implements OnInit, OnDestroy {
       case 'open-workspace-artifact':
         if (workspaceArtifact) {
           void this.openWorkspaceArtifact(workspaceArtifact);
+        }
+        return;
+      case 'install-open-workspace-applet-artifact':
+        if (workspaceArtifact) {
+          void this.installAndOpenWorkspaceAppletArtifact(workspaceArtifact);
         }
         return;
       case 'open-with-workspace-artifact':
@@ -2863,13 +2885,235 @@ export class AppComponent implements OnInit, OnDestroy {
     this.notify(`${fallbackArtifact.name} created in ${this.workspaceDisplayPathForPath(normalizedTargetPath)} (local).`);
   }
 
+  handleWorkspaceArtifactKeydown(event: KeyboardEvent, artifact: WorkspaceArtifact): void {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button,input,select,textarea')) {
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.openWorkspaceArtifact(artifact);
+      return;
+    }
+
+    if (event.key === 'F2') {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.renameWorkspaceArtifact(artifact);
+      return;
+    }
+
+    if (event.key === 'Delete') {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.deleteWorkspaceArtifact(artifact);
+      return;
+    }
+
+    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.showWorkspaceArtifactProperties(artifact);
+      const row = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+      const rect = row?.getBoundingClientRect();
+      this.showWorkspaceArtifactContextMenuAt(
+        rect ? rect.left + Math.min(48, Math.max(16, rect.width / 3)) : window.innerWidth / 2,
+        rect ? rect.top + Math.min(32, Math.max(16, rect.height / 2)) : window.innerHeight / 2,
+        artifact,
+        row ?? undefined,
+      );
+    }
+  }
+
   async openWorkspaceArtifact(artifact: WorkspaceArtifact): Promise<void> {
     if (artifact.kind === 'folder') {
       await this.navigateWorkspacePath(this.workspaceArtifactPath(artifact));
       return;
     }
+
+    if (this.isWorkspaceAppletArtifact(artifact)) {
+      await this.installAndOpenWorkspaceAppletArtifact(artifact);
+      return;
+    }
+
     this.showWorkspaceArtifactProperties(artifact);
     this.notify(`No registered workspace viewer exists yet for "${artifact.name}".`);
+  }
+
+  isWorkspaceAppletArtifact(artifact: WorkspaceArtifact): boolean {
+    return artifact.kind === 'applet' && this.workspaceArtifactPath(artifact).endsWith('.sbapplet.json');
+  }
+
+  workspaceAppletActionLabel(artifact: WorkspaceArtifact): string {
+    if (!this.isWorkspaceAppletArtifact(artifact)) {
+      return 'Open';
+    }
+    return this.installedGeneratedAppForWorkspaceArtifact(artifact)
+      ? 'Launch Applet'
+      : 'Install/Open Applet';
+  }
+
+  workspaceAppletOpenDisabledReason(artifact: WorkspaceArtifact): string {
+    if (!this.isWorkspaceAppletArtifact(artifact)) {
+      return 'This action is available for .sbapplet.json workspace artifacts.';
+    }
+
+    const api = getSwitchboardApi();
+    if (!api?.workspaceArtifactContent) {
+      return 'Workspace artifact content API is unavailable.';
+    }
+    if (!api.appManifest) {
+      return 'App manifest registry API is unavailable.';
+    }
+    if (!api.appPermission) {
+      return 'App permission API is unavailable.';
+    }
+    return '';
+  }
+
+  private workspaceAppletActionCapabilities(artifact: WorkspaceArtifact): string[] {
+    const capabilities = ['workspace-file:read', 'app-manifest:read'];
+    capabilities.push(this.installedGeneratedAppForWorkspaceArtifact(artifact) ? 'app-manifest:update' : 'app-manifest:create');
+    capabilities.push('app-permission:read', 'app-permission:grant');
+    return capabilities;
+  }
+
+  private installedGeneratedAppForWorkspaceArtifact(artifact: WorkspaceArtifact): ShellAppDefinition | null {
+    const path = this.workspaceArtifactPath(artifact);
+    return this.installedAppDefinitions.find((definition) =>
+      Boolean(definition.generated && definition.manifest && generatedAppArtifactPath(definition.manifest) === path),
+    ) ?? null;
+  }
+
+  private capabilitiesFromWorkspaceAppletManifest(manifestRecord: Record<string, unknown>): string[] {
+    const requestedCapabilities = manifestStringArrayField(manifestRecord, 'requestedCapabilities');
+    const capabilities = manifestStringArrayField(manifestRecord, 'capabilities');
+    return requestedCapabilities.length > 0 ? requestedCapabilities : capabilities;
+  }
+
+  private workspaceAppletNameFromArtifact(artifact: WorkspaceArtifact): string {
+    return artifact.name.endsWith('.sbapplet.json')
+      ? artifact.name.slice(0, -'.sbapplet.json'.length)
+      : artifact.name;
+  }
+
+  async installAndOpenWorkspaceAppletArtifact(artifact: WorkspaceArtifact): Promise<void> {
+    const disabledReason = this.workspaceAppletOpenDisabledReason(artifact);
+    if (disabledReason) {
+      this.showWorkspaceArtifactProperties(artifact);
+      this.notify(disabledReason);
+      return;
+    }
+
+    const api = getSwitchboardApi();
+    if (!api?.workspaceArtifactContent || !api.appManifest || !api.appPermission) {
+      this.errorMessage = 'Workspace artifact install APIs are unavailable.';
+      return;
+    }
+
+    const artifactPath = this.workspaceArtifactPath(artifact);
+    this.errorMessage = '';
+    try {
+      const artifactRecord = await api.workspaceArtifactContent.get(artifactPath);
+      if (artifactRecord.kind !== 'applet') {
+        throw new Error('Workspace artifact content is not an applet manifest.');
+      }
+
+      const manifestRecord = artifactRecord.manifest as Record<string, unknown>;
+      const sourceCode = generatedAppSourceFromArtifact(artifactRecord);
+      if (!sourceCode.trim()) {
+        throw new Error('Workspace applet artifact does not contain generated app source.');
+      }
+
+      const appId = manifestStringField(manifestRecord, 'appId');
+      if (!appId) {
+        throw new Error('Workspace applet artifact manifest is missing appId.');
+      }
+
+      const capabilities = this.capabilitiesFromWorkspaceAppletManifest(manifestRecord);
+      const manifests = await api.appManifest.list();
+      const existing = manifests.find((candidate) =>
+        candidate.appId === appId || generatedAppArtifactPath(candidate) === artifactRecord.path,
+      );
+      const now = new Date().toISOString();
+      const input: CreateAppManifestInput = {
+        appId,
+        name: manifestStringField(manifestRecord, 'name', this.workspaceAppletNameFromArtifact(artifact)),
+        description: manifestStringField(manifestRecord, 'description', `Workspace applet artifact ${artifact.name}.`),
+        version: manifestStringField(manifestRecord, 'version', '0.1.0'),
+        author: manifestStringField(manifestRecord, 'author', 'SwitchboardOS Workspace'),
+        entrypoint: manifestStringField(manifestRecord, 'entrypoint', `${appId}.js`),
+        icon: manifestStringField(manifestRecord, 'icon', 'APP'),
+        category: manifestStringField(manifestRecord, 'category', 'workspace-applet'),
+        capabilities,
+        sourceCode: '',
+        packageMetadata: {
+          ...(existing?.packageMetadata ?? {}),
+          artifactBacked: true,
+          artifactPath: artifactRecord.path,
+          artifactKind: artifactRecord.kind,
+          artifactContentRoute: 'workspaceArtifactContent',
+          artifactUpdatedAt: artifactRecord.updatedAt,
+          artifactSize: artifactRecord.size,
+          sourcePersistence: 'workspaceArtifactContent',
+          sourceCodeFallback: Boolean(existing?.sourceCode.trim()),
+          installedFrom: 'file-explorer',
+          sourceCodeLogged: false,
+          isolation: 'sandboxed-iframe-srcdoc',
+          sdkBridge: 'postMessage',
+          nodeAccess: false,
+        },
+        enabled: true,
+        installedAt: existing?.installedAt ?? now,
+      };
+
+      const persisted = existing
+        ? await api.appManifest.update(existing.id, input)
+        : await api.appManifest.create(input);
+      const manifest = persisted ?? existing;
+      if (!manifest) {
+        throw new Error('Workspace applet manifest was not persisted.');
+      }
+
+      const permissions = await api.appPermission.list(manifest.appId);
+      for (const capability of capabilities) {
+        if (!permissions.some((permission) => permission.capability === capability && permission.granted)) {
+          await api.appPermission.create({
+            appId: manifest.appId,
+            capability,
+            granted: true,
+          });
+        }
+      }
+
+      await api.audit.log({
+        type: 'workspace_artifact.app_installed',
+        entityType: 'app',
+        entityId: manifest.appId,
+        message: 'Workspace applet artifact installed and opened from File Explorer.',
+        metadata: {
+          appId: manifest.appId,
+          manifestId: manifest.id,
+          artifactPath: artifactRecord.path,
+          artifactKind: artifactRecord.kind,
+          artifactContentRoute: 'workspaceArtifactContent',
+          sourcePersistedInManifest: false,
+          sourcePersistedInWorkspaceArtifact: true,
+          sourceCodeLogged: false,
+          secretsLogged: false,
+        },
+      });
+
+      await this.loadInstalledApps();
+      window.postMessage({ type: 'sb:app-installed', appId: manifest.appId }, '*');
+      this.showWorkspaceArtifactProperties(artifact);
+      this.openApp(manifest.appId);
+      this.notify(`${manifest.name} launched from workspace artifact ${artifactRecord.path}.`);
+    } catch (error) {
+      this.errorMessage = this.errorText(error, 'Unable to install workspace applet artifact.');
+    }
   }
 
   openWorkspaceArtifactWith(artifact: WorkspaceArtifact): void {
@@ -4293,6 +4537,7 @@ export class AppComponent implements OnInit, OnDestroy {
     windowId?: string;
     notificationKind?: ShellNotificationKind;
     requiredCapabilities?: string[];
+    workspacePath?: string;
   }): ShellPrimitiveObject {
     return {
       id: input.id,
@@ -4306,6 +4551,7 @@ export class AppComponent implements OnInit, OnDestroy {
       ...(input.windowId ? { windowId: input.windowId } : {}),
       ...(input.notificationKind ? { notificationKind: input.notificationKind } : {}),
       ...(input.requiredCapabilities ? { requiredCapabilities: [...input.requiredCapabilities] } : {}),
+      ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
     };
   }
 
@@ -4330,19 +4576,87 @@ export class AppComponent implements OnInit, OnDestroy {
     return this.hosts.find((candidate) => candidate.id === menu.hostId) ?? null;
   }
 
+  private showWorkspaceArtifactContextMenuAt(
+    x: number,
+    y: number,
+    artifact: WorkspaceArtifact,
+    focusReturnElement?: HTMLElement,
+  ): void {
+    const items = this.workspaceArtifactContextItems(artifact);
+    this.showContextMenuAt({
+      x,
+      y,
+      target: 'workspace-file',
+      label: artifact.name,
+      items,
+      appId: 'workspace-files',
+      workspaceArtifact: artifact,
+      object: this.workspaceArtifactShellObject(artifact, items),
+      focusReturnElement,
+    });
+  }
+
+  private workspaceArtifactShellObject(artifact: WorkspaceArtifact, items: ContextMenuItem[]): ShellPrimitiveObject {
+    const path = this.workspaceArtifactPath(artifact);
+    const actionIds = items.flatMap((item) => [
+      item.actionId ?? item.id,
+      ...(item.submenu ?? []).map((subItem) => subItem.actionId ?? subItem.id),
+    ]);
+    const requiredCapabilities = Array.from(new Set(items.flatMap((item) => [
+      ...(item.requiredCapabilities ?? []),
+      ...((item.submenu ?? []).flatMap((subItem) => subItem.requiredCapabilities ?? [])),
+    ])));
+    return {
+      id: `workspace:${path}`,
+      kind: this.isWorkspaceAppletArtifact(artifact) ? 'workspace-applet-artifact' : 'workspace-file',
+      owner: 'workspace-files',
+      source: 'workspace-file-object',
+      targetScope: 'workspace-file',
+      label: artifact.name,
+      actionIds,
+      sourceAppId: 'workspace-files',
+      workspacePath: path,
+      requiredCapabilities,
+    };
+  }
+
   private workspaceArtifactContextItems(artifact: WorkspaceArtifact): ContextMenuItem[] {
     const path = this.workspaceArtifactPath(artifact);
     const canPasteHere = Boolean(this.workspaceClipboard) && artifact.kind === 'folder';
     const clipboardDetail = this.workspaceClipboard
       ? `${this.workspaceClipboard.mode === 'copy' ? 'Copy' : 'Move'} "${this.workspaceClipboard.name}" from clipboard`
       : 'No item in workspace clipboard.';
-    return [
-      {
+    const appletDisabledReason = this.isWorkspaceAppletArtifact(artifact)
+      ? this.workspaceAppletOpenDisabledReason(artifact)
+      : '';
+    const openItem: ContextMenuItem = this.isWorkspaceAppletArtifact(artifact)
+      ? {
+        id: 'install-open-workspace-applet-artifact',
+        label: this.workspaceAppletActionLabel(artifact),
+        icon: 'APP',
+        shortcut: 'Enter',
+        disabled: Boolean(appletDisabledReason),
+        disabledReason: appletDisabledReason || undefined,
+        detail: appletDisabledReason || 'Install or launch this applet through workspace artifact content.',
+        requiredCapabilities: this.workspaceAppletActionCapabilities(artifact),
+      }
+      : {
         id: 'open-workspace-artifact',
         label: 'Open',
         icon: 'O',
         shortcut: 'Enter',
         detail: artifact.kind === 'folder' ? `Open ${path}` : 'Shows properties; no workspace viewer is registered yet.',
+        requiredCapabilities: ['workspace-file:read'],
+      };
+    return this.workspaceArtifactObjectContextItems([
+      openItem,
+      {
+        id: 'open-with-workspace-artifact',
+        label: 'Open With',
+        icon: 'OW',
+        detail: 'No Open With handlers are registered yet.',
+        disabled: true,
+        disabledReason: 'No Open With handlers are registered for this artifact.',
       },
       ...(artifact.kind === 'folder'
         ? [{
@@ -4351,14 +4665,9 @@ export class AppComponent implements OnInit, OnDestroy {
           icon: '+',
           shortcut: 'Ctrl+Shift+N',
           detail: `Create inside ${path}.`,
+          requiredCapabilities: ['workspace-file:write'],
         }]
         : []),
-      {
-        id: 'open-with-workspace-artifact',
-        label: 'Open With',
-        icon: 'OW',
-        detail: 'No Open With handlers are registered yet.',
-      },
       {
         id: 'rename-workspace-artifact',
         label: 'Rename',
@@ -4366,6 +4675,7 @@ export class AppComponent implements OnInit, OnDestroy {
         shortcut: 'F2',
         separatorBefore: true,
         detail: path,
+        requiredCapabilities: ['workspace-file:write'],
       },
       {
         id: 'copy-workspace-artifact',
@@ -4373,6 +4683,7 @@ export class AppComponent implements OnInit, OnDestroy {
         icon: 'C',
         shortcut: 'Ctrl+C',
         detail: `Copy "${path}" to clipboard.`,
+        requiredCapabilities: ['workspace-file:read'],
       },
       {
         id: 'cut-workspace-artifact',
@@ -4380,6 +4691,7 @@ export class AppComponent implements OnInit, OnDestroy {
         icon: 'X',
         shortcut: 'Ctrl+X',
         detail: `Move "${path}" to clipboard.`,
+        requiredCapabilities: ['workspace-file:write'],
       },
       {
         id: 'paste-workspace-artifact',
@@ -4387,7 +4699,9 @@ export class AppComponent implements OnInit, OnDestroy {
         icon: 'P',
         shortcut: 'Ctrl+V',
         disabled: !canPasteHere,
+        disabledReason: canPasteHere ? undefined : 'Choose a folder as paste target.',
         detail: canPasteHere ? clipboardDetail : 'Choose a folder as paste target.',
+        requiredCapabilities: ['workspace-file:write'],
       },
       {
         id: 'duplicate-workspace-artifact',
@@ -4395,6 +4709,7 @@ export class AppComponent implements OnInit, OnDestroy {
         icon: 'D',
         shortcut: 'Ctrl+D',
         detail: 'Creates a workspace copy.',
+        requiredCapabilities: ['workspace-file:write'],
       },
       {
         id: 'delete-workspace-artifact',
@@ -4404,6 +4719,7 @@ export class AppComponent implements OnInit, OnDestroy {
         separatorBefore: true,
         danger: true,
         detail: 'Moves the item to the Recycle Bin.',
+        requiredCapabilities: ['workspace-file:write'],
       },
       {
         id: 'properties-workspace-artifact',
@@ -4412,8 +4728,26 @@ export class AppComponent implements OnInit, OnDestroy {
         shortcut: 'Alt+Enter',
         separatorBefore: true,
         detail: path,
+        requiredCapabilities: ['workspace-file:read'],
       },
-    ];
+    ]);
+  }
+
+  private workspaceArtifactObjectContextItems(items: ContextMenuItem[]): ContextMenuItem[] {
+    return items.map((item) => ({
+      ...item,
+      source: item.source ?? 'workspace-file-object',
+      sourceAppId: item.sourceAppId ?? 'workspace-files',
+      targetScope: item.targetScope ?? 'workspace-file',
+      actionId: item.actionId ?? item.id,
+      submenu: item.submenu?.map((subItem) => ({
+        ...subItem,
+        source: subItem.source ?? 'workspace-file-object',
+        sourceAppId: subItem.sourceAppId ?? 'workspace-files',
+        targetScope: subItem.targetScope ?? 'workspace-file',
+        actionId: subItem.actionId ?? subItem.id,
+      })),
+    }));
   }
 
   private desktopContextItems(): ContextMenuItem[] {

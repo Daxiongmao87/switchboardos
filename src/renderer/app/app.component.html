@@ -258,9 +258,11 @@
                     tabindex="0"
                     [class.is-selected]="selectedWorkspaceArtifact?.id === artifact.id"
                     [attr.aria-selected]="selectedWorkspaceArtifact?.id === artifact.id"
+                    [attr.data-workspace-artifact-kind]="artifact.kind"
+                    [attr.data-workspace-artifact-path]="workspaceArtifactLocation(artifact)"
                     (click)="showWorkspaceArtifactProperties(artifact)"
                     (dblclick)="openWorkspaceArtifact(artifact)"
-                    (keydown.enter)="openWorkspaceArtifact(artifact)"
+                    (keydown)="handleWorkspaceArtifactKeydown($event, artifact)"
                     (contextmenu)="openWorkspaceArtifactContextMenu($event, artifact)"
                   >
                     <span class="workspace-file-icon">{{ workspaceArtifactIcon(artifact) }}</span>
@@ -274,6 +276,16 @@
                     <div class="workspace-file-meta-line" *ngIf="artifact.size !== undefined">{{ formatWorkspaceArtifactSize(artifact.size) }}</div>
                     <div class="workspace-file-type" *ngIf="workspaceArtifactViewMode === 'grid'">{{ workspaceArtifactKindLabel(artifact) }}</div>
                     <div class="workspace-file-actions">
+                      <button
+                        type="button"
+                        class="mini-button"
+                        data-testid="workspace-artifact-open-action"
+                        [disabled]="isWorkspaceAppletArtifact(artifact) && workspaceAppletOpenDisabledReason(artifact) !== ''"
+                        [attr.title]="isWorkspaceAppletArtifact(artifact) ? workspaceAppletOpenDisabledReason(artifact) || null : null"
+                        (click)="$event.stopPropagation(); openWorkspaceArtifact(artifact)"
+                      >
+                        {{ isWorkspaceAppletArtifact(artifact) ? workspaceAppletActionLabel(artifact) : 'Open' }}
+                      </button>
                       <button type="button" class="mini-button" (click)="$event.stopPropagation(); renameWorkspaceArtifact(artifact)">Rename</button>
                       <button type="button" class="mini-button workspace-file-danger" (click)="$event.stopPropagation(); deleteWorkspaceArtifact(artifact)">Move to Recycle Bin</button>
                     </div>
@@ -630,8 +642,8 @@
       [attr.data-context-contribution-surface]="menu.contributionSurface || null"
       [attr.data-shell-object-notification-kind]="menu.object?.notificationKind || null"
       [attr.data-shell-object-host-id]="menu.object?.hostId || null"
-      [attr.data-shell-object-path]="menu.object?.remotePath || null"
-      [attr.data-target-path]="menu.object?.remotePath || null"
+      [attr.data-shell-object-path]="menu.object?.workspacePath || menu.object?.remotePath || null"
+      [attr.data-target-path]="menu.object?.workspacePath || menu.object?.remotePath || null"
       [attr.data-shell-object-action-ids]="menu.object ? shellPrimitiveActionIds(menu.object) : null"
       [attr.data-shell-object-capabilities]="menu.object ? shellPrimitiveCapabilities(menu.object) || null : null"
       [attr.aria-label]="menu.label + ' context menu'"
