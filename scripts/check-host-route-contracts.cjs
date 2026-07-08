@@ -516,6 +516,26 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'hosted:GET:/api/credential-refs',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/credential-refs/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/credential-refs',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:PATCH:/api/credential-refs/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:DELETE:/api/credential-refs/:id',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
     id: 'ipc:secret:store',
     routeMarker: "'secret:store'",
     contextFile: 'src/main/main.ts',
@@ -1021,6 +1041,14 @@ const REQUIRED_HOST_SECONDARY_ACTION_PARITY = new Map([
   ['ipc:host:import', 'hosted:POST:/api/hosts/import'],
 ]);
 
+const REQUIRED_CREDENTIAL_REF_PARITY = new Map([
+  ['ipc:credential-ref:list', 'hosted:GET:/api/credential-refs'],
+  ['ipc:credential-ref:get', 'hosted:GET:/api/credential-refs/:id'],
+  ['ipc:credential-ref:create', 'hosted:POST:/api/credential-refs'],
+  ['ipc:credential-ref:update', 'hosted:PATCH:/api/credential-refs/:id'],
+  ['ipc:credential-ref:delete', 'hosted:DELETE:/api/credential-refs/:id'],
+]);
+
 const failures = [];
 
 function fail(message) {
@@ -1305,6 +1333,34 @@ function validateHostSecondaryActionParity(contracts) {
   }
 }
 
+function validateCredentialRefParity(contracts) {
+  const contractsById = new Map(contracts.map((contract) => [contract.id, contract]));
+  for (const [ipcId, hostedId] of REQUIRED_CREDENTIAL_REF_PARITY.entries()) {
+    const ipcContract = contractsById.get(ipcId);
+    if (!ipcContract) {
+      fail(`Missing IPC credential-ref parity source contract ${ipcId}.`);
+      continue;
+    }
+    const ipcParity = parseParity(ipcContract);
+    if (ipcParity.kind !== 'paired' || ipcParity.peerRouteId !== hostedId) {
+      fail(`IPC credential-ref contract ${ipcId} must be paired with ${hostedId}, not ${ipcParity.kind ?? 'missing parity'}.`);
+    }
+    if (ipcParity.kind === 'exception' || ipcParity.reason) {
+      fail(`IPC credential-ref contract ${ipcId} still carries a hosted parity exception.`);
+    }
+
+    const hostedContract = contractsById.get(hostedId);
+    if (!hostedContract) {
+      fail(`Missing hosted credential-ref parity peer contract ${hostedId}.`);
+      continue;
+    }
+    const hostedParity = parseParity(hostedContract);
+    if (hostedParity.kind !== 'paired' || hostedParity.peerRouteId !== ipcId) {
+      fail(`Hosted credential-ref contract ${hostedId} must be paired with ${ipcId}, not ${hostedParity.kind ?? 'missing parity'}.`);
+    }
+  }
+}
+
 function parsePolicyFullCapabilities() {
   const source = ts.createSourceFile('policy-service.ts', policyText, ts.ScriptTarget.ES2020, true);
   let capabilities = [];
@@ -1402,6 +1458,66 @@ function validateHostedDispatches() {
 
   if (!hostedText.includes('runHostRouteContract({')) {
     fail('Hosted route handlers are not using runHostRouteContract.');
+  }
+
+  if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/credential-refs'))) {
+    const credentialRefHelperIndex = hostedText.indexOf('private runHostedCredentialRefRoute');
+    if (credentialRefHelperIndex === -1) {
+      fail('Hosted credential-ref routes are not using runHostedCredentialRefRoute.');
+    } else {
+      const helperBody = hostedText.slice(credentialRefHelperIndex, credentialRefHelperIndex + 1800);
+      if (!helperBody.includes('runHostRouteContract({')) {
+        fail('Hosted credential-ref helper is not backed by runHostRouteContract.');
+      }
+    }
+  }
+
+  if (!hostedText.includes("if (resource === 'credential-refs')")
+    || !hostedText.includes("contractId: 'hosted:GET:/api/credential-refs'")
+    || !hostedText.includes("contractId: 'hosted:GET:/api/credential-refs/:id'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/credential-refs'")
+    || !hostedText.includes("contractId: 'hosted:PATCH:/api/credential-refs/:id'")
+    || !hostedText.includes("contractId: 'hosted:DELETE:/api/credential-refs/:id'")
+    || !hostedText.includes('this.options.store.listCredentialRefs()')
+    || !hostedText.includes('this.options.store.getCredentialRef(refId)')
+    || !hostedText.includes('this.options.store.createCredentialRef(input)')
+    || !hostedText.includes('this.options.store.updateCredentialRef(refId, input)')
+    || !hostedText.includes('this.options.store.deleteCredentialRef(refId)')) {
+    fail('Hosted credential-ref routes must expose full metadata CRUD through route contracts and MvpSqliteStore.');
+  }
+
+  if (!hostedApiText.includes('credentialRef: {')
+    || !hostedApiText.includes("request('/api/credential-refs')")
+    || !hostedApiText.includes('/api/credential-refs/${encodeURIComponent(id)}')
+    || !hostedApiText.includes("request('/api/credential-refs', { method: 'POST'")
+    || !hostedApiText.includes("method: 'PATCH', body: input")
+    || !hostedApiText.includes("method: 'DELETE'")) {
+    fail('Hosted browser API must expose credentialRef metadata CRUD methods.');
+  }
+
+  if (!contractText.includes('credentialRefNameLogged: false')
+    || !contractText.includes('credentialReferenceValueLogged: false')
+    || !contractText.includes('credentialRefMetadataLogged: false')
+    || !contractText.includes('rawCredentialMaterialLogged: false')
+    || !contractText.includes('storesSecretMaterial: false')
+    || !contractText.includes('osKeychainAccess: false')
+    || !contractText.includes('sshAgentAccess: false')
+    || !hostedText.includes('credentialRefRouteSuccessMetadata')
+    || !hostedText.includes('credentialRefMetadataKeyCount')
+    || !hostedText.includes('credentialReferenceValueLogged: false')
+    || !hostedText.includes('rawCredentialMaterialLogged: false')
+    || !hostedText.includes('secretsLogged: false')) {
+    fail('Hosted credential-ref routes must keep sanitized non-secret metadata audit state.');
+  }
+
+  if (contractText.includes('hosted:POST:/api/secrets')
+    || contractText.includes('hosted:GET:/api/secrets')
+    || contractText.includes('hosted:DELETE:/api/secrets')
+    || hostedText.includes("resource === 'secrets'")
+    || hostedText.includes('/api/secrets')
+    || hostedApiText.includes("request('/api/secrets")
+    || hostedApiText.includes('request(`/api/secrets')) {
+    fail('Hosted secret APIs are forbidden for credential-ref hosted parity.');
   }
 
   if (REQUIRED_HOST_CONTRACTS.some((entry) => REQUIRED_HOST_SECONDARY_ACTION_PARITY.has(entry.id)
@@ -2127,6 +2243,7 @@ const contracts = parseContractsFromSource();
 const contractIds = validateContractMetadata(contracts);
 validateHostGroupTagParity(contracts);
 validateHostSecondaryActionParity(contracts);
+validateCredentialRefParity(contracts);
 const requiredContractIds = new Set(REQUIRED_HOST_CONTRACTS.map((entry) => entry.id));
 for (const required of requiredContractIds) {
   if (!contractIds.has(required)) {

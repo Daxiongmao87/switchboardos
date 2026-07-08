@@ -21,8 +21,10 @@ import type {
   CreateAuditEventInput,
   CreateAgentEndpointInput,
   CreateCommandHistoryInput,
+  CreateCredentialRefInput,
   CreateHostInput,
   CreateWorkspaceProfileInput,
+  CredentialRef,
   HostOperationInput,
   HostOperationResult,
   HostRecord,
@@ -53,6 +55,7 @@ import type {
   TerminalWriteResult,
   UpdateAppManifestInput,
   UpdateAgentEndpointInput,
+  UpdateCredentialRefInput,
   UpdateHostInput,
   UpdateWorkspaceProfileInput,
   WorkspaceArtifactContentRecord,
@@ -132,6 +135,13 @@ interface HostedSwitchboardApi {
     store: (_key: string, _value: string) => Promise<boolean>;
     retrieve: (_key: string) => Promise<string | null>;
     remove: (_key: string) => Promise<boolean>;
+  };
+  credentialRef: {
+    list: () => Promise<CredentialRef[]>;
+    get: (id: string) => Promise<CredentialRef | null>;
+    create: (input: CreateCredentialRefInput) => Promise<CredentialRef>;
+    update: (id: string, input: UpdateCredentialRefInput) => Promise<CredentialRef | null>;
+    remove: (id: string) => Promise<boolean>;
   };
   audit: {
     list: () => Promise<AuditEvent[]>;
@@ -299,6 +309,15 @@ function createHostedApi(): HostedSwitchboardApi {
       store: () => Promise.resolve(false),
       retrieve: () => Promise.resolve(null),
       remove: () => Promise.resolve(false),
+    },
+    credentialRef: {
+      list: () => request('/api/credential-refs'),
+      get: (id: string) => request(`/api/credential-refs/${encodeURIComponent(id)}`),
+      create: (input: CreateCredentialRefInput) =>
+        request('/api/credential-refs', { method: 'POST', body: input }),
+      update: (id: string, input: UpdateCredentialRefInput) =>
+        request(`/api/credential-refs/${encodeURIComponent(id)}`, { method: 'PATCH', body: input }),
+      remove: (id: string) => request(`/api/credential-refs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     },
     audit: {
       list: () => request('/api/audit'),

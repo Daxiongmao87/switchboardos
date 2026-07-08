@@ -36,6 +36,9 @@ import {
   validateBootstrapRunUpdateInput,
   validateCommandHistoryCreateInput,
   validateCommandHistoryEntryIdInput,
+  validateCredentialRefCreateInput,
+  validateCredentialRefIdInput,
+  validateCredentialRefUpdateInput,
   validateHostCreateInput,
   validateHostFavoriteInput,
   validateHostGroupNameInput,
@@ -107,6 +110,7 @@ import type {
   BootstrapRun,
   CommandHistoryEntry,
   ConnectionTestResult,
+  CredentialRef,
   MvpSettingsUpdate,
   OperatorActionExecuteResult,
   OperatorProposeResult,
@@ -761,6 +765,10 @@ export class HostedServer {
       return this.routeHostTagApi(method, actionOrId, subAction, body, session);
     }
 
+    if (resource === 'credential-refs') {
+      return this.routeCredentialRefApi(method, actionOrId, subAction, body, session);
+    }
+
     if (resource === 'settings') {
       if (method === 'GET') {
         validateHostedNoRequestBody(body);
@@ -1274,6 +1282,119 @@ export class HostedServer {
     }
 
     throw new HttpError(404, `No hosted host tag route for ${method}.`);
+  }
+
+  private runHostedCredentialRefRoute<TResult>(
+    params: {
+      contractId: string;
+      session: HostedSession | null;
+      route: string;
+      action: string;
+      entityId?: string | null;
+      input: unknown;
+      execute: () => TResult;
+      successAuditMetadata?: (result: TResult) => Record<string, unknown>;
+    },
+  ): Promise<TResult> {
+    return runHostRouteContract({
+      contract: this.requireRouteAccessContract(params.contractId),
+      policyService: this.options.policyService,
+      logAuditEvent: (event) => this.options.store.logAuditEvent(event),
+      context: {
+        caller: 'hosted',
+        route: params.route,
+        action: params.action,
+        entityId: params.entityId ?? null,
+        entityType: 'credential_ref',
+        sessionId: params.session?.id ?? null,
+      },
+      input: params.input,
+      execute: params.execute,
+      successAuditMetadata: params.successAuditMetadata,
+    });
+  }
+
+  private routeCredentialRefApi(
+    method: string,
+    refIdSegment: string | undefined,
+    subAction: string | undefined,
+    body: unknown,
+    session: HostedSession | null,
+  ): unknown {
+    if (subAction) {
+      throw new HttpError(404, `No hosted credential reference route for ${method}.`);
+    }
+
+    if (!refIdSegment && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      return this.runHostedCredentialRefRoute({
+        contractId: 'hosted:GET:/api/credential-refs',
+        session,
+        route: '/api/credential-refs',
+        action: 'GET /api/credential-refs',
+        input: null,
+        execute: () => this.options.store.listCredentialRefs(),
+      });
+    }
+
+    if (!refIdSegment && method === 'POST') {
+      const input = validateCredentialRefCreateInput(body);
+      return this.runHostedCredentialRefRoute({
+        contractId: 'hosted:POST:/api/credential-refs',
+        session,
+        route: '/api/credential-refs',
+        action: 'POST /api/credential-refs',
+        input,
+        execute: () => this.options.store.createCredentialRef(input),
+        successAuditMetadata: credentialRefRouteSuccessMetadata,
+      });
+    }
+
+    if (refIdSegment && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      const refId = validateCredentialRefIdInput(decodeURIComponent(refIdSegment));
+      return this.runHostedCredentialRefRoute({
+        contractId: 'hosted:GET:/api/credential-refs/:id',
+        session,
+        route: `/api/credential-refs/${refId}`,
+        action: 'GET /api/credential-refs/:id',
+        entityId: refId,
+        input: refId,
+        execute: () => this.options.store.getCredentialRef(refId),
+      });
+    }
+
+    if (refIdSegment && method === 'PATCH') {
+      const refId = validateCredentialRefIdInput(decodeURIComponent(refIdSegment));
+      const input = validateCredentialRefUpdateInput(body);
+      return this.runHostedCredentialRefRoute({
+        contractId: 'hosted:PATCH:/api/credential-refs/:id',
+        session,
+        route: `/api/credential-refs/${refId}`,
+        action: 'PATCH /api/credential-refs/:id',
+        entityId: refId,
+        input,
+        execute: () => this.options.store.updateCredentialRef(refId, input),
+        successAuditMetadata: credentialRefRouteSuccessMetadata,
+      });
+    }
+
+    if (refIdSegment && method === 'DELETE') {
+      validateHostedNoRequestBody(body);
+      const refId = validateCredentialRefIdInput(decodeURIComponent(refIdSegment));
+      return this.runHostedCredentialRefRoute({
+        contractId: 'hosted:DELETE:/api/credential-refs/:id',
+        session,
+        route: `/api/credential-refs/${refId}`,
+        action: 'DELETE /api/credential-refs/:id',
+        entityId: refId,
+        input: refId,
+        execute: () => this.options.store.deleteCredentialRef(refId),
+        successAuditMetadata: credentialRefRouteSuccessMetadata,
+      });
+    }
+
+    throw new HttpError(404, `No hosted credential reference route for ${method}.`);
   }
 
   private runHostedAuditRoute<TResult>(
@@ -3400,6 +3521,37 @@ function appPermissionRouteSuccessMetadata(result: AppPermission | boolean | nul
     appId: result.appId,
     capability: result.capability,
     granted: result.granted,
+  };
+}
+
+function credentialRefRouteSuccessMetadata(result: CredentialRef | boolean | null): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    return {
+      credentialRefFound: Boolean(result),
+      storesSecretMaterial: false,
+      credentialRefNameLogged: false,
+      credentialReferenceValueLogged: false,
+      credentialRefMetadataLogged: false,
+      rawCredentialMaterialLogged: false,
+      osKeychainAccess: false,
+      sshAgentAccess: false,
+      secretsLogged: false,
+    };
+  }
+
+  return {
+    credentialRefId: result.id,
+    credentialRefType: result.type,
+    credentialRefMetadataKeyCount: Object.keys(result.metadata ?? {}).length,
+    credentialReferenceValueLength: result.referenceValue.length,
+    storesSecretMaterial: false,
+    credentialRefNameLogged: false,
+    credentialReferenceValueLogged: false,
+    credentialRefMetadataLogged: false,
+    rawCredentialMaterialLogged: false,
+    osKeychainAccess: false,
+    sshAgentAccess: false,
+    secretsLogged: false,
   };
 }
 
