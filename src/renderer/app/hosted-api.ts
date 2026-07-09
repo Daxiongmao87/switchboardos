@@ -14,20 +14,28 @@ import type {
   BootstrapGenerateInput,
   BootstrapGenerateResult,
   BootstrapPreset,
+  BootstrapPresetRecord,
+  BootstrapRun,
   CommandHistoryEntry,
   ConnectionTestResult,
   CreateAppManifestInput,
   CreateAppPermissionInput,
   CreateAuditEventInput,
   CreateAgentEndpointInput,
+  CreateBootstrapPresetInput,
+  CreateBootstrapRunInput,
   CreateCommandHistoryInput,
   CreateCredentialRefInput,
+  CreateHostGroupInput,
   CreateHostInput,
+  CreateHostTagInput,
   CreateWorkspaceProfileInput,
   CredentialRef,
   HostOperationInput,
   HostOperationResult,
+  HostGroup,
   HostRecord,
+  HostTag,
   MvpSettings,
   MvpSettingsUpdate,
   OperatorActionExecuteInput,
@@ -55,8 +63,12 @@ import type {
   TerminalWriteResult,
   UpdateAppManifestInput,
   UpdateAgentEndpointInput,
+  UpdateBootstrapPresetInput,
+  UpdateBootstrapRunInput,
   UpdateCredentialRefInput,
+  UpdateHostGroupInput,
   UpdateHostInput,
+  UpdateHostTagInput,
   UpdateWorkspaceProfileInput,
   WorkspaceArtifactContentRecord,
   WorkspaceScriptletRunInput,
@@ -187,9 +199,37 @@ interface HostedSwitchboardApi {
   workspaceScriptlet: {
     run: (input: WorkspaceScriptletRunInput) => Promise<WorkspaceScriptletRunResult>;
   };
+  hostGroup: {
+    list: () => Promise<HostGroup[]>;
+    get: (id: string) => Promise<HostGroup | null>;
+    create: (input: CreateHostGroupInput) => Promise<HostGroup>;
+    update: (id: string, input: UpdateHostGroupInput) => Promise<HostGroup | null>;
+    remove: (id: string) => Promise<boolean>;
+  };
+  hostTag: {
+    list: () => Promise<HostTag[]>;
+    get: (id: string) => Promise<HostTag | null>;
+    create: (input: CreateHostTagInput) => Promise<HostTag>;
+    update: (id: string, input: UpdateHostTagInput) => Promise<HostTag | null>;
+    remove: (id: string) => Promise<boolean>;
+  };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;
     generate: (input: BootstrapGenerateInput) => Promise<BootstrapGenerateResult>;
+  };
+  bootstrapPreset: {
+    list: () => Promise<BootstrapPresetRecord[]>;
+    get: (id: string) => Promise<BootstrapPresetRecord | null>;
+    create: (input: CreateBootstrapPresetInput) => Promise<BootstrapPresetRecord>;
+    update: (id: string, input: UpdateBootstrapPresetInput) => Promise<BootstrapPresetRecord | null>;
+    remove: (id: string) => Promise<boolean>;
+  };
+  bootstrapRun: {
+    list: () => Promise<BootstrapRun[]>;
+    get: (id: string) => Promise<BootstrapRun | null>;
+    create: (input: CreateBootstrapRunInput) => Promise<BootstrapRun>;
+    update: (id: string, input: UpdateBootstrapRunInput) => Promise<BootstrapRun | null>;
+    remove: (id: string) => Promise<boolean>;
   };
   commandHistory: {
     list: (limit?: number) => Promise<CommandHistoryEntry[]>;
@@ -392,10 +432,48 @@ function createHostedApi(): HostedSwitchboardApi {
       run: (input: WorkspaceScriptletRunInput) =>
         request('/api/workspace-scriptlets/run', { method: 'POST', body: input }),
     },
+    hostGroup: {
+      list: () => request('/api/host-groups'),
+      get: (id: string) => request(`/api/host-groups/${encodeURIComponent(id)}`),
+      create: (input: CreateHostGroupInput) =>
+        request('/api/host-groups', { method: 'POST', body: input }),
+      update: (id: string, input: UpdateHostGroupInput) =>
+        request(`/api/host-groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: input }),
+      remove: (id: string) => request(`/api/host-groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    },
+    hostTag: {
+      list: () => request('/api/host-tags'),
+      get: (id: string) => request(`/api/host-tags/${encodeURIComponent(id)}`),
+      create: (input: CreateHostTagInput) =>
+        request('/api/host-tags', { method: 'POST', body: input }),
+      update: (id: string, input: UpdateHostTagInput) =>
+        request(`/api/host-tags/${encodeURIComponent(id)}`, { method: 'PATCH', body: input }),
+      remove: (id: string) => request(`/api/host-tags/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    },
     bootstrap: {
       presets: () => request('/api/bootstrap/presets'),
       generate: (input: BootstrapGenerateInput) =>
         request('/api/bootstrap/generate', { method: 'POST', body: input }),
+    },
+    bootstrapPreset: {
+      list: () => request('/api/bootstrap/persisted-presets'),
+      get: (id: string) => request(`/api/bootstrap/persisted-presets/${encodeURIComponent(id)}`),
+      create: (input: CreateBootstrapPresetInput) =>
+        request('/api/bootstrap/persisted-presets', { method: 'POST', body: input }),
+      update: (id: string, input: UpdateBootstrapPresetInput) =>
+        request(`/api/bootstrap/persisted-presets/${encodeURIComponent(id)}`, { method: 'PATCH', body: input }),
+      remove: (id: string) =>
+        request(`/api/bootstrap/persisted-presets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    },
+    bootstrapRun: {
+      list: () => request('/api/bootstrap/runs'),
+      get: (id: string) => request(`/api/bootstrap/runs/${encodeURIComponent(id)}`),
+      create: (input: CreateBootstrapRunInput) =>
+        request('/api/bootstrap/runs', { method: 'POST', body: input }),
+      update: (id: string, input: UpdateBootstrapRunInput) =>
+        request(`/api/bootstrap/runs/${encodeURIComponent(id)}`, { method: 'PATCH', body: input }),
+      remove: (id: string) =>
+        request(`/api/bootstrap/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     },
     commandHistory: {
       list: () => request('/api/command-history'),

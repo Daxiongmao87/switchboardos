@@ -4,6 +4,8 @@ import type {
   BootstrapGenerateInput,
   BootstrapGenerateResult,
   BootstrapPreset,
+  BootstrapPresetRecord,
+  BootstrapRun,
   CommandHistoryEntry,
   ConnectionTestResult,
   AppManifest,
@@ -20,12 +22,20 @@ import type {
   CreateAppPermissionInput,
   CreateAuditEventInput,
   CreateAgentEndpointInput,
+  CreateBootstrapPresetInput,
+  CreateBootstrapRunInput,
   CreateCommandHistoryInput,
+  CreateCredentialRefInput,
+  CreateHostGroupInput,
   CreateHostInput,
+  CreateHostTagInput,
   CreateWorkspaceProfileInput,
+  CredentialRef,
   HostOperationInput,
   HostOperationResult,
+  HostGroup,
   HostRecord,
+  HostTag,
   MvpSettings,
   MvpSettingsUpdate,
   OperatorActionExecuteInput,
@@ -53,7 +63,12 @@ import type {
   TerminalWriteResult,
   UpdateAppManifestInput,
   UpdateAgentEndpointInput,
+  UpdateBootstrapPresetInput,
+  UpdateBootstrapRunInput,
+  UpdateCredentialRefInput,
+  UpdateHostGroupInput,
   UpdateHostInput,
+  UpdateHostTagInput,
   UpdateWorkspaceProfileInput,
   WorkspaceArtifactContentRecord,
   WorkspaceScriptletRunInput,
@@ -185,9 +200,44 @@ export interface SwitchboardApi {
   workspaceScriptlet: {
     run: (input: WorkspaceScriptletRunInput) => Promise<WorkspaceScriptletRunResult>;
   };
+  hostGroup: {
+    list: () => Promise<HostGroup[]>;
+    get: (id: string) => Promise<HostGroup | null>;
+    create: (input: CreateHostGroupInput) => Promise<HostGroup>;
+    update: (id: string, input: UpdateHostGroupInput) => Promise<HostGroup | null>;
+    remove: (id: string) => Promise<boolean>;
+  };
+  hostTag: {
+    list: () => Promise<HostTag[]>;
+    get: (id: string) => Promise<HostTag | null>;
+    create: (input: CreateHostTagInput) => Promise<HostTag>;
+    update: (id: string, input: UpdateHostTagInput) => Promise<HostTag | null>;
+    remove: (id: string) => Promise<boolean>;
+  };
+  credentialRef: {
+    list: () => Promise<CredentialRef[]>;
+    get: (id: string) => Promise<CredentialRef | null>;
+    create: (input: CreateCredentialRefInput) => Promise<CredentialRef>;
+    update: (id: string, input: UpdateCredentialRefInput) => Promise<CredentialRef | null>;
+    remove: (id: string) => Promise<boolean>;
+  };
   bootstrap: {
     presets: () => Promise<BootstrapPreset[]>;
     generate: (input: BootstrapGenerateInput) => Promise<BootstrapGenerateResult>;
+  };
+  bootstrapPreset: {
+    list: () => Promise<BootstrapPresetRecord[]>;
+    get: (id: string) => Promise<BootstrapPresetRecord | null>;
+    create: (input: CreateBootstrapPresetInput) => Promise<BootstrapPresetRecord>;
+    update: (id: string, input: UpdateBootstrapPresetInput) => Promise<BootstrapPresetRecord | null>;
+    remove: (id: string) => Promise<boolean>;
+  };
+  bootstrapRun: {
+    list: () => Promise<BootstrapRun[]>;
+    get: (id: string) => Promise<BootstrapRun | null>;
+    create: (input: CreateBootstrapRunInput) => Promise<BootstrapRun>;
+    update: (id: string, input: UpdateBootstrapRunInput) => Promise<BootstrapRun | null>;
+    remove: (id: string) => Promise<boolean>;
   };
   commandHistory: {
     list: (limit?: number) => Promise<CommandHistoryEntry[]>;

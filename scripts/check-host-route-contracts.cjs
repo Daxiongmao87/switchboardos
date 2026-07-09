@@ -1504,6 +1504,11 @@ function validateHostedDispatches() {
     fail('Hosted browser API must expose credentialRef metadata CRUD methods.');
   }
 
+  if (!switchboardApiText.includes('credentialRef: {')
+    || !preloadText.includes('credentialRef: {')) {
+    fail('Desktop preload and SwitchboardApi must expose credentialRef metadata CRUD methods.');
+  }
+
   if (!contractText.includes('credentialRefNameLogged: false')
     || !contractText.includes('credentialReferenceValueLogged: false')
     || !contractText.includes('credentialRefMetadataLogged: false')
@@ -1599,6 +1604,24 @@ function validateHostedDispatches() {
     || !hostedText.includes("contractId: 'hosted:PATCH:/api/host-tags/:id'")
     || !hostedText.includes("contractId: 'hosted:DELETE:/api/host-tags/:id'")) {
     fail('Hosted host group/tag CRUD routes must expose all ten route-contract dispatches.');
+  }
+
+  if (!hostedApiText.includes('hostGroup: {')
+    || !hostedApiText.includes("request('/api/host-groups')")
+    || !hostedApiText.includes('/api/host-groups/${encodeURIComponent(id)}')
+    || !hostedApiText.includes("request('/api/host-groups', { method: 'POST'")
+    || !hostedApiText.includes('hostTag: {')
+    || !hostedApiText.includes("request('/api/host-tags')")
+    || !hostedApiText.includes('/api/host-tags/${encodeURIComponent(id)}')
+    || !hostedApiText.includes("request('/api/host-tags', { method: 'POST'")) {
+    fail('Hosted browser API must expose hostGroup and hostTag CRUD methods.');
+  }
+
+  if (!switchboardApiText.includes('hostGroup: {')
+    || !switchboardApiText.includes('hostTag: {')
+    || !preloadText.includes('hostGroup: {')
+    || !preloadText.includes('hostTag: {')) {
+    fail('Desktop preload and SwitchboardApi must expose hostGroup and hostTag CRUD methods.');
   }
 
   if (!hostedText.includes('hostGroupRouteSuccessMetadata')
@@ -1796,6 +1819,24 @@ function validateHostedDispatches() {
         fail('Hosted bootstrap helper is not backed by runHostRouteContract.');
       }
     }
+
+    if (!hostedApiText.includes('bootstrapPreset: {')
+      || !hostedApiText.includes("request('/api/bootstrap/persisted-presets')")
+      || !hostedApiText.includes('/api/bootstrap/persisted-presets/${encodeURIComponent(id)}')
+      || !hostedApiText.includes("request('/api/bootstrap/persisted-presets', { method: 'POST'")
+      || !hostedApiText.includes('bootstrapRun: {')
+      || !hostedApiText.includes("request('/api/bootstrap/runs')")
+      || !hostedApiText.includes('/api/bootstrap/runs/${encodeURIComponent(id)}')
+      || !hostedApiText.includes("request('/api/bootstrap/runs', { method: 'POST'")) {
+      fail('Hosted browser API must expose bootstrapPreset and bootstrapRun CRUD methods.');
+    }
+
+    if (!switchboardApiText.includes('bootstrapPreset: {')
+      || !switchboardApiText.includes('bootstrapRun: {')
+      || !preloadText.includes('bootstrapPreset: {')
+      || !preloadText.includes('bootstrapRun: {')) {
+      fail('Desktop preload and SwitchboardApi must expose bootstrapPreset and bootstrapRun CRUD methods.');
+    }
   }
 
   if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/command-history'))) {
@@ -1815,6 +1856,7 @@ function validateHostedDispatches() {
     }
 
     if (!preloadText.includes("invoke('command-history:get', id)")
+      || !preloadText.includes('get: (id: string) => Promise<CommandHistoryEntry | null>;')
       || !switchboardApiText.includes('get: (id: string) => Promise<CommandHistoryEntry | null>')) {
       fail('Preload and SwitchboardApi must expose commandHistory.get through IPC.');
     }
