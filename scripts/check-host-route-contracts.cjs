@@ -1469,6 +1469,15 @@ function validateHostedDispatches() {
     fail('Hosted route handlers are not using runHostRouteContract.');
   }
 
+  if (!switchboardApiText.includes('navigate: (route: string) => void;')
+    || !preloadText.includes("navigate: (route: string): void => {")
+    || !preloadText.includes("window.postMessage({ type: 'sb:navigate', route }, '*');")
+    || !hostedApiText.includes('navigate: (route: string) => void;')
+    || !hostedApiText.includes("navigate: (route: string): void => {")
+    || !hostedApiText.includes("window.postMessage({ type: 'sb:navigate', route }, '*');")) {
+    fail('Hosted browser API must expose window.navigate through the shell sb:navigate postMessage contract.');
+  }
+
   if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/credential-refs'))) {
     const credentialRefHelperIndex = hostedText.indexOf('private runHostedCredentialRefRoute');
     if (credentialRefHelperIndex === -1) {

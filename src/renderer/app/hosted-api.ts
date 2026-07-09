@@ -122,6 +122,7 @@ interface HostedSwitchboardApi {
     close: () => Promise<void>;
     getBounds: () => Promise<WindowBounds | null>;
     restoreBounds: (bounds: WindowBounds) => Promise<void>;
+    navigate: (route: string) => void;
   };
   dialog: {
     openFile: (_options?: Record<string, unknown>) => Promise<DialogResult>;
@@ -321,6 +322,9 @@ function createHostedApi(): HostedSwitchboardApi {
       close: () => Promise.resolve(),
       getBounds: () => Promise.resolve(null),
       restoreBounds: () => Promise.resolve(),
+      navigate: (route: string): void => {
+        window.postMessage({ type: 'sb:navigate', route }, '*');
+      },
     },
     dialog: {
       openFile: () => Promise.resolve({ filePaths: [], canceled: true }),

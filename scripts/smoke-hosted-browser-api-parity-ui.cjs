@@ -47,8 +47,8 @@ if (typeof WebSocket !== 'function') {
 
 const repoRoot = join(__dirname, '..');
 const electronBin = join(repoRoot, 'node_modules', '.bin', 'electron');
-const hostedPort = 9900 + Math.floor(Math.random() * 300);
-const browserCdpPort = 10300 + Math.floor(Math.random() * 300);
+const hostedPort = 11000 + Math.floor(Math.random() * 300);
+const browserCdpPort = 11300 + Math.floor(Math.random() * 300);
 const cdpCommandTimeoutMs = 180000;
 const configDir = mkdtempSync(join(tmpdir(), 'switchboardos-hosted-browser-api-'));
 const electronUserDataDir = join(configDir, 'electron-user-data');
@@ -260,6 +260,8 @@ async function waitForHostedBrowserApi(cdp) {
     const ready = await cdp.evaluate(`Boolean(
       window.location.origin === ${JSON.stringify(`http://127.0.0.1:${hostedPort}`)}
       && window.sb
+      && window.sb.window
+      && typeof window.sb.window.navigate === 'function'
       && window.sb.hostGroup
       && window.sb.hostTag
       && window.sb.credentialRef
@@ -304,11 +306,33 @@ async function main() {
         runId: null,
         commandId: null,
       };
+      const waitForBrowserCondition = async (condition, description, timeoutMs = 15000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          const value = condition();
+          if (value) {
+            return value;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        throw new Error(description);
+      };
 
       try {
         const appInfo = await api.app.getInfo();
         const authSession = await fetch('/api/auth/session').then((response) => response.json());
         const bounds = await api.window.getBounds();
+        const initialSettingsWindowCount = document.querySelectorAll('.desktop-window[data-app-id="settings"]').length;
+        const navigationMethodAvailable = typeof api.window?.navigate === 'function';
+        api.window.navigate('/settings');
+        const settingsWindow = await waitForBrowserCondition(() => {
+          const candidates = Array.from(document.querySelectorAll('.desktop-window[data-app-id="settings"]'));
+          return candidates.find((element) =>
+            ((element.querySelector('.window-title')?.textContent || '').trim().toLowerCase()).includes('settings'),
+          ) || candidates[0] || null;
+        }, 'hosted window.navigate did not open the settings shell window');
+        const settingsWindowCount = document.querySelectorAll('.desktop-window[data-app-id="settings"]').length;
+        const settingsWindowTitle = (settingsWindow.querySelector('.window-title')?.textContent || '').trim();
         const groupBefore = await api.hostGroup.list();
         const tagBefore = await api.hostTag.list();
         const presetBefore = await api.bootstrapPreset.list();
@@ -411,6 +435,14 @@ async function main() {
             && authSession.authenticated === true
             && authSession.loginRequired === false,
           preloadAbsent: typeof window.require === 'undefined' && bounds === null,
+          windowNavigation: {
+            methodAvailable: navigationMethodAvailable,
+            settingsWindowOpened: Boolean(settingsWindow),
+            settingsWindowCountIncreased: settingsWindowCount > initialSettingsWindowCount,
+            settingsWindowAppId: settingsWindow.getAttribute('data-app-id'),
+            settingsWindowId: settingsWindow.getAttribute('data-window-id'),
+            settingsWindowTitle,
+          },
           beforeCounts: {
             groups: groupBefore.length,
             tags: tagBefore.length,
@@ -496,6 +528,12 @@ async function main() {
     assert.equal(result.origin, `http://127.0.0.1:${hostedPort}`, 'hosted browser loaded the hosted HTTP UI');
     assert.equal(result.hostedInfo, true, 'hosted app info reports no-auth hosted browser mode');
     assert.equal(result.preloadAbsent, true, 'hosted browser path is not using Electron preload APIs');
+    assert.equal(result.windowNavigation.methodAvailable, true, 'hosted browser API exposes window.navigate');
+    assert.equal(result.windowNavigation.settingsWindowOpened, true, 'window.navigate opened a shell-owned window');
+    assert.equal(result.windowNavigation.settingsWindowCountIncreased, true, 'window.navigate created the settings window');
+    assert.equal(result.windowNavigation.settingsWindowAppId, 'settings', 'window.navigate opened the settings app window');
+    assert.ok(result.windowNavigation.settingsWindowId, 'window.navigate produced a shell window id');
+    assert.match(result.windowNavigation.settingsWindowTitle, /settings/i, 'window.navigate opened the settings window title');
     assert.equal(result.group.created, true, 'hostGroup.create returned a persisted group');
     assert.equal(result.group.read, true, 'hostGroup.get returned the created group');
     assert.equal(result.group.updated, true, 'hostGroup.update returned the updated group');
@@ -535,7 +573,7 @@ async function main() {
     assert.equal(result.audit.commandOutputLogged, true, 'command history audit metadata marks command output as not logged');
     assert.equal(result.audit.containsSecret, false, 'audit output does not contain browser-created secret markers');
 
-    console.log('hosted browser API parity smoke: no-preload hosted window.sb CRUD, missing reads, and sanitized audit passed');
+    console.log('hosted browser API parity smoke: no-preload hosted window.sb navigation, CRUD, missing reads, and sanitized audit passed');
   } finally {
     cdp.close();
     cleanup();
