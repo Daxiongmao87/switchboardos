@@ -2209,6 +2209,18 @@ function validateHostedDispatches() {
     fail('Generated app runtime must call structured appHost API for host SDK operations.');
   }
 
+  if (!generatedRuntimeText.includes("openTerminal: (hostId) => __sdkRequest('host:openTerminal', { hostId })")
+    || !generatedRuntimeText.includes("message.method === 'host:openTerminal'")
+    || !generatedRuntimeText.includes('this.assertHostOpenTerminalAllowed()')
+    || !generatedRuntimeText.includes("this.grantedCapabilities.has('host:actions')")
+    || !generatedRuntimeText.includes('api.window.navigate(`/terminal?hostId=${encodeURIComponent(hostId)}`)')) {
+    fail('Generated app runtime missing shell-owned host.openTerminal SDK path through window.navigate and host:actions permission.');
+  }
+
+  if (generatedRuntimeText.includes('openHostTerminal(')) {
+    fail('Generated app runtime host.openTerminal must use the shell window navigation API, not direct shell component methods.');
+  }
+
   if (generatedRuntimeText.includes('switchboardos.generated-app') || generatedRuntimeText.includes('localStorage')) {
     fail('Generated app runtime must not persist SwitchboardOS.storage through renderer localStorage.');
   }

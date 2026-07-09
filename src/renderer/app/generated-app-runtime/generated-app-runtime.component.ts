@@ -494,6 +494,7 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
           getHostStatus: (hostId) => __sdkRequest('host:getStatus', { hostId }),
           getCapabilities: (hostId) => __sdkRequest('host:getCapabilities', { hostId }),
           testConnection: (hostId) => __sdkRequest('host:testConnection', { hostId }),
+          openTerminal: (hostId) => __sdkRequest('host:openTerminal', { hostId }),
         }),
         storage: Object.freeze({
           get: (key) => __sdkRequest('storage:get', { key }),
@@ -634,6 +635,21 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
       }
       const hostId = sdkHostId(message.payload);
       return api.appHost.testConnection(this.manifest!.appId, this.windowId, hostId);
+    }
+
+    if (message.method === 'host:openTerminal') {
+      if (!api?.window?.navigate) {
+        throw new Error('Generated app host terminal navigation API is unavailable.');
+      }
+      const hostId = sdkHostId(message.payload);
+      this.assertHostOpenTerminalAllowed();
+      api.window.navigate(`/terminal?hostId=${encodeURIComponent(hostId)}`);
+      return {
+        opened: true,
+        method: 'host:openTerminal',
+        hostId,
+        route: '/terminal',
+      };
     }
 
     if (message.method === 'storage:get') {
@@ -884,6 +900,12 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
   private assertContextMenuContributionAllowed(): void {
     if (!this.grantedCapabilities.has('context-menu:contribute')) {
       throw new Error('Generated app context menu requires approved context-menu:contribute capability.');
+    }
+  }
+
+  private assertHostOpenTerminalAllowed(): void {
+    if (!this.grantedCapabilities.has('host:actions')) {
+      throw new Error('Generated app host.openTerminal requires approved host:actions capability.');
     }
   }
 
