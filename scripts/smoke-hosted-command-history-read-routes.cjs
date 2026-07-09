@@ -145,6 +145,31 @@ async function main() {
     assert.equal(listed.json.length, 1);
     assert.equal(listed.json[0].id, created.json.id);
 
+    const invalidLimit = await jsonRequest(baseUrl, '/api/command-history?limit=0', { cookie });
+    assert.equal(invalidLimit.status, 400, 'invalid command history list limit is rejected');
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const secondInput = {
+      command: 'SECOND_SECRET_COMMAND --token SECOND_SECRET_TOKEN',
+      hostId: 'host-command-history-smoke',
+      sessionId: 'session-command-history-smoke-2',
+      exitCode: 1,
+      durationMs: 654,
+    };
+    const secondCreated = await jsonRequest(baseUrl, '/api/command-history', {
+      method: 'POST',
+      cookie,
+      csrfToken,
+      body: secondInput,
+    });
+    assert.equal(secondCreated.status, 200, `second command history create succeeds: ${secondCreated.text}`);
+    assert.ok(secondCreated.json.id, 'second command history create returns an id');
+
+    const limitedList = await jsonRequest(baseUrl, '/api/command-history?limit=1', { cookie });
+    assert.equal(limitedList.status, 200, 'limited command history list succeeds');
+    assert.equal(limitedList.json.length, 1, 'limited command history list returns one entry');
+    assert.equal(limitedList.json[0].id, secondCreated.json.id, 'limited command history list returns the newest entry');
+
     policyMode = 'disabled';
     const policyDeniedRead = await jsonRequest(baseUrl, `/api/command-history/${created.json.id}`, { cookie });
     assert.equal(policyDeniedRead.status, 403, 'disabled policy denies command history read');
@@ -190,9 +215,12 @@ async function main() {
     const auditJson = JSON.stringify(audits);
     assert.equal(auditJson.includes('SECRET_COMMAND_TEXT'), false, 'command text was not written to audit');
     assert.equal(auditJson.includes('SECRET_COMMAND_TOKEN'), false, 'command token text was not written to audit');
+    assert.equal(auditJson.includes('SECOND_SECRET_COMMAND'), false, 'second command text was not written to audit');
+    assert.equal(auditJson.includes('SECOND_SECRET_TOKEN'), false, 'second command token text was not written to audit');
     assert.equal(auditJson.includes(createInput.sessionId), false, 'session id was not written through command payload audit');
+    assert.equal(auditJson.includes(secondInput.sessionId), false, 'second session id was not written through command payload audit');
 
-    console.log('hosted command-history read route smoke: get parity, token auth, CSRF, policy, persistence, missing null, and sanitized audit passed');
+    console.log('hosted command-history read route smoke: get/list limit parity, token auth, CSRF, policy, persistence, missing null, and sanitized audit passed');
   } finally {
     server.close();
     store.close();

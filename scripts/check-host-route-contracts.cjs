@@ -1855,6 +1855,19 @@ function validateHostedDispatches() {
       fail('Hosted API must expose commandHistory.get through /api/command-history/:id.');
     }
 
+    if (!hostedText.includes('validateCommandHistoryListLimitInput')
+      || !hostedText.includes("const limitParam = url.searchParams.get('limit');")
+      || !hostedText.includes('limitParam === null ? undefined : Number(limitParam)')
+      || !hostedText.includes('execute: () => this.options.store.listCommandHistory(validatedLimit)')) {
+      fail('Hosted command-history list must validate and pass the optional limit query to the store.');
+    }
+
+    if (!hostedApiText.includes('list: (limit?: number) => {')
+      || !hostedApiText.includes("?limit=${encodeURIComponent(String(limit))}")
+      || !hostedApiText.includes('return request(`/api/command-history${query}`);')) {
+      fail('Hosted browser API commandHistory.list must preserve the optional limit argument.');
+    }
+
     if (!preloadText.includes("invoke('command-history:get', id)")
       || !preloadText.includes('get: (id: string) => Promise<CommandHistoryEntry | null>;')
       || !switchboardApiText.includes('get: (id: string) => Promise<CommandHistoryEntry | null>')) {
@@ -2252,6 +2265,7 @@ function validateHostedDispatches() {
   }
 
   if (hostedText.includes('return this.options.store.listCommandHistory();')
+    || hostedText.includes('execute: () => this.options.store.listCommandHistory(),')
     || hostedText.includes('return this.options.store.createCommandHistoryEntry(asRecord(body) as CreateCommandHistoryInput);')
     || hostedText.includes('return this.options.store.getCommandHistoryEntry(decodeURIComponent(action));')
     || hostedText.includes('return this.options.store.deleteCommandHistoryEntry(decodeURIComponent(action));')) {

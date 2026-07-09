@@ -36,6 +36,7 @@ import {
   validateBootstrapRunUpdateInput,
   validateCommandHistoryCreateInput,
   validateCommandHistoryEntryIdInput,
+  validateCommandHistoryListLimitInput,
   validateCredentialRefCreateInput,
   validateCredentialRefIdInput,
   validateCredentialRefUpdateInput,
@@ -841,7 +842,7 @@ export class HostedServer {
     }
 
     if (resource === 'command-history') {
-      return this.routeCommandHistoryApi(method, actionOrId, body, session);
+      return this.routeCommandHistoryApi(method, actionOrId, body, url, session);
     }
 
     if (resource === 'app-manifests') {
@@ -2087,18 +2088,23 @@ export class HostedServer {
     method: string,
     action: string | undefined,
     body: unknown,
+    url: URL,
     session: HostedSession | null,
   ): unknown {
     if (!action && method === 'GET') {
       validateHostedNoRequestBody(body);
+      const limitParam = url.searchParams.get('limit');
+      const validatedLimit = validateCommandHistoryListLimitInput(
+        limitParam === null ? undefined : Number(limitParam),
+      );
       return this.runHostedCommandHistoryRoute({
         contractId: 'hosted:GET:/api/command-history',
         session,
         route: '/api/command-history',
         action: 'GET /api/command-history',
         entityType: 'command_history',
-        input: null,
-        execute: () => this.options.store.listCommandHistory(),
+        input: validatedLimit ?? null,
+        execute: () => this.options.store.listCommandHistory(validatedLimit),
       });
     }
     if (!action && method === 'POST') {

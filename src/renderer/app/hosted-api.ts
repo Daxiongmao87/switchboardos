@@ -476,7 +476,10 @@ function createHostedApi(): HostedSwitchboardApi {
         request(`/api/bootstrap/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     },
     commandHistory: {
-      list: () => request('/api/command-history'),
+      list: (limit?: number) => {
+        const query = limit === undefined ? '' : `?limit=${encodeURIComponent(String(limit))}`;
+        return request(`/api/command-history${query}`);
+      },
       get: (id: string) => request(`/api/command-history/${encodeURIComponent(id)}`),
       create: (input: CreateCommandHistoryInput) =>
         request('/api/command-history', { method: 'POST', body: input }),
