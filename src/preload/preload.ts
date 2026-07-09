@@ -418,6 +418,7 @@ contextBridge.exposeInMainWorld('sb', {
   // --- Command History ---
   commandHistory: {
     list: (limit?: number): Promise<CommandHistoryEntry[]> => invoke('command-history:list', limit),
+    get: (id: string): Promise<CommandHistoryEntry | null> => invoke('command-history:get', id),
     create: (input: CreateCommandHistoryInput): Promise<CommandHistoryEntry> => invoke('command-history:create', input),
     remove: (id: string): Promise<boolean> => invoke('command-history:delete', id),
   },

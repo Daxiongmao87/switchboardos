@@ -191,6 +191,7 @@ export interface SwitchboardApi {
   };
   commandHistory: {
     list: (limit?: number) => Promise<CommandHistoryEntry[]>;
+    get: (id: string) => Promise<CommandHistoryEntry | null>;
     create: (input: CreateCommandHistoryInput) => Promise<CommandHistoryEntry>;
     remove: (id: string) => Promise<boolean>;
   };

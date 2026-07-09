@@ -361,6 +361,11 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:command-history:get',
+    routeMarker: "'command-history:get'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:command-history:delete',
     routeMarker: "'command-history:delete'",
     contextFile: 'src/main/main.ts',
@@ -843,6 +848,10 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:POST:/api/command-history',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:GET:/api/command-history/:id',
     contextFile: 'src/main/hosted-server.ts',
   },
   {
@@ -1799,6 +1808,25 @@ function validateHostedDispatches() {
         fail('Hosted command-history helper is not backed by runHostRouteContract.');
       }
     }
+
+    if (!hostedApiText.includes('commandHistory: {')
+      || !hostedApiText.includes('get: (id: string) => request(`/api/command-history/${encodeURIComponent(id)}`)')) {
+      fail('Hosted API must expose commandHistory.get through /api/command-history/:id.');
+    }
+
+    if (!preloadText.includes("invoke('command-history:get', id)")
+      || !switchboardApiText.includes('get: (id: string) => Promise<CommandHistoryEntry | null>')) {
+      fail('Preload and SwitchboardApi must expose commandHistory.get through IPC.');
+    }
+
+    if (!contractText.includes("id: 'ipc:command-history:get'")
+      || !contractText.includes("id: 'hosted:GET:/api/command-history/:id'")
+      || !contractText.includes("eventType: 'command_history.read'")
+      || !contractText.includes('mutatingOperation: false')
+      || !contractText.includes('commandLogged: false')
+      || !contractText.includes('commandOutputLogged: false')) {
+      fail('Command-history read routes must declare paired sanitized route contracts.');
+    }
   }
 
   if (REQUIRED_HOST_CONTRACTS.some((entry) => entry.id.includes('/api/settings'))) {
@@ -2176,12 +2204,14 @@ function validateHostedDispatches() {
 
   if (mainText.includes("ipcMain.handle('command-history:list', async (_event, limit?: number) => mvpStore.listCommandHistory(limit))")
     || mainText.includes("ipcMain.handle('command-history:create', async (_event, input: CreateCommandHistoryInput) => mvpStore.createCommandHistoryEntry(input))")
+    || mainText.includes("ipcMain.handle('command-history:get', async (_event, entryId: string) => mvpStore.getCommandHistoryEntry(entryId))")
     || mainText.includes("ipcMain.handle('command-history:delete', async (_event, entryId: string) => mvpStore.deleteCommandHistoryEntry(entryId))")) {
     fail('Direct IPC command-history fallback detected in main.ts.');
   }
 
   if (hostedText.includes('return this.options.store.listCommandHistory();')
     || hostedText.includes('return this.options.store.createCommandHistoryEntry(asRecord(body) as CreateCommandHistoryInput);')
+    || hostedText.includes('return this.options.store.getCommandHistoryEntry(decodeURIComponent(action));')
     || hostedText.includes('return this.options.store.deleteCommandHistoryEntry(decodeURIComponent(action));')) {
     fail('Direct hosted command-history fallback detected in hosted-server.ts.');
   }

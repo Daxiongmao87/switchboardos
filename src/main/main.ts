@@ -3895,6 +3895,20 @@ ipcMain.handle('command-history:create', async (_event, input: CreateCommandHist
     commandHistoryRouteSuccessMetadata,
   );
 });
+ipcMain.handle('command-history:get', async (_event, entryId: string) => {
+  const validatedEntryId = validateCommandHistoryEntryIdInput(entryId);
+  return runCommandHistoryIpcRoute(
+    'ipc:command-history:get',
+    {
+      route: 'command-history:get',
+      action: 'command-history:get',
+      entityId: validatedEntryId,
+      entityType: 'command_history',
+    },
+    validatedEntryId,
+    () => mvpStore.getCommandHistoryEntry(validatedEntryId),
+  );
+});
 ipcMain.handle('command-history:delete', async (_event, entryId: string) => {
   const validatedEntryId = validateCommandHistoryEntryIdInput(entryId);
   return runCommandHistoryIpcRoute(

@@ -3876,6 +3876,43 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
     mutatesState: true,
   },
   {
+    id: 'ipc:command-history:get',
+    transport: 'ipc',
+    route: {
+      channel: 'command-history:get',
+    },
+    requestValidator: 'validateCommandHistoryEntryIdInput',
+    identity: {
+      caller: 'ipc',
+      sessionRequired: false,
+      appIdentityRequired: false,
+    },
+    capability: 'command-history:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'command_history.read',
+      entityType: 'command_history',
+      entityIdSource: 'context-entity-id',
+      message: 'Command history entry read.',
+      metadata: {
+        actionClass: 'command-history-route',
+        mutatingOperation: false,
+        commandLogged: false,
+        commandOutputLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'hosted:GET:/api/command-history/:id',
+    },
+    mutatesState: false,
+  },
+  {
     id: 'ipc:command-history:delete',
     transport: 'ipc',
     route: {
@@ -3987,6 +4024,44 @@ export const HOST_ROUTE_CONTRACTS: readonly RouteAccessContract[] = [
       peerRouteId: 'ipc:command-history:create',
     },
     mutatesState: true,
+  },
+  {
+    id: 'hosted:GET:/api/command-history/:id',
+    transport: 'hosted',
+    route: {
+      method: 'GET',
+      path: '/api/command-history/:id',
+    },
+    requestValidator: 'validateCommandHistoryEntryIdInput',
+    identity: {
+      caller: 'hosted',
+      sessionRequired: true,
+      appIdentityRequired: true,
+    },
+    capability: 'command-history:read',
+    policyDecisionRequired: true,
+    denialAudit: {
+      source: 'policy.denied',
+      eventType: 'policy.denied',
+    },
+    successAudit: {
+      required: false,
+      eventType: 'command_history.read',
+      entityType: 'command_history',
+      entityIdSource: 'context-entity-id',
+      message: 'Command history entry read.',
+      metadata: {
+        actionClass: 'command-history-route',
+        mutatingOperation: false,
+        commandLogged: false,
+        commandOutputLogged: false,
+      },
+    },
+    parity: {
+      kind: 'paired',
+      peerRouteId: 'ipc:command-history:get',
+    },
+    mutatesState: false,
   },
   {
     id: 'hosted:DELETE:/api/command-history/:id',

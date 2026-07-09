@@ -193,6 +193,7 @@ interface HostedSwitchboardApi {
   };
   commandHistory: {
     list: (limit?: number) => Promise<CommandHistoryEntry[]>;
+    get: (id: string) => Promise<CommandHistoryEntry | null>;
     create: (input: CreateCommandHistoryInput) => Promise<CommandHistoryEntry>;
     remove: (id: string) => Promise<boolean>;
   };
@@ -398,6 +399,7 @@ function createHostedApi(): HostedSwitchboardApi {
     },
     commandHistory: {
       list: () => request('/api/command-history'),
+      get: (id: string) => request(`/api/command-history/${encodeURIComponent(id)}`),
       create: (input: CreateCommandHistoryInput) =>
         request('/api/command-history', { method: 'POST', body: input }),
       remove: (id: string) =>

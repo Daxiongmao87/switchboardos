@@ -2114,6 +2114,20 @@ export class HostedServer {
         successAuditMetadata: (result) => this.commandHistoryRouteSuccessMetadata(result),
       });
     }
+    if (action && method === 'GET') {
+      validateHostedNoRequestBody(body);
+      const entryId = validateCommandHistoryEntryIdInput(decodeURIComponent(action));
+      return this.runHostedCommandHistoryRoute({
+        contractId: 'hosted:GET:/api/command-history/:id',
+        session,
+        route: '/api/command-history/:id',
+        action: 'GET /api/command-history/:id',
+        entityId: entryId,
+        entityType: 'command_history',
+        input: entryId,
+        execute: () => this.options.store.getCommandHistoryEntry(entryId),
+      });
+    }
     if (action && method === 'DELETE') {
       const entryId = validateCommandHistoryEntryIdInput(decodeURIComponent(action));
       return this.runHostedCommandHistoryRoute({
