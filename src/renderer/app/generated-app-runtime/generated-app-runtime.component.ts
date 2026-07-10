@@ -494,6 +494,11 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
           getHostStatus: (hostId) => __sdkRequest('host:getStatus', { hostId }),
           getCapabilities: (hostId) => __sdkRequest('host:getCapabilities', { hostId }),
           testConnection: (hostId) => __sdkRequest('host:testConnection', { hostId }),
+          exec: (hostId, command, options) => __sdkRequest('host:exec', {
+            hostId,
+            command,
+            timeoutMs: options && options.timeoutMs,
+          }),
           openTerminal: (hostId) => __sdkRequest('host:openTerminal', { hostId }),
         }),
         storage: Object.freeze({
@@ -635,6 +640,16 @@ export class GeneratedAppRuntimeComponent implements AfterViewInit, OnInit, OnCh
       }
       const hostId = sdkHostId(message.payload);
       return api.appHost.testConnection(this.manifest!.appId, this.windowId, hostId);
+    }
+
+    if (message.method === 'host:exec') {
+      if (!api?.appHost) {
+        throw new Error('Generated app host SDK API is unavailable.');
+      }
+      const payload = sdkHostExecPayload(message.payload);
+      return api.appHost.exec(this.manifest!.appId, this.windowId, payload.hostId, payload.command, {
+        timeoutMs: payload.timeoutMs,
+      });
     }
 
     if (message.method === 'host:openTerminal') {
@@ -1065,6 +1080,29 @@ function sdkHostId(payload: unknown): string {
     throw new Error('Host SDK request is missing hostId.');
   }
   return hostId;
+}
+
+function sdkHostExecPayload(payload: unknown): { hostId: string; command: string; timeoutMs?: number } {
+  const record = isRecord(payload) ? payload : {};
+  const hostId = sdkHostId(record);
+  const command = typeof record.command === 'string' ? record.command.trim() : '';
+  if (!command) {
+    throw new Error('Host SDK exec request is missing command.');
+  }
+  if (command.length > 4000) {
+    throw new Error('Host SDK exec command must be 4000 characters or fewer.');
+  }
+  const timeoutMs = typeof record.timeoutMs === 'number' && Number.isFinite(record.timeoutMs)
+    ? Math.trunc(record.timeoutMs)
+    : undefined;
+  if (timeoutMs !== undefined && (timeoutMs < 1000 || timeoutMs > 120000)) {
+    throw new Error('Host SDK exec timeoutMs must be between 1000 and 120000.');
+  }
+  return {
+    hostId,
+    command,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
 }
 
 function sdkStringFromRecord(record: Record<string, unknown>, key: string, fallback: string, maxLength: number): string {

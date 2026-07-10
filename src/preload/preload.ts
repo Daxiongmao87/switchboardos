@@ -41,6 +41,7 @@ import type {
   CreateWorkspaceProfileInput,
   CredentialRef,
   GeneratedAppHostCapabilitiesResult,
+  GeneratedAppHostExecResult,
   GeneratedAppHostGetResult,
   GeneratedAppHostListResult,
   GeneratedAppHostStatusResult,
@@ -378,6 +379,21 @@ contextBridge.exposeInMainWorld('sb', {
       invoke('app-host:get-capabilities', { appId, windowId, hostId, method: 'host:getCapabilities' }),
     testConnection: (appId: string, windowId: string, hostId: string): Promise<GeneratedAppHostTestConnectionResult> =>
       invoke('app-host:test-connection', { appId, windowId, hostId, method: 'host:testConnection' }),
+    exec: (
+      appId: string,
+      windowId: string,
+      hostId: string,
+      command: string,
+      options?: { timeoutMs?: number },
+    ): Promise<GeneratedAppHostExecResult> =>
+      invoke('app-host:exec', {
+        appId,
+        windowId,
+        hostId,
+        command,
+        timeoutMs: options?.timeoutMs,
+        method: 'host:exec',
+      }),
   },
 
   // --- Agent Endpoints ---
@@ -584,6 +600,13 @@ declare global {
         getHostStatus: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostStatusResult>;
         getCapabilities: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostCapabilitiesResult>;
         testConnection: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostTestConnectionResult>;
+        exec: (
+          appId: string,
+          windowId: string,
+          hostId: string,
+          command: string,
+          options?: { timeoutMs?: number },
+        ) => Promise<GeneratedAppHostExecResult>;
       };
       agentEndpoint: {
         list: () => Promise<AgentEndpoint[]>;

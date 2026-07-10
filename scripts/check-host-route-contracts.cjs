@@ -291,6 +291,11 @@ const REQUIRED_HOST_CONTRACTS = [
     contextFile: 'src/main/main.ts',
   },
   {
+    id: 'ipc:app-host:exec',
+    routeMarker: "'app-host:exec'",
+    contextFile: 'src/main/main.ts',
+  },
+  {
     id: 'ipc:bootstrap-preset:list',
     routeMarker: "'bootstrap-preset:list'",
     contextFile: 'src/main/main.ts',
@@ -792,6 +797,10 @@ const REQUIRED_HOST_CONTRACTS = [
   },
   {
     id: 'hosted:POST:/api/app-host/test-connection',
+    contextFile: 'src/main/hosted-server.ts',
+  },
+  {
+    id: 'hosted:POST:/api/app-host/exec',
     contextFile: 'src/main/hosted-server.ts',
   },
   {
@@ -2179,7 +2188,8 @@ function validateHostedDispatches() {
 
   if (mainText.includes("ipcMain.handle('app-host:list', async (_event, input) => mvpStore.listHosts()")
     || mainText.includes("ipcMain.handle('app-host:get', async (_event, input) => mvpStore.getHost(")
-    || mainText.includes("ipcMain.handle('app-host:test-connection', async (_event, input) => mvpStore.testConnection(")) {
+    || mainText.includes("ipcMain.handle('app-host:test-connection', async (_event, input) => mvpStore.testConnection(")
+    || mainText.includes("ipcMain.handle('app-host:exec', async (_event, input) => sshService.exec(")) {
     fail('Direct IPC generated app host SDK fallback detected in main.ts.');
   }
 
@@ -2193,7 +2203,8 @@ function validateHostedDispatches() {
 
   if (generatedRuntimeText.includes('api.host.list(')
     || generatedRuntimeText.includes('api.host.get(')
-    || generatedRuntimeText.includes('api.host.testConnection(')) {
+    || generatedRuntimeText.includes('api.host.testConnection(')
+    || generatedRuntimeText.includes('api.ssh.exec(')) {
     fail('Generated app runtime host SDK must call structured appHost API, not generic host API.');
   }
 
@@ -2205,8 +2216,30 @@ function validateHostedDispatches() {
     || !generatedRuntimeText.includes('api.appHost.getHost')
     || !generatedRuntimeText.includes('api.appHost.getHostStatus')
     || !generatedRuntimeText.includes('api.appHost.getCapabilities')
-    || !generatedRuntimeText.includes('api.appHost.testConnection')) {
+    || !generatedRuntimeText.includes('api.appHost.testConnection')
+    || !generatedRuntimeText.includes('api.appHost.exec')) {
     fail('Generated app runtime must call structured appHost API for host SDK operations.');
+  }
+
+  if (!generatedRuntimeText.includes("exec: (hostId, command, options) => __sdkRequest('host:exec'")
+    || !generatedRuntimeText.includes("message.method === 'host:exec'")
+    || !generatedRuntimeText.includes('sdkHostExecPayload(message.payload)')
+    || !preloadText.includes("invoke('app-host:exec'")
+    || !hostedApiText.includes("request('/api/app-host/exec'")
+    || !hostedText.includes("contractId: 'hosted:POST:/api/app-host/exec'")
+    || !mainText.includes("runAppRouteIpc(\n    'ipc:app-host:exec'")
+    || !mainText.includes('validateGeneratedAppHostExecInput')
+    || !hostedText.includes('validateGeneratedAppHostExecInput')) {
+    fail('Generated app runtime missing host.exec SDK path through appHost dispatch, hosted parity, and runtime validators.');
+  }
+
+  if (!contractText.includes("id: 'ipc:app-host:exec'")
+    || !contractText.includes("id: 'hosted:POST:/api/app-host/exec'")
+    || !contractText.includes("eventType: 'app_host_sdk.executed'")
+    || !contractText.includes("requestValidator: 'validateGeneratedAppHostExecInput'")
+    || !contractText.includes("commandTextLogged: false")
+    || !contractText.includes("commandOutputLogged: false")) {
+    fail('Generated app host.exec route contracts must be paired, validated, and sanitize command text/output audit metadata.');
   }
 
   if (!generatedRuntimeText.includes("openTerminal: (hostId) => __sdkRequest('host:openTerminal', { hostId })")

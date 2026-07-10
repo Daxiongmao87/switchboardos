@@ -44,6 +44,7 @@ import type {
   OperatorProposeResult,
   SshExecInput,
   SshExecResult,
+  GeneratedAppHostExecResult,
   SshFileDeleteInput,
   SshFileDeleteResult,
   SshFileListInput,
@@ -264,6 +265,13 @@ interface HostedSwitchboardApi {
     getHostStatus: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostStatusResult>;
     getCapabilities: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostCapabilitiesResult>;
     testConnection: (appId: string, windowId: string, hostId: string) => Promise<GeneratedAppHostTestConnectionResult>;
+    exec: (
+      appId: string,
+      windowId: string,
+      hostId: string,
+      command: string,
+      options?: { timeoutMs?: number },
+    ) => Promise<GeneratedAppHostExecResult>;
   };
   agentEndpoint: {
     list: () => Promise<AgentEndpoint[]>;
@@ -562,6 +570,17 @@ function createHostedApi(): HostedSwitchboardApi {
         request('/api/app-host/test-connection', {
           method: 'POST',
           body: { appId, windowId, hostId, method: 'host:testConnection' },
+        }),
+      exec: (
+        appId: string,
+        windowId: string,
+        hostId: string,
+        command: string,
+        options?: { timeoutMs?: number },
+      ) =>
+        request('/api/app-host/exec', {
+          method: 'POST',
+          body: { appId, windowId, hostId, command, timeoutMs: options?.timeoutMs, method: 'host:exec' },
         }),
     },
     agentEndpoint: {

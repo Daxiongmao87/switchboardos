@@ -48,6 +48,7 @@ import {
   validateAppScopedStorageSetInput,
   validateAuditEventInput,
   validateGeneratedAppHostCapabilitiesInput,
+  validateGeneratedAppHostExecInput,
   validateGeneratedAppHostGetInput,
   validateGeneratedAppHostListInput,
   validateGeneratedAppHostStatusInput,
@@ -134,6 +135,8 @@ import type {
   CreateHostInput,
   CreateHostTagInput,
   GeneratedAppHostCapabilitiesResult,
+  GeneratedAppHostExecInput,
+  GeneratedAppHostExecResult,
   GeneratedAppHostGetResult,
   GeneratedAppHostListInput,
   GeneratedAppHostListResult,
@@ -1686,8 +1689,8 @@ function assertAppScopedStorageGranted(input: AppScopedStorageGetInput, action: 
   throw new AppCapabilityDeniedError(input.appId, 'storage:scoped', action);
 }
 
-function generatedAppHostCapabilityForMethod(input: GeneratedAppHostListInput | GeneratedAppHostTargetInput): PolicyCapability {
-  return input.method === 'host:testConnection' ? 'host:actions' : 'host:read';
+function generatedAppHostCapabilityForMethod(input: { method: string }): PolicyCapability {
+  return input.method === 'host:testConnection' || input.method === 'host:exec' ? 'host:actions' : 'host:read';
 }
 
 function generatedAppHostSummary(host: HostRecord): GeneratedAppHostSummary {
@@ -1771,6 +1774,28 @@ async function generatedAppHostTestConnectionResult(
   };
 }
 
+async function generatedAppHostExecResult(input: GeneratedAppHostExecInput): Promise<GeneratedAppHostExecResult> {
+  const result = await sshService.exec({
+    hostId: input.hostId,
+    command: input.command,
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+  });
+  return {
+    appId: input.appId,
+    windowId: input.windowId,
+    method: input.method,
+    hostId: result.hostId,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
+    status: result.status,
+    error: result.error,
+  };
+}
+
 function generatedAppHostRouteSuccessMetadata(result: GeneratedAppHostSdkResult): Record<string, unknown> {
   const found = 'found' in result ? result.found : true;
   return {
@@ -1783,6 +1808,11 @@ function generatedAppHostRouteSuccessMetadata(result: GeneratedAppHostSdkResult)
     success: 'success' in result ? result.success : null,
     status: 'status' in result && typeof result.status === 'string' ? result.status : null,
     capability: generatedAppHostCapabilityForMethod(result),
+    exitCode: 'exitCode' in result ? result.exitCode : null,
+    durationMs: 'durationMs' in result ? result.durationMs : null,
+    remoteCommandExecution: result.method === 'host:exec',
+    commandTextLogged: false,
+    commandOutputLogged: false,
     hostCredentialsLogged: false,
     hostNotesLogged: false,
     sourceCodeLogged: false,
@@ -1815,6 +1845,8 @@ function assertGeneratedAppHostCapabilityGranted(
       hostId: 'hostId' in input ? input.hostId : null,
       capability,
       granted: false,
+      commandTextLogged: false,
+      commandOutputLogged: false,
       hostCredentialsLogged: false,
       hostNotesLogged: false,
       sourceCodeLogged: false,
@@ -3606,6 +3638,25 @@ ipcMain.handle('app-host:test-connection', async (_event, input: GeneratedAppHos
     () => {
       assertGeneratedAppHostCapabilityGranted(validatedInput, 'app-host:test-connection');
       return generatedAppHostTestConnectionResult(validatedInput);
+    },
+    generatedAppHostRouteSuccessMetadata,
+  );
+});
+ipcMain.handle('app-host:exec', async (_event, input: GeneratedAppHostExecInput) => {
+  const validatedInput = validateGeneratedAppHostExecInput(input);
+  return runAppRouteIpc(
+    'ipc:app-host:exec',
+    {
+      route: 'app-host:exec',
+      action: 'app-host:exec',
+      hostId: validatedInput.hostId,
+      entityType: 'host',
+      appId: validatedInput.appId,
+    },
+    validatedInput,
+    () => {
+      assertGeneratedAppHostCapabilityGranted(validatedInput, 'app-host:exec');
+      return generatedAppHostExecResult(validatedInput);
     },
     generatedAppHostRouteSuccessMetadata,
   );

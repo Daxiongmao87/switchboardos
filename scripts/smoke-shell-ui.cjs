@@ -1869,10 +1869,12 @@ async function browserSmoke() {
     let allowedManifest = null;
     let deniedManifest = null;
     let deniedOpenTerminalManifest = null;
+    let deniedExecManifest = null;
     const allowedPermissions = [];
     const allowedAppId = `smoke-host-sdk-allowed-${Date.now()}`;
     const deniedAppId = `smoke-host-sdk-denied-${Date.now()}`;
     const deniedOpenTerminalAppId = `smoke-host-sdk-open-terminal-denied-${Date.now()}`;
+    const deniedExecAppId = `smoke-host-sdk-exec-denied-${Date.now()}`;
     const targetHostId = seededHost.id;
 
     const runtimeDiagnostics = (appId) => {
@@ -1886,6 +1888,7 @@ async function browserSmoke() {
         runtimeCapabilities: runtime?.getAttribute('data-granted-capabilities') || null,
         srcdocHasHostSdk: srcdoc.includes('SwitchboardOS.host.listHosts'),
         srcdocHasOpenTerminal: srcdoc.includes('SwitchboardOS.host.openTerminal'),
+        srcdocHasExec: srcdoc.includes('SwitchboardOS.host.exec'),
         semanticStatuses: semanticEvents
           .filter((entry) => entry?.semanticState?.metadata?.appId === appId)
           .map((entry) => entry.semanticState.status),
@@ -1926,13 +1929,21 @@ async function browserSmoke() {
               const statusResult = await SwitchboardOS.host.getHostStatus(targetHostId);
               const capabilitiesResult = await SwitchboardOS.host.getCapabilities(targetHostId);
               const testResult = await SwitchboardOS.host.testConnection(targetHostId);
+              const execResult = await SwitchboardOS.host.exec(targetHostId, 'printf generated-host-exec-smoke', { timeoutMs: 3000 });
               const openTerminalResult = await SwitchboardOS.host.openTerminal(targetHostId);
               const host = getResult && getResult.host;
               const sensitiveLeaked = Boolean(host && sensitiveKeys.some((key) => Object.prototype.hasOwnProperty.call(host, key)));
               const foundInList = Array.isArray(listResult.hosts) && listResult.hosts.some((candidate) => candidate.id === targetHostId);
+              const execStructured = Boolean(execResult
+                && execResult.hostId === targetHostId
+                && execResult.method === 'host:exec'
+                && typeof execResult.status === 'string'
+                && typeof execResult.stdout === 'string'
+                && typeof execResult.stderr === 'string'
+                && !Object.prototype.hasOwnProperty.call(execResult, 'command'));
               const openTerminalOpened = Boolean(openTerminalResult && openTerminalResult.opened && openTerminalResult.hostId === targetHostId);
               SwitchboardOS.agent.setState({
-                status: foundInList && getResult.found && statusResult.found && capabilitiesResult.found && testResult.hostId === targetHostId && openTerminalOpened && !sensitiveLeaked
+                status: foundInList && getResult.found && statusResult.found && capabilitiesResult.found && testResult.hostId === targetHostId && execStructured && openTerminalOpened && !sensitiveLeaked
                   ? 'host-sdk-ok'
                   : 'host-sdk-mismatch',
                 summary: 'Host SDK smoke completed through backend appHost and shell terminal contracts.',
@@ -1946,6 +1957,9 @@ async function browserSmoke() {
                   capabilitiesFound: capabilitiesResult.found,
                   testStatus: testResult.status,
                   testHostMatches: testResult.hostId === targetHostId,
+                  execStatus: execResult && execResult.status,
+                  execStructured,
+                  execCommandEchoed: Boolean(execResult && Object.prototype.hasOwnProperty.call(execResult, 'command')),
                   openTerminalOpened,
                   sensitiveLeaked
                 }
@@ -2193,11 +2207,87 @@ async function browserSmoke() {
         'Alt+F4 closed generated host SDK openTerminal denied app',
       );
 
+      deniedExecManifest = await api.appManifest.create({
+        appId: deniedExecAppId,
+        name: 'Smoke Host SDK Exec Denied',
+        version: '1.0.0',
+        entrypoint: 'generated://smoke-host-sdk-exec-denied',
+        description: 'Smoke generated app without host exec action permission.',
+        author: 'SwitchboardOS Smoke',
+        icon: 'HX',
+        category: 'smoke',
+        capabilities: [],
+        sourceCode: `
+          (async () => {
+            const targetHostId = ${JSON.stringify(targetHostId)};
+            try {
+              await SwitchboardOS.host.exec(targetHostId, 'printf denied-generated-host-exec-smoke', { timeoutMs: 3000 });
+              SwitchboardOS.agent.setState({
+                status: 'host-sdk-exec-denial-missed',
+                summary: 'Host exec SDK unexpectedly succeeded without permission.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  denied: false,
+                  targetHostId
+                }
+              });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              SwitchboardOS.agent.setState({
+                status: 'host-sdk-exec-denied',
+                summary: 'Host exec SDK denied without permission.',
+                metadata: {
+                  appId: SwitchboardOS.window.appId,
+                  denied: true,
+                  targetHostId,
+                  mentionsCapability: message.includes('host:actions')
+                }
+              });
+            }
+          })();
+        `,
+        packageMetadata: {
+          smoke: 'generated-app-host-sdk-exec-denied',
+        },
+        enabled: true,
+        installedAt: new Date().toISOString(),
+      });
+
+      window.postMessage({ type: 'sb:app-open', appId: deniedExecAppId }, '*');
+      const deniedExecWindow = await waitFor(
+        () => document.querySelector(`.desktop-window[data-app-id="${deniedExecAppId}"]`),
+        `generated host SDK exec denied window ${JSON.stringify(runtimeDiagnostics(deniedExecAppId))}`,
+        20000,
+      );
+      const deniedExecRuntime = await waitFor(
+        () => deniedExecWindow.querySelector('[data-testid="generated-app-runtime"]'),
+        `generated host SDK exec denied runtime mounted ${JSON.stringify(runtimeDiagnostics(deniedExecAppId))}`,
+        20000,
+      );
+      await waitFor(
+        () => (deniedExecRuntime.querySelector('iframe')?.getAttribute('srcdoc') || '').includes('SwitchboardOS.host.exec'),
+        `generated host SDK exec denied iframe source installed ${JSON.stringify(runtimeDiagnostics(deniedExecAppId))}`,
+        20000,
+      );
+      const deniedExecState = await waitForHostSdkState(deniedExecAppId);
+      const auditAfterDeniedExec = await api.audit.list();
+      const deniedExecAuditEvents = auditAfterDeniedExec.filter((event) => (
+        event.metadata?.appId === deniedExecAppId || event.entityId === deniedExecAppId
+      ));
+      const deniedExecAuditJson = JSON.stringify(deniedExecAuditEvents);
+
+      keydown('F4', { altKey: true });
+      await waitFor(
+        () => !document.querySelector(`.desktop-window[data-app-id="${deniedExecAppId}"]`),
+        'Alt+F4 closed generated host SDK exec denied app',
+      );
+
       return {
         available: true,
         allowedAppId,
         deniedAppId,
         deniedOpenTerminalAppId,
+        deniedExecAppId,
         targetHostId,
         allowedStateStatus: allowedState.semanticState.status,
         allowedFoundInList: allowedState.semanticState.metadata.foundInList === true,
@@ -2205,6 +2295,8 @@ async function browserSmoke() {
         allowedStatusFound: allowedState.semanticState.metadata.statusFound === true,
         allowedCapabilitiesFound: allowedState.semanticState.metadata.capabilitiesFound === true,
         allowedTestHostMatches: allowedState.semanticState.metadata.testHostMatches === true,
+        allowedExecStructured: allowedState.semanticState.metadata.execStructured === true,
+        allowedExecCommandEchoed: allowedState.semanticState.metadata.execCommandEchoed === true,
         allowedOpenTerminalOpened: allowedState.semanticState.metadata.openTerminalOpened === true,
         allowedOpenTerminalWindowOpened: Boolean(allowedOpenTerminalWindow),
         allowedOpenTerminalHostContext: allowedOpenTerminalRuntimeState.hostContextId === targetHostId
@@ -2216,8 +2308,13 @@ async function browserSmoke() {
         allowedAuditHasStatus: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.status_read' && event.metadata?.method === 'host:getStatus'),
         allowedAuditHasCapabilities: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.capabilities_read' && event.metadata?.method === 'host:getCapabilities'),
         allowedAuditHasTest: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.connection_tested' && event.metadata?.method === 'host:testConnection'),
+        allowedAuditHasExec: allowedAuditEvents.some((event) => event.type === 'app_host_sdk.executed' && event.metadata?.method === 'host:exec'),
         allowedAuditSanitized: !allowedAuditJson.includes('SwitchboardOS.host.')
+          && !allowedAuditJson.includes('generated-host-exec-smoke')
+          && !allowedAuditJson.includes('printf generated-host-exec-smoke')
           && !allowedAuditJson.includes('Created by the shell UI smoke test')
+          && allowedAuditJson.includes('"commandTextLogged":false')
+          && allowedAuditJson.includes('"commandOutputLogged":false')
           && allowedAuditJson.includes('"hostCredentialsLogged":false')
           && allowedAuditJson.includes('"sourceCodeLogged":false')
           && allowedAuditJson.includes('"secretsLogged":false'),
@@ -2240,6 +2337,25 @@ async function browserSmoke() {
         deniedOpenTerminalAuditSanitized: !deniedOpenTerminalAuditJson.includes('SwitchboardOS.host.')
           && deniedOpenTerminalAuditJson.includes('"sourceCodeLogged":false')
           && deniedOpenTerminalAuditJson.includes('"secretsLogged":false'),
+        deniedExecStateStatus: deniedExecState.semanticState.status,
+        deniedExecMentionsCapability: deniedExecState.semanticState.metadata.mentionsCapability === true,
+        deniedExecAuditHasBackendDenial: deniedExecAuditEvents.some((event) => (
+          event.type === 'app_host_sdk.denied'
+            && event.metadata?.method === 'host:exec'
+            && event.metadata?.capability === 'host:actions'
+        )),
+        deniedExecAuditHasSdkDenial: deniedExecAuditEvents.some((event) => (
+          event.type === 'app.sdk_capability_denied'
+            && event.metadata?.method === 'host:exec'
+            && typeof event.metadata?.reason === 'string'
+            && event.metadata.reason.includes('host:actions')
+        )),
+        deniedExecAuditSanitized: !deniedExecAuditJson.includes('SwitchboardOS.host.')
+          && !deniedExecAuditJson.includes('denied-generated-host-exec-smoke')
+          && deniedExecAuditJson.includes('"commandTextLogged":false')
+          && deniedExecAuditJson.includes('"commandOutputLogged":false')
+          && deniedExecAuditJson.includes('"sourceCodeLogged":false')
+          && deniedExecAuditJson.includes('"secretsLogged":false'),
       };
     } finally {
       window.removeEventListener('switchboard-generated-app-semantic', handleSemantic);
@@ -2254,6 +2370,9 @@ async function browserSmoke() {
       }
       if (deniedOpenTerminalManifest) {
         await api.appManifest.remove(deniedOpenTerminalManifest.id).catch(() => false);
+      }
+      if (deniedExecManifest) {
+        await api.appManifest.remove(deniedExecManifest.id).catch(() => false);
       }
     }
   })();
@@ -2602,6 +2721,8 @@ async function main() {
     report.generatedHostSdk.allowedStatusFound,
     report.generatedHostSdk.allowedCapabilitiesFound,
     report.generatedHostSdk.allowedTestHostMatches,
+    report.generatedHostSdk.allowedExecStructured,
+    !report.generatedHostSdk.allowedExecCommandEchoed,
     report.generatedHostSdk.allowedOpenTerminalOpened,
     report.generatedHostSdk.allowedOpenTerminalWindowOpened,
     report.generatedHostSdk.allowedOpenTerminalHostContext,
@@ -2611,6 +2732,7 @@ async function main() {
     report.generatedHostSdk.allowedAuditHasStatus,
     report.generatedHostSdk.allowedAuditHasCapabilities,
     report.generatedHostSdk.allowedAuditHasTest,
+    report.generatedHostSdk.allowedAuditHasExec,
     report.generatedHostSdk.allowedAuditSanitized,
     report.generatedHostSdk.deniedStateStatus === 'host-sdk-denied',
     report.generatedHostSdk.deniedStateMentionsCapability,
@@ -2621,6 +2743,11 @@ async function main() {
     report.generatedHostSdk.deniedOpenTerminalMentionsCapability,
     report.generatedHostSdk.deniedOpenTerminalAuditHasSdkDenial,
     report.generatedHostSdk.deniedOpenTerminalAuditSanitized,
+    report.generatedHostSdk.deniedExecStateStatus === 'host-sdk-exec-denied',
+    report.generatedHostSdk.deniedExecMentionsCapability,
+    report.generatedHostSdk.deniedExecAuditHasBackendDenial,
+    report.generatedHostSdk.deniedExecAuditHasSdkDenial,
+    report.generatedHostSdk.deniedExecAuditSanitized,
     report.menus.desktopMenu.some((label) => label.includes('New Folder')),
     report.menus.desktopMenu.some((label) => label.includes('Change Wallpaper')),
     report.menuAffordances.desktopMenu.iconCount >= 6,

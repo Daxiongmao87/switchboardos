@@ -49,7 +49,8 @@ export type GeneratedAppHostSdkMethod =
   | 'host:get'
   | 'host:getStatus'
   | 'host:getCapabilities'
-  | 'host:testConnection';
+  | 'host:testConnection'
+  | 'host:exec';
 
 export interface GeneratedAppHostSdkBaseInput {
   appId: string;
@@ -81,11 +82,19 @@ export interface GeneratedAppHostTestConnectionInput extends GeneratedAppHostSdk
   hostId: string;
 }
 
+export interface GeneratedAppHostExecInput extends GeneratedAppHostSdkBaseInput {
+  method: 'host:exec';
+  hostId: string;
+  command: string;
+  timeoutMs?: number;
+}
+
 export type GeneratedAppHostTargetInput =
   | GeneratedAppHostGetInput
   | GeneratedAppHostStatusInput
   | GeneratedAppHostCapabilitiesInput
-  | GeneratedAppHostTestConnectionInput;
+  | GeneratedAppHostTestConnectionInput
+  | GeneratedAppHostExecInput;
 
 export interface GeneratedAppHostSummary {
   id: string;
@@ -138,13 +147,27 @@ export interface GeneratedAppHostTestConnectionResult extends GeneratedAppHostTe
   errorCode?: string;
 }
 
+export interface GeneratedAppHostExecResult extends GeneratedAppHostSdkBaseInput {
+  method: 'host:exec';
+  hostId: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  status: SshExecStatus;
+  error: string | null;
+}
+
 export type GeneratedAppHostSdkInput = GeneratedAppHostListInput | GeneratedAppHostTargetInput;
 export type GeneratedAppHostSdkResult =
   | GeneratedAppHostListResult
   | GeneratedAppHostGetResult
   | GeneratedAppHostStatusResult
   | GeneratedAppHostCapabilitiesResult
-  | GeneratedAppHostTestConnectionResult;
+  | GeneratedAppHostTestConnectionResult
+  | GeneratedAppHostExecResult;
 
 export interface AuditEvent {
   id: string;

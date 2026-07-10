@@ -9,6 +9,7 @@ import type {
   AppScopedStorageGetInput,
   AppScopedStorageSetInput,
   GeneratedAppHostCapabilitiesInput,
+  GeneratedAppHostExecInput,
   GeneratedAppHostGetInput,
   GeneratedAppHostListInput,
   GeneratedAppHostStatusInput,
@@ -109,6 +110,7 @@ const GENERATED_APP_HOST_SDK_METHODS: readonly GeneratedAppHostSdkMethod[] = [
   'host:getStatus',
   'host:getCapabilities',
   'host:testConnection',
+  'host:exec',
 ];
 const WORKSPACE_FILE_KINDS = ['applet', 'scriptlet', 'note'] as const;
 const WORKSPACE_ARTIFACT_CONTENT_KINDS = ['applet', 'scriptlet'] as const;
@@ -533,6 +535,23 @@ export function validateGeneratedAppHostCapabilitiesInput(value: unknown): Gener
 
 export function validateGeneratedAppHostTestConnectionInput(value: unknown): GeneratedAppHostTestConnectionInput {
   return validateGeneratedAppHostTargetInput(value, 'host:testConnection', 'generated app host test input');
+}
+
+export function validateGeneratedAppHostExecInput(value: unknown): GeneratedAppHostExecInput {
+  const record = requireRecord(value, 'generated app host exec input');
+  const method = validateGeneratedAppHostMethod(record.method);
+  if (method !== 'host:exec') {
+    throw new RuntimeValidationError('method must be host:exec.');
+  }
+  const execInput = validateSshExecInput(record);
+  return {
+    appId: validateGeneratedAppSdkAppId(record.appId),
+    windowId: validateGeneratedAppSdkWindowId(record.windowId),
+    method,
+    hostId: execInput.hostId,
+    command: execInput.command,
+    ...(execInput.timeoutMs !== undefined ? { timeoutMs: execInput.timeoutMs } : {}),
+  };
 }
 
 export function validateHostOperationInput(value: unknown): HostOperationInput {

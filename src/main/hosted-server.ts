@@ -23,6 +23,7 @@ import {
   validateAppScopedStorageSetInput,
   validateAuditEventInput,
   validateGeneratedAppHostCapabilitiesInput,
+  validateGeneratedAppHostExecInput,
   validateGeneratedAppHostGetInput,
   validateGeneratedAppHostListInput,
   validateGeneratedAppHostStatusInput,
@@ -94,6 +95,8 @@ import type {
   AppScopedStorageGetResult,
   AppScopedStorageRecord,
   GeneratedAppHostCapabilitiesResult,
+  GeneratedAppHostExecInput,
+  GeneratedAppHostExecResult,
   GeneratedAppHostGetResult,
   GeneratedAppHostListInput,
   GeneratedAppHostListResult,
@@ -2693,6 +2696,29 @@ export class HostedServer {
       });
     }
 
+    if (action === 'exec') {
+      const input = validateGeneratedAppHostExecInput(body);
+      return this.runHostedAppRoute({
+        contractId: 'hosted:POST:/api/app-host/exec',
+        session,
+        route: '/api/app-host/exec',
+        action: 'POST /api/app-host/exec',
+        hostId: input.hostId,
+        entityType: 'host',
+        appId: input.appId,
+        input,
+        execute: async () => {
+          this.assertGeneratedAppHostCapabilityGranted(input, 'POST /api/app-host/exec');
+          return generatedAppHostExecResult(input, await this.options.sshService.exec({
+            hostId: input.hostId,
+            command: input.command,
+            ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+          }));
+        },
+        successAuditMetadata: generatedAppHostRouteSuccessMetadata,
+      });
+    }
+
     throw new HttpError(404, `No hosted app host SDK route for ${method} /api/app-host/${action ?? ''}.`);
   }
 
@@ -2719,6 +2745,8 @@ export class HostedServer {
         hostId: 'hostId' in input ? input.hostId : null,
         capability,
         granted: false,
+        commandTextLogged: false,
+        commandOutputLogged: false,
         hostCredentialsLogged: false,
         hostNotesLogged: false,
         sourceCodeLogged: false,
@@ -3715,8 +3743,8 @@ function workspaceArtifactContentRouteSuccessMetadata(result: WorkspaceArtifactC
   };
 }
 
-function generatedAppHostCapabilityForMethod(input: GeneratedAppHostListInput | GeneratedAppHostTargetInput): PolicyCapability {
-  return input.method === 'host:testConnection' ? 'host:actions' : 'host:read';
+function generatedAppHostCapabilityForMethod(input: { method: string }): PolicyCapability {
+  return input.method === 'host:testConnection' || input.method === 'host:exec' ? 'host:actions' : 'host:read';
 }
 
 function generatedAppHostSummary(host: HostRecord): GeneratedAppHostSummary {
@@ -3802,6 +3830,23 @@ function generatedAppHostTestConnectionResult(
   };
 }
 
+function generatedAppHostExecResult(input: GeneratedAppHostExecInput, result: SshExecResult): GeneratedAppHostExecResult {
+  return {
+    appId: input.appId,
+    windowId: input.windowId,
+    method: input.method,
+    hostId: result.hostId,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    startedAt: result.startedAt,
+    completedAt: result.completedAt,
+    status: result.status,
+    error: result.error,
+  };
+}
+
 function generatedAppHostRouteSuccessMetadata(result: GeneratedAppHostSdkResult): Record<string, unknown> {
   const found = 'found' in result ? result.found : true;
   return {
@@ -3814,6 +3859,11 @@ function generatedAppHostRouteSuccessMetadata(result: GeneratedAppHostSdkResult)
     success: 'success' in result ? result.success : null,
     status: 'status' in result && typeof result.status === 'string' ? result.status : null,
     capability: generatedAppHostCapabilityForMethod(result),
+    exitCode: 'exitCode' in result ? result.exitCode : null,
+    durationMs: 'durationMs' in result ? result.durationMs : null,
+    remoteCommandExecution: result.method === 'host:exec',
+    commandTextLogged: false,
+    commandOutputLogged: false,
     hostCredentialsLogged: false,
     hostNotesLogged: false,
     sourceCodeLogged: false,
